@@ -1,6 +1,6 @@
 # Handoff: changes since Marawan's last commit
 
-Marawan's last commit is `93a4ff9` ("Align matn embeddings, training passages, and evaluation"). Everything below was added on top of it in 41 commits (the last ones are the REST API, items 16 and 17, the security pass, item 18, nginx with the sign-in limit, item 19, PostgreSQL with pgvector, item 20, and blue/green and canary releases, item 21): about 140 files. All 422 tests pass (2 skipped: one needs NLTK data, one needs the exported Arabic model). The tests need a PostgreSQL with pgvector, see item 20. The work sits on the branch `feat/blue-green-canary`, which builds on `feat/postgres-pgvector`, `feat/rest-api-v1`, `chore/dockerfile-hardening` and `chore/precommit-hooks`, and has not been pushed.
+Marawan's last commit is `93a4ff9` ("Align matn embeddings, training passages, and evaluation"). Everything below was added on top of it in 43 commits (the last ones are the REST API, items 16 and 17, the security pass, item 18, nginx with the sign-in limit, item 19, PostgreSQL with pgvector, item 20, and blue/green and canary releases, item 21): about 140 files. All 426 tests pass (2 skipped: one needs NLTK data, one needs the exported Arabic model). The tests need a PostgreSQL with pgvector, see item 20. The work sits on the branch `feat/blue-green-canary`, which builds on `feat/postgres-pgvector`, `feat/rest-api-v1`, `chore/dockerfile-hardening` and `chore/precommit-hooks`, and has not been pushed.
 
 Each change has the same three lines: which files, why this is the normal way to do it, and what you get out of it.
 
@@ -321,7 +321,7 @@ tools/deploy.sh stop-idle           # when you are sure, stop the old colour
 
 ### 23. Semantic search uses an Arabic ONNX model instead of multilingual E5
 
-**Files:** `backend/scripts/export_onnx.py` (new), `backend/scripts/arabic_encoder.py` (new), `backend/scripts/loading.py`, `backend/scripts/build_embeddings.py`, `backend/scripts/embedding_store.py`, `backend/services/ranking.py`, `backend/services/retrieval.py`, `backend/routers/search.py`, `backend/scripts/eval_pipeline.py`, `backend/scripts/pooling.py`, `backend/scripts/finetune_eval.py`, `backend/scripts/migrate_to_postgres.py`, `backend/features.py`, `frontend/src/api/useSearchMethods.ts`, `requirements.txt`, tests.
+**Files:** `backend/scripts/export_onnx.py` (new), `backend/scripts/arabic_encoder.py` (new), `backend/scripts/recall_proxy.py` (new), `backend/scripts/loading.py`, `backend/scripts/build_embeddings.py`, `backend/scripts/embedding_store.py`, `backend/services/ranking.py`, `backend/services/retrieval.py`, `backend/routers/search.py`, `backend/scripts/eval_pipeline.py`, `backend/scripts/pooling.py`, `backend/scripts/finetune_eval.py`, `backend/scripts/migrate_to_postgres.py`, `backend/features.py`, `frontend/src/api/useSearchMethods.ts`, `requirements.txt`, tests.
 
 **What changed:** the dense methods (`cosine-similarity`, `semantic-rerank`, `semantic-rrf`) now use `akhooli/sbert-nli-500k-triplets-MB` (ModernBERT, Arabic only, trained with Matryoshka loss, Apache-2.0, revision `73ca7f3`). `scripts/export_onnx.py` downloads it and writes an ONNX file whose graph does the mean pooling, keeps the first 256 values and normalises them. Queries run through ONNX Runtime, so torch is only needed to export. Choices made with the owner: Arabic only, vectors cut to 256, newest opset that passes.
 
@@ -336,7 +336,32 @@ tools/deploy.sh stop-idle           # when you are sure, stop the old colour
 - **Fine-tuning is disconnected.** `finetune.py` trains E5 LoRA adapters; `finetune_eval.py` stops with a message because those vectors would not match the new model. `FINETUNED_ADAPTER_PATH` is no longer read.
 - **Dependencies:** `onnxruntime` is needed at run time; `onnx` and `onnxscript` only for the export.
 
-**Not checked:** search quality. Parity with PyTorch is checked, but nobody has measured whether this model finds better hadiths than E5 on the 20 evaluation queries (`queries.json` is missing on this machine). The 256-dimension cut is the intended Matryoshka use, but its effect on ranking was not measured.
+**Recall@k of the new model (measured, proxy tests only):** there are no human relevance judgments on this machine (`queries.json` and `qrels_graded.json` are missing), so the project's own evaluation could not run. With your go-ahead I used two automatic tests, `backend/scripts/recall_proxy.py`, seed 42, Arabic queries through the app's real search systems. The full output is `docs/recall_proxy.json`; to rerun: `cd backend && python -m scripts.recall_proxy` (about 10 minutes). Numbers are means with a 95% bootstrap interval over queries.
+
+*Test 1, known item (1000 queries).* The query is the first half of a hadith's Arabic text; relevant = that hadith and any copy that starts the same way. It rewards close wording, so it shows whether the model finds the hadith, not whether it understands a question.
+
+| Method | recall@3 | recall@8 |
+|---|---|---|
+| cosine-similarity | 0.709 (0.681 to 0.735) | 0.748 (0.722 to 0.774) |
+| semantic-rerank | 0.725 (0.700 to 0.751) | 0.756 (0.731 to 0.782) |
+| semantic-rrf | 0.750 (0.725 to 0.774) | 0.793 (0.768 to 0.817) |
+
+*Test 2, chapter title (238 queries, every distinct Arabic chapter title).* The query is a title such as "كتاب الصيام"; relevant = every hadith under that title in any book. Those sets hold 40 to 627 hadiths, so plain recall@3 could be 0.005 at best. The score is capped recall (hits in the top k divided by min(k, set size)). Hit rate is the share of queries with at least one relevant hadith in the top k.
+
+| Method | capped recall@3 | capped recall@8 | hit rate@3 | hit rate@8 |
+|---|---|---|---|---|
+| cosine-similarity | 0.064 | 0.057 | 0.176 | 0.265 |
+| semantic-rerank | 0.122 | 0.113 | 0.252 | 0.408 |
+| semantic-rrf | 0.123 | 0.113 | 0.269 | 0.424 |
+
+**How to read it:**
+
+- **Semantic RRF is best in both tests.** Its gain over cosine is clear in test 1 at k=8 and in test 2; the intervals for rerank and RRF overlap in test 1.
+- **About 20% of known-item queries are missed even at k=8** (hit rate 0.82 to 0.86 for the best two). I did not investigate the misses. A likely cause is that half a hadith is a poor query for a 256-dimension vector of the whole text, but that is a guess.
+- **Test 2 is low, and is not a fair verdict on the model.** A chapter is a whole book (for example Fasting) and the title names a subject, while most hadiths in it never use the title's words. A low score here mostly shows how loose chapter labels are as relevance.
+- **Not measured:** the five keyword methods (you asked for the new model only), English (the model has no English), real user questions, and recall against human-graded qrels. Treat these numbers as a smoke test of the pipeline, not a comparison with E5. Replace them with real qrels when `queries.json` is available.
+
+**Not checked:** whether this model finds better hadiths than E5 on the 20 evaluation queries (`queries.json` is missing on this machine). The 256-dimension cut was not compared with the full 768 dimensions.
 
 ## Still open
 

@@ -1,6 +1,6 @@
 # Handoff: changes since Marawan's last commit
 
-Marawan's last commit is `93a4ff9` ("Align matn embeddings, training passages, and evaluation"). Everything below was added on top of it in 18 commits (the last 6 are the REST API, items 16 and 17, the security pass, item 18, and rate limiting, item 19): about 130 files. All 368 tests pass. The work sits on the branch `feat/rest-api-v1`, which builds on `chore/dockerfile-hardening` and `chore/precommit-hooks`, and has not been pushed.
+Marawan's last commit is `93a4ff9` ("Align matn embeddings, training passages, and evaluation"). Everything below was added on top of it in 20 commits (the last ones are the REST API, items 16 and 17, the security pass, item 18, and nginx with the sign-in limit, item 19): about 130 files. All 368 tests pass. The work sits on the branch `feat/rest-api-v1`, which builds on `chore/dockerfile-hardening` and `chore/precommit-hooks`, and has not been pushed.
 
 Each change has the same three lines: which files, why this is the normal way to do it, and what you get out of it.
 
@@ -208,25 +208,32 @@ Behavior that differs from before:
 
 **Still open, on purpose:**
 
-- **Rate limits count per server.** They are added now (item 19), but the counters sit in memory, so with several servers each one counts alone. Use a shared store (`RATE_LIMIT_STORAGE_URI`) before scaling out.
+- **The sign-in limit is not a hard lockout.** It is 5 tries at once then 1 a minute (item 19), and it only exists when nginx is in front. Several nginx instances would each count on their own.
 - **The token lives in `localStorage`**, so an XSS bug would expose it. The CSP and the absence of raw HTML rendering reduce that risk; an httpOnly cookie would remove it but needs CSRF handling.
 - **Tokens cannot be revoked** before they expire (12 hours by default).
 - **Some dependency reports are not fixed:** `torch` (2.11 to 2.13), `datasets` (4 to 5), `setuptools`, `accelerate`, `nltk`, and React Router (needs version 7). The Python ones are build and training tools, or need a wider retest. React Router's open redirect needs a `<Link>` or `navigate()` fed a user-controlled URL, which this app does not do. Bump them when you can retest.
 - **`.pkl` index files are loaded with `pickle`**, which runs code from the file. They are built by us and never uploaded, so keep `backend/data` writable only by the app and never load a pickle from someone else.
 - **The LLM scripts** (`llm_grader.py`, `kv_generator.py`) send hadith text to a model. It is offline tooling and its output is a label, so prompt injection has little to hit, but treat its output as untrusted.
 
-### 19. Rate limiting
+### 19. nginx in front of the app, with a sign-in rate limit
 
-**Files:** `backend/ratelimit.py` (new), `backend/main.py`, `backend/routers/auth.py`, `backend/rest.py`, `requirements.txt`, `.env.example`, `tests/test_ratelimit.py` (new), `tests/conftest.py`
+**Files:** `nginx/default.conf` (new), `nginx/proxy_app.conf` (new), `docker-compose.yml`, `tools/test-nginx.sh` (new), `.github/workflows/docker-scan.yml`, `backend/routers/auth.py`, `backend/main.py`, `requirements.txt`
 
-**Why it's best practice:** Without a limit, one client can try thousands of passwords a minute or keep the search busy for everyone. SlowAPI (a FastAPI version of Flask-Limiter) counts requests per client address. Every route gets 120 a minute. Sign-in and sign-up get 10 tries per 20 minutes (a locked-out client waits until its 20-minute window ends), since those are what an attacker hammers. Going over gets a 429 in the same error format as the rest of the API, with a `Retry-After` header, and normal responses show `X-RateLimit-*` headers so clients can slow down on their own.
+**Why it's best practice:** Rate limiting belongs at the edge. nginx turns away a flood before it reaches Python, it counts in one place even with several app servers (no shared store needed), and it sees the real client address. It also caps request bodies at 1 MB, hides its version and follows the app container by name when it restarts. The nginx container is the `nginx-unprivileged` image, so like the app it does not run as root.
 
-**Benefit:** Password guessing becomes slow enough to be pointless, and a runaway script cannot starve other users. The frontend needs no change: the sign-in form already shows the server's message. Static files and the frontend pages are not counted. Change the numbers with `RATE_LIMIT_DEFAULT` and `RATE_LIMIT_AUTH`, or turn it off with `RATE_LIMIT_ENABLED=false`.
+**Benefit:** Sign-in and sign-up allow 5 tries at once per client address, then 1 more per minute (429 after that, as `application/problem+json` with `Retry-After: 60`). Every other route is not limited. Guessing passwords is slowed hard. `docker compose up` still serves the site on port 8000, but now through nginx: the app's own port is no longer published.
 
-Two things to set when deploying:
+**What changed and why:**
 
-- **Behind a proxy or load balancer,** the client address is the proxy's unless you set `FORWARDED_ALLOW_IPS` to the proxy's address. Otherwise everyone shares one counter.
-- **With several servers,** set `RATE_LIMIT_STORAGE_URI` to a shared store such as `redis://...` and add the `redis` package. The default in-memory counters are per server.
+- An earlier version used SlowAPI inside the app (per-address 10 tries per 20 minutes, 120 a minute for everything else). It was removed, together with its four packages. The app now has no rate limiting of its own, so running uvicorn without nginx has none.
+- nginx cannot do "10 tries, then locked for 20 minutes". Its slowest refill is 1 per minute, so the rule is 5 tries then 1 a minute (at most 65 in the first hour). The choice was made on purpose; an exact lockout would need an nginx script module or a counter in the app.
+- General traffic (searches, reads) is not limited any more. The earlier 120 a minute is gone by choice.
+
+**Test it:** `tools/test-nginx.sh` starts nginx with a stub app in Docker and checks the limit, the JSON 429, that other routes are not limited and the body cap. The scan workflow runs it too. It does not build the real app image, so run `docker compose up --build` once and try the site before relying on it.
+
+**If another proxy sits in front of nginx** (Traefik, Dokploy, a cloud load balancer), nginx would see that proxy's address for everyone and all clients would share one counter. Then add nginx's `real_ip` settings (`set_real_ip_from <proxy address>; real_ip_header X-Forwarded-For;`) or move the limit into that proxy. Also note `docker-compose.yml` still has `CORS_ORIGINS=*`.
+
+**Docker on Windows or WSL** can hide the real client address (all requests look like the Docker gateway). The limit is correct on a Linux server; do not judge it from a Windows laptop.
 
 ## Quick start after pulling
 

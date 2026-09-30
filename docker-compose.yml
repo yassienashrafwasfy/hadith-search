@@ -4,8 +4,9 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: hadith-search
-    ports:
-      - "8000:8000"
+    # Not published: clients reach the app through the nginx service below.
+    expose:
+      - "8000"
     environment:
       # annotation = lightweight (no E5/index preload), search = lazy E5, research = eager E5
       - APP_MODE=annotation
@@ -20,6 +21,20 @@ services:
       # Upload hadiths.db, queries.json, qrels_ungraded.json here
       # For search mode: also upload embeddings (.npy) and indexes (.pkl)
       - hadith-data:/app/backend/data
+    restart: unless-stopped
+
+  # Public edge: proxies to the app and rate-limits sign-in and sign-up (see nginx/default.conf).
+  # The unprivileged image runs as a normal user and listens on 8080 inside the container.
+  nginx:
+    image: nginxinc/nginx-unprivileged:stable-alpine
+    container_name: hadith-nginx
+    ports:
+      - "8000:8080"
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./nginx/proxy_app.conf:/etc/nginx/proxy_app.conf:ro
+    depends_on:
+      - hadith-search
     restart: unless-stopped
 
 volumes:

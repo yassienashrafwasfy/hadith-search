@@ -409,7 +409,7 @@ React + TypeScript + Tailwind CSS + Vite SPA.
 
 **Summary**:
 - Docker-based deployment
-- Port 8000 (backend serves both API and built frontend static files)
+- Port 8000 is nginx (rate limit on sign-in/sign-up), which proxies to the app; the app serves both the API and the built frontend files
 - Data volume must be mounted at `/app/backend/data` in the container
 - For annotation-only deployment: `APP_MODE=annotation` — minimal RAM (~200MB)
 - For full search deployment: E5 model loads lazily on first query (~3GB RAM after load)

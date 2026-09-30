@@ -9,7 +9,7 @@ from sqlalchemy import func, select
 
 from database import get_session, init_annotation_tables, now_iso
 from models import Annotator, Assignment
-from ratelimit import auth_limit, limiter
+from ratelimit import auth_ip_limit, auth_limit, limiter, username_key
 from rest import API_PREFIX, href, json_response, link
 from tokens import AuthSettings, auth_settings, issue_token, read_token
 
@@ -179,12 +179,19 @@ async def create_annotator(
     return _token_body(identity, assigned, settings)
 
 
+def _sign_in_credentials(request: Request, credentials: Credentials) -> Credentials:
+    """Parses the body and tells the rate limiter which account this attempt is against."""
+    request.state.rate_limit_username = credentials.username.strip().lower()
+    return credentials
+
+
 @router.post("/tokens", status_code=201)
-@limiter.limit(auth_limit)
+@limiter.limit(auth_limit, key_func=username_key)
+@limiter.limit(auth_ip_limit)
 async def create_token(
     request: Request,
     response: Response,
-    credentials: Credentials,
+    credentials: Credentials = Depends(_sign_in_credentials),
     settings: AuthSettings = Depends(auth_settings),
 ):
     """Sign in: exchanges a username and password for a bearer token."""

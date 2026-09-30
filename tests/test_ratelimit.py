@@ -72,3 +72,24 @@ def test_auth_limit_is_ten_tries_per_twenty_minutes(monkeypatch):
     monkeypatch.delenv("RATE_LIMIT_AUTH", raising=False)
     item = parse(auth_limit())
     assert (item.amount, item.get_expiry()) == (10, 20 * 60)
+
+
+async def test_sign_in_limit_is_per_username_not_per_address(_client, _limits_on):
+    for _ in range(3):
+        await _client.post(f"{API}/tokens", json=CREDS)
+    blocked = await _client.post(f"{API}/tokens", json=CREDS)
+    other = await _client.post(f"{API}/tokens", json={**CREDS, "username": "bob"})
+    assert (blocked.status_code, other.status_code) == (429, 401)
+    # same account, different capitalisation or padding, is the same counter
+    assert (
+        await _client.post(f"{API}/tokens", json={**CREDS, "username": " ALICE "})
+    ).status_code == 429
+
+
+async def test_one_address_cannot_spray_many_usernames(_client, _limits_on, monkeypatch):
+    monkeypatch.setenv("RATE_LIMIT_AUTH_IP", "4/minute")
+    codes = [
+        (await _client.post(f"{API}/tokens", json={**CREDS, "username": f"user{i}"})).status_code
+        for i in range(5)
+    ]
+    assert codes == [401, 401, 401, 401, 429]

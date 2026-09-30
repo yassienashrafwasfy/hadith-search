@@ -60,7 +60,7 @@ const DevAnnotationSessionPage = () => {
       setLoading(true);
       setError(null);
       try {
-        const response = await authFetch(`${API_BASE_URL}/annotation/${queryId}/current`);
+        const response = await authFetch(`${API_BASE_URL}/api/v1/assignments/${queryId}`);
         if (response.status === 401) {
           navigate('/dev/annotation/signin');
           return;
@@ -88,14 +88,19 @@ const DevAnnotationSessionPage = () => {
     setSaving(true);
     savingRef.current = true;
     try {
-      await authFetch(`${API_BASE_URL}/annotation/${queryId}/label`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          hadith_id: hadith.hadith_id,
-          index,
-          label
-        })
+      const base = `${API_BASE_URL}/api/v1/assignments/${queryId}`;
+      const json = { 'Content-Type': 'application/json' };
+      const saved = await authFetch(`${base}/labels/${hadith.hadith_id}`, {
+        method: 'PUT',
+        headers: json,
+        body: JSON.stringify({ label })
+      });
+      if (!saved.ok) throw new Error(`Label save failed: ${saved.status}`);
+      // Saving a label no longer moves the cursor; do that explicitly.
+      await authFetch(`${base}/progress`, {
+        method: 'PUT',
+        headers: json,
+        body: JSON.stringify({ index: Math.min(index + 1, state.total - 1) })
       });
       lastSavedRef.current = Date.now();
 
@@ -120,8 +125,10 @@ const DevAnnotationSessionPage = () => {
     if (index < 0 || index >= state.total) return;
 
     try {
-      await authFetch(`${API_BASE_URL}/annotation/${queryId}/navigate?index=${index}`, {
-        method: 'POST'
+      await authFetch(`${API_BASE_URL}/api/v1/assignments/${queryId}/progress`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ index })
       });
       setState(prev => prev ? { ...prev, current_index: index } : null);
     } catch (err) {

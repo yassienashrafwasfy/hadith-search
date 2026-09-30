@@ -31,14 +31,14 @@ const DevAnnotationPage = () => {
       setLoading(true);
       setError(null);
       try {
-        const response = await authFetch(`${API_BASE_URL}/annotation/queries`);
+        const response = await authFetch(`${API_BASE_URL}/api/v1/assignments`);
         if (response.status === 401) {
           navigate('/dev/annotation/signin');
           return;
         }
         if (!response.ok) throw new Error('Failed to fetch queries');
         const data = await response.json();
-        if (mounted) setQueries(data.queries);
+        if (mounted) setQueries(data.assignments);
       } catch (err) {
         if (mounted) setError(err instanceof Error ? err.message : 'Unknown error');
       } finally {

@@ -48,7 +48,7 @@ const KvVerificationPage = () => {
 
   const fetchStats = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE_URL}/kv-pairs/stats`);
+      const res = await fetch(`${API_BASE_URL}/api/v1/kv-pairs/statistics`);
       if (!res.ok) throw new Error('Failed to fetch stats');
       const data = await res.json();
       setStats(data);
@@ -66,7 +66,7 @@ const KvVerificationPage = () => {
         offset: String(offset),
       });
       if (statusFilter !== 'all') params.set('status', statusFilter);
-      const res = await fetch(`${API_BASE_URL}/kv-pairs?${params}`);
+      const res = await fetch(`${API_BASE_URL}/api/v1/kv-pairs?${params}`);
       if (!res.ok) throw new Error('Failed to fetch KV pairs');
       const data: KvResponse = await res.json();
       setPairs(data.pairs);
@@ -89,8 +89,8 @@ const KvVerificationPage = () => {
   const handleVerify = async (pairId: number, status: 'verified' | 'rejected') => {
     setVerifyingId(pairId);
     try {
-      const res = await fetch(`${API_BASE_URL}/kv-pairs/${pairId}/verify`, {
-        method: 'POST',
+      const res = await fetch(`${API_BASE_URL}/api/v1/kv-pairs/${pairId}`, {
+        method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status }),
       });

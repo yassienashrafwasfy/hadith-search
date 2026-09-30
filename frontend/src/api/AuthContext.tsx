@@ -17,6 +17,25 @@ export interface Assignment {
   query: string;
 }
 
+interface AnnotatorResource extends Annotator {
+  assignments: Assignment[];
+}
+
+const API_V1 = `${API_BASE_URL}/api/v1`;
+
+// Errors come back as application/problem+json; `detail` is the human-readable part.
+const problemDetail = async (response: Response, fallback: string): Promise<string> => {
+  try {
+    const problem = await response.json();
+    if (Array.isArray(problem.errors) && problem.errors.length) {
+      return problem.errors.map((e: { field: string; message: string }) => `${e.field}: ${e.message}`).join(', ');
+    }
+    return problem.detail || fallback;
+  } catch {
+    return fallback;
+  }
+};
+
 interface AuthState {
   token: string | null;
   annotator: Annotator | null;
@@ -59,7 +78,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const fetchMe = useCallback(async (token: string) => {
     try {
-      const response = await fetch(`${API_BASE_URL}/auth/me`, {
+      const response = await fetch(`${API_V1}/annotators/me`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!response.ok) {
@@ -67,11 +86,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         setState({ token: null, annotator: null, assignments: [], loading: false });
         return;
       }
-      const data = await response.json();
+      const me: AnnotatorResource = await response.json();
       setState({
         token,
-        annotator: data.annotator,
-        assignments: data.assignments,
+        annotator: { id: me.id, username: me.username },
+        assignments: me.assignments,
         loading: false,
       });
     } catch {
@@ -90,57 +109,45 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   }, [fetchMe]);
 
   const signup = useCallback(async (username: string, password: string) => {
-    const response = await fetch(`${API_BASE_URL}/auth/signup`, {
+    const response = await fetch(`${API_V1}/annotators`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username, password }),
     });
     if (!response.ok) {
-      const err = await response.json();
-      throw new Error(err.detail || 'Signup failed');
+      throw new Error(await problemDetail(response, 'Signup failed'));
     }
-    const data = await response.json();
-    localStorage.setItem(TOKEN_KEY, data.token);
+    const data: { access_token: string; annotator: AnnotatorResource } = await response.json();
+    localStorage.setItem(TOKEN_KEY, data.access_token);
     setState({
-      token: data.token,
-      annotator: data.annotator,
-      assignments: data.assignments,
+      token: data.access_token,
+      annotator: { id: data.annotator.id, username: data.annotator.username },
+      assignments: data.annotator.assignments,
       loading: false,
     });
   }, []);
 
   const signin = useCallback(async (username: string, password: string) => {
-    const response = await fetch(`${API_BASE_URL}/auth/signin`, {
+    const response = await fetch(`${API_V1}/tokens`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username, password }),
     });
     if (!response.ok) {
-      const err = await response.json();
-      throw new Error(err.detail || 'Signin failed');
+      throw new Error(await problemDetail(response, 'Signin failed'));
     }
-    const data = await response.json();
-    localStorage.setItem(TOKEN_KEY, data.token);
+    const data: { access_token: string; annotator: AnnotatorResource } = await response.json();
+    localStorage.setItem(TOKEN_KEY, data.access_token);
     setState({
-      token: data.token,
-      annotator: data.annotator,
-      assignments: data.assignments,
+      token: data.access_token,
+      annotator: { id: data.annotator.id, username: data.annotator.username },
+      assignments: data.annotator.assignments,
       loading: false,
     });
   }, []);
 
-  const signout = useCallback(async () => {
-    const token = localStorage.getItem(TOKEN_KEY);
-    if (token) {
-      try {
-        await fetch(`${API_BASE_URL}/auth/signout`, {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${token}` },
-        });
-      } catch {
-        // ignore network errors on signout
-      }
-    }
+  // Tokens are stateless, so signing out just means forgetting the token.
+  const signout = useCallback(() => {
     localStorage.removeItem(TOKEN_KEY);
     setState({ token: null, annotator: null, assignments: [], loading: false });
   }, []);

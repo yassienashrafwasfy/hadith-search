@@ -1,0 +1,76 @@
+{
+ "kappa_interpretation": "Moderate agreement",
+ "metadata": {
+  "n_queries_compared": 3,
+  "n_total_pairs": 10
+ },
+ "overall": {
+  "agreement_rate": 0.7,
+  "cohens_kappa": 0.5522,
+  "human_grade_distribution": {
+   "0": "3 (30.0%)",
+   "1": "4 (40.0%)",
+   "2": "3 (30.0%)"
+  },
+  "llm_grade_distribution": {
+   "0": "4 (40.0%)",
+   "1": "3 (30.0%)",
+   "2": "3 (30.0%)"
+  },
+  "spearman_p_value": 0.007058,
+  "spearman_rho": 0.7857
+ },
+ "per_query": {
+  "q1": {
+   "agreement_rate": 0.6,
+   "human_dist": {
+    "0": "2 (40.0%)",
+    "1": "1 (20.0%)",
+    "2": "2 (40.0%)"
+   },
+   "kappa": 0.375,
+   "llm_dist": {
+    "0": "2 (40.0%)",
+    "1": "1 (20.0%)",
+    "2": "2 (40.0%)"
+   },
+   "n_docs": 5,
+   "spearman_p": 0.14429361281438755,
+   "spearman_rho": 0.75
+  },
+  "q2": {
+   "agreement_rate": 0.6667,
+   "human_dist": {
+    "0": "0 (0.0%)",
+    "1": "3 (100.0%)",
+    "2": "0 (0.0%)"
+   },
+   "kappa": 0.0,
+   "llm_dist": {
+    "0": "1 (33.3%)",
+    "1": "2 (66.7%)",
+    "2": "0 (0.0%)"
+   },
+   "n_docs": 3,
+   "spearman_p": null,
+   "spearman_rho": null
+  },
+  "q3": {
+   "agreement_rate": 1.0,
+   "human_dist": {
+    "0": "1 (50.0%)",
+    "1": "0 (0.0%)",
+    "2": "1 (50.0%)"
+   },
+   "kappa": 1.0,
+   "llm_dist": {
+    "0": "1 (50.0%)",
+    "1": "0 (0.0%)",
+    "2": "1 (50.0%)"
+   },
+   "n_docs": 2,
+   "spearman_p": null,
+   "spearman_rho": 0.9999999999999999
+  }
+ }
+}

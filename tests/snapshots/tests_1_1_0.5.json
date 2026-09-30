@@ -1,0 +1,18 @@
+{
+ "t": {
+  "note": "insufficient data",
+  "p_value": null,
+  "significant_at_0.01": false,
+  "significant_at_0.05": false,
+  "t_statistic": null,
+  "test": "paired_t"
+ },
+ "w": {
+  "note": "insufficient data",
+  "p_value": null,
+  "significant_at_0.01": false,
+  "significant_at_0.05": false,
+  "statistic": null,
+  "test": "wilcoxon"
+ }
+}

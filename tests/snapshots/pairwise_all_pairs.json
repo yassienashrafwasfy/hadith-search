@@ -1,0 +1,120 @@
+{
+ "AP": {
+  "COSINE_SIMILARITY vs BM25_RRF": {
+   "direction": "worse",
+   "mean_diff": -0.04375000000000001,
+   "n_queries": 8,
+   "t_test": {
+    "p_value": 0.13951958313684426,
+    "significant_at_0.01": false,
+    "significant_at_0.05": false,
+    "t_statistic": -1.6666666666666672,
+    "test": "paired_t"
+   },
+   "wilcoxon": {
+    "p_value": 0.1875,
+    "significant_at_0.01": false,
+    "significant_at_0.05": false,
+    "statistic": 8.0,
+    "test": "wilcoxon"
+   }
+  },
+  "TF_IDF vs BM25_RRF": {
+   "direction": "worse",
+   "mean_diff": -0.0875,
+   "n_queries": 8,
+   "t_test": {
+    "p_value": 0.03833372883603092,
+    "significant_at_0.01": false,
+    "significant_at_0.05": true,
+    "t_statistic": -2.5458753860865775,
+    "test": "paired_t"
+   },
+   "wilcoxon": {
+    "p_value": 0.03125,
+    "significant_at_0.01": false,
+    "significant_at_0.05": true,
+    "statistic": 3.0,
+    "test": "wilcoxon"
+   }
+  },
+  "TF_IDF vs COSINE_SIMILARITY": {
+   "direction": "worse",
+   "mean_diff": -0.04374999999999998,
+   "n_queries": 8,
+   "t_test": {
+    "p_value": 0.13951958313684446,
+    "significant_at_0.01": false,
+    "significant_at_0.05": false,
+    "t_statistic": -1.666666666666666,
+    "test": "paired_t"
+   },
+   "wilcoxon": {
+    "p_value": 0.1484375,
+    "significant_at_0.01": false,
+    "significant_at_0.05": false,
+    "statistic": 8.0,
+    "test": "wilcoxon"
+   }
+  }
+ },
+ "RR": {
+  "COSINE_SIMILARITY vs BM25_RRF": {
+   "direction": "worse",
+   "mean_diff": -0.04375000000000001,
+   "n_queries": 8,
+   "t_test": {
+    "p_value": 0.13951958313684426,
+    "significant_at_0.01": false,
+    "significant_at_0.05": false,
+    "t_statistic": -1.6666666666666672,
+    "test": "paired_t"
+   },
+   "wilcoxon": {
+    "p_value": 0.1875,
+    "significant_at_0.01": false,
+    "significant_at_0.05": false,
+    "statistic": 8.0,
+    "test": "wilcoxon"
+   }
+  },
+  "TF_IDF vs BM25_RRF": {
+   "direction": "worse",
+   "mean_diff": -0.0875,
+   "n_queries": 8,
+   "t_test": {
+    "p_value": 0.03833372883603092,
+    "significant_at_0.01": false,
+    "significant_at_0.05": true,
+    "t_statistic": -2.545875386086578,
+    "test": "paired_t"
+   },
+   "wilcoxon": {
+    "p_value": 0.03125,
+    "significant_at_0.01": false,
+    "significant_at_0.05": true,
+    "statistic": 3.0,
+    "test": "wilcoxon"
+   }
+  },
+  "TF_IDF vs COSINE_SIMILARITY": {
+   "direction": "worse",
+   "mean_diff": -0.04374999999999998,
+   "n_queries": 8,
+   "t_test": {
+    "p_value": 0.13951958313684446,
+    "significant_at_0.01": false,
+    "significant_at_0.05": false,
+    "t_statistic": -1.666666666666666,
+    "test": "paired_t"
+   },
+   "wilcoxon": {
+    "p_value": 0.1484375,
+    "significant_at_0.01": false,
+    "significant_at_0.05": false,
+    "statistic": 8.0,
+    "test": "wilcoxon"
+   }
+  }
+ }
+}

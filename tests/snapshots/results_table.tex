@@ -1,0 +1,17 @@
+\begin{table*}[t]
+\centering
+\caption{Retrieval performance comparison across 5 systems. Best scores are in \textbf{bold}. * and ** denote statistically significant improvement over BM25 at $p<0.05$ and $p<0.01$ (paired t-test).}
+\label{tab:results}
+\small
+\begin{tabular}{lcccccc}
+\toprule
+\textbf{Method} & \textbf{MAP} & \textbf{MRR} & \textbf{P@20} & \textbf{R@20} & \textbf{F1@20} & \textbf{nDCG@20} \\
+\midrule
+BM25 & 0.179 & 0.179 & 0.179 & 0.179 & 0.179 & 0.100 \\
+TF\_IDF & 0.223 & 0.223 & 0.223 & 0.222 & 0.223 & 0.170** \\
+COSINE\_SIMILARITY & 0.266* & 0.266* & 0.266* & 0.266* & 0.266* & 0.240** \\
+BM25\_RRF & 0.310* & 0.310* & 0.310* & 0.310* & 0.310* & 0.310** \\
+FINAL\_PIPELINE & \textbf{0.354}** & \textbf{0.354}** & \textbf{0.354}** & \textbf{0.354}** & \textbf{0.354}** & \textbf{0.380}** \\
+\bottomrule
+\end{tabular}
+\end{table*}

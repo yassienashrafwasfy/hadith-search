@@ -1,0 +1,17 @@
+\begin{table}[htbp]
+\centering
+\caption{Relative improvement (\%) from LoRA fine-tuning averaged across 6 IR metrics. Positive values indicate improvement over baseline.}
+\label{tab:finetune-delta}
+\small
+\begin{tabular}{lccc}
+\toprule
+\textbf{System} & \textbf{FT(triplet)} & \textbf{FT(kv)} & \textbf{FT(combined)} \\
+\midrule
+COSINE\_SIMILARITY & +45.9\% & -19.1\% & +19.1\% \\
+BM25\_RRF & +38.7\% & -- & +16.1\% \\
+FINAL\_PIPELINE & +33.5\% & -- & +14.0\% \\
+\midrule
+\textbf{Average} & \textbf{+39.4\%} & \textbf{-19.1\%} & \textbf{+16.4\%} \\
+\bottomrule
+\end{tabular}
+\end{table}

@@ -1,0 +1,20 @@
+# Config used by tools/mutation.sh inside the flattened .mutation/ copy of backend/ + tests/.
+# mutmut derives module keys from paths, so backend/ is flattened to make `import features`
+# and `scripts.stats_tests` resolve to the mutated files.
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-ra -p no:cacheprovider"
+asyncio_mode = "auto"
+markers = ["nlp: needs real NLTK / CAMeL Tools data"]
+
+[tool.mutmut]
+source_paths = [
+    "features.py",
+    "lazy_exports.py",
+    "services/",
+    "scripts/stats_tests.py",
+    "scripts/llm_validation.py",
+]
+pytest_add_cli_args = ["-n0"]
+also_copy = ["database.py", "main.py", "models/", "routers/", "startup.py", "scripts/"]

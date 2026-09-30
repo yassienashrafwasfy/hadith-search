@@ -1,0 +1,42 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["backend"]
+norecursedirs = [".mutation", "mutants", "node_modules", ".venv"]
+addopts = "-ra -n auto"
+asyncio_mode = "auto"
+markers = [
+    "nlp: needs real NLTK / CAMeL Tools data (skipped when not installed)",
+]
+
+[tool.black]
+line-length = 100
+target-version = ["py312"]
+extend-exclude = "(\\.venv|frontend|node_modules|\\.mutation|mutants)"
+
+[tool.ruff]
+src = ["backend"]
+line-length = 100
+target-version = "py312"
+extend-exclude = ["frontend", "node_modules", ".mutation", "mutants"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "C90"]
+ignore = ["E501"]  # line length is black's job
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10  # radon grade A/B only
+
+[tool.ruff.lint.per-file-ignores]
+# imports intentionally follow environment setup / side effects
+"backend/main.py" = ["E402"]
+"backend/scripts/build_all.py" = ["E402"]
+"backend/scripts/build_embeddings.py" = ["E402"]
+"backend/scripts/pooling.py" = ["E402"]
+
+[tool.vulture]
+paths = ["backend", "tests"]
+exclude = ["backend/models/", ".mutation", "mutants"]  # declarative columns/fields only
+min_confidence = 60
+# ORM/pydantic fields, FastAPI handlers and pytest fixtures are used by frameworks, not by name
+ignore_decorators = ["@router.*", "@app.*", "@_system", "@pytest.fixture", "@pytest_asyncio.fixture"]
+ignore_names = ["model_config", "pytestmark", "forward"]  # forward: torch.nn.Module hook

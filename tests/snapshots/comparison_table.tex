@@ -1,0 +1,24 @@
+\begin{table*}[t]
+\centering
+\caption{Impact of LoRA fine-tuning on E5-dependent retrieval systems. Baseline uses pretrained \mbox{multilingual-e5-large}. FT(triplet), FT(kv), and FT(combined) use LoRA adapters trained with contrastive, cross-concept alignment, and combined objectives. Best per system per metric in \textbf{bold}. * and ** denote significant improvement over baseline at $p<0.05$ and $p<0.01$ (paired t-test).}
+\label{tab:finetune-comparison}
+\small
+\begin{tabular}{llcccccc}
+\toprule
+\textbf{System} & \textbf{Mode} & \textbf{MAP} & \textbf{MRR} & \textbf{P@20} & \textbf{R@20} & \textbf{F1@20} & \textbf{nDCG@20} \\
+\midrule
+COSINE\_SIMILARITY & Baseline & 0.266 & 0.266 & 0.266 & 0.266 & 0.266 & 0.240 \\
+ & FT(triplet) & \textbf{0.386}** & \textbf{0.386}** & \textbf{0.386}** & \textbf{0.386}** & \textbf{0.386}** & \textbf{0.360}** \\
+ & FT(kv) & 0.216 & 0.216 & 0.216 & 0.216 & 0.216 & 0.190 \\
+ & FT(combined) & 0.316** & 0.316** & 0.316** & 0.316** & 0.316** & 0.290** \\
+\midrule
+BM25\_RRF & Baseline & 0.310 & 0.310 & 0.310 & 0.310 & 0.310 & 0.310 \\
+ & FT(triplet) & \textbf{0.430}** & \textbf{0.430}** & \textbf{0.430}** & \textbf{0.430}** & \textbf{0.430}** & \textbf{0.430}** \\
+ & FT(combined) & 0.360** & 0.360** & 0.360** & 0.360** & 0.360** & 0.360** \\
+\midrule
+FINAL\_PIPELINE & Baseline & 0.354 & 0.354 & 0.354 & 0.354 & 0.354 & 0.380 \\
+ & FT(triplet) & \textbf{0.474}** & \textbf{0.474}** & \textbf{0.474}** & \textbf{0.474}** & \textbf{0.474}** & \textbf{0.500}** \\
+ & FT(combined) & 0.404** & 0.404** & 0.404** & 0.404** & 0.404** & 0.430** \\
+\bottomrule
+\end{tabular}
+\end{table*}

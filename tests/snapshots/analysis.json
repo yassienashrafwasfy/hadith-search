@@ -1,0 +1,688 @@
+{
+ "bootstrap_cis": {
+  "BM25": {
+   "AP": {
+    "ci_lower": 0.13375,
+    "ci_upper": 0.22749999999999998,
+    "mean": 0.17875,
+    "std": 0.06791538853603063
+   },
+   "F1@20": {
+    "ci_lower": 0.13740625000000004,
+    "ci_upper": 0.22375,
+    "mean": 0.17875,
+    "std": 0.06791538853603063
+   },
+   "P@20": {
+    "ci_lower": 0.13365625000000003,
+    "ci_upper": 0.22375,
+    "mean": 0.17875000000000002,
+    "std": 0.06791538853603063
+   },
+   "R@20": {
+    "ci_lower": 0.13740625000000004,
+    "ci_upper": 0.22009375000000003,
+    "mean": 0.17875,
+    "std": 0.06791538853603063
+   },
+   "RR": {
+    "ci_lower": 0.14125,
+    "ci_upper": 0.23125,
+    "mean": 0.17875000000000002,
+    "std": 0.06791538853603063
+   },
+   "nDCG@20": {
+    "ci_lower": 0.1,
+    "ci_upper": 0.1,
+    "mean": 0.1,
+    "std": 0.0
+   }
+  },
+  "BM25_RRF": {
+   "AP": {
+    "ci_lower": 0.28,
+    "ci_upper": 0.3475,
+    "mean": 0.31,
+    "std": 0.060000000000000005
+   },
+   "F1@20": {
+    "ci_lower": 0.27249999999999996,
+    "ci_upper": 0.35134375,
+    "mean": 0.31,
+    "std": 0.060000000000000005
+   },
+   "P@20": {
+    "ci_lower": 0.26875000000000004,
+    "ci_upper": 0.34375,
+    "mean": 0.31,
+    "std": 0.060000000000000005
+   },
+   "R@20": {
+    "ci_lower": 0.2725,
+    "ci_upper": 0.34,
+    "mean": 0.31,
+    "std": 0.060000000000000005
+   },
+   "RR": {
+    "ci_lower": 0.27625,
+    "ci_upper": 0.35124999999999995,
+    "mean": 0.31,
+    "std": 0.060000000000000005
+   },
+   "nDCG@20": {
+    "ci_lower": 0.31,
+    "ci_upper": 0.31,
+    "mean": 0.31,
+    "std": 0.0
+   }
+  },
+  "COSINE_SIMILARITY": {
+   "AP": {
+    "ci_lower": 0.225,
+    "ci_upper": 0.29634375,
+    "mean": 0.26625,
+    "std": 0.0609302880347697
+   },
+   "F1@20": {
+    "ci_lower": 0.22865625000000003,
+    "ci_upper": 0.30384374999999997,
+    "mean": 0.26625,
+    "std": 0.06093028803476971
+   },
+   "P@20": {
+    "ci_lower": 0.23615625,
+    "ci_upper": 0.30000000000000004,
+    "mean": 0.26625,
+    "std": 0.0609302880347697
+   },
+   "R@20": {
+    "ci_lower": 0.23240625,
+    "ci_upper": 0.3075,
+    "mean": 0.26625,
+    "std": 0.0609302880347697
+   },
+   "RR": {
+    "ci_lower": 0.22499999999999998,
+    "ci_upper": 0.30759375,
+    "mean": 0.26625,
+    "std": 0.0609302880347697
+   },
+   "nDCG@20": {
+    "ci_lower": 0.24,
+    "ci_upper": 0.24,
+    "mean": 0.24,
+    "std": 0.0
+   }
+  },
+  "FINAL_PIPELINE": {
+   "AP": {
+    "ci_lower": 0.3125,
+    "ci_upper": 0.38759375,
+    "mean": 0.35375,
+    "std": 0.0609302880347697
+   },
+   "F1@20": {
+    "ci_lower": 0.31625000000000003,
+    "ci_upper": 0.39134375,
+    "mean": 0.35375,
+    "std": 0.0609302880347697
+   },
+   "P@20": {
+    "ci_lower": 0.31240625,
+    "ci_upper": 0.395,
+    "mean": 0.35375,
+    "std": 0.0609302880347697
+   },
+   "R@20": {
+    "ci_lower": 0.32365625,
+    "ci_upper": 0.395,
+    "mean": 0.35375,
+    "std": 0.0609302880347697
+   },
+   "RR": {
+    "ci_lower": 0.31999999999999995,
+    "ci_upper": 0.38384375000000004,
+    "mean": 0.35375,
+    "std": 0.0609302880347697
+   },
+   "nDCG@20": {
+    "ci_lower": 0.38,
+    "ci_upper": 0.38,
+    "mean": 0.38,
+    "std": 0.0
+   }
+  },
+  "TF_IDF": {
+   "AP": {
+    "ci_lower": 0.18875000000000003,
+    "ci_upper": 0.26009375,
+    "mean": 0.2225,
+    "std": 0.06363961030678927
+   },
+   "F1@20": {
+    "ci_lower": 0.18125000000000002,
+    "ci_upper": 0.26,
+    "mean": 0.2225,
+    "std": 0.06363961030678927
+   },
+   "P@20": {
+    "ci_lower": 0.185,
+    "ci_upper": 0.26009375,
+    "mean": 0.2225,
+    "std": 0.06363961030678927
+   },
+   "R@20": {
+    "ci_lower": 0.185,
+    "ci_upper": 0.26009375,
+    "mean": 0.2225,
+    "std": 0.06363961030678927
+   },
+   "RR": {
+    "ci_lower": 0.18500000000000003,
+    "ci_upper": 0.25634375000000004,
+    "mean": 0.2225,
+    "std": 0.06363961030678927
+   },
+   "nDCG@20": {
+    "ci_lower": 0.17,
+    "ci_upper": 0.17,
+    "mean": 0.17,
+    "std": 0.0
+   }
+  }
+ },
+ "metadata": {
+  "baseline": "BM25",
+  "confidence_level": 0.95,
+  "k": 20,
+  "n_bootstrap": 200,
+  "n_queries": 8,
+  "systems": [
+   "BM25",
+   "TF_IDF",
+   "COSINE_SIMILARITY",
+   "BM25_RRF",
+   "FINAL_PIPELINE"
+  ]
+ },
+ "pairwise_tests": {
+  "AP": {
+   "BM25_RRF vs BM25": {
+    "direction": "better",
+    "mean_diff": 0.13125,
+    "n_queries": 8,
+    "t_test": {
+     "p_value": 0.01120143255409014,
+     "significant_at_0.01": false,
+     "significant_at_0.05": true,
+     "t_statistic": 3.415650255319866,
+     "test": "paired_t"
+    },
+    "wilcoxon": {
+     "p_value": 0.0625,
+     "significant_at_0.01": false,
+     "significant_at_0.05": false,
+     "statistic": 0.0,
+     "test": "wilcoxon"
+    }
+   },
+   "COSINE_SIMILARITY vs BM25": {
+    "direction": "better",
+    "mean_diff": 0.0875,
+    "n_queries": 8,
+    "t_test": {
+     "p_value": 0.03833372883603095,
+     "significant_at_0.01": false,
+     "significant_at_0.05": true,
+     "t_statistic": 2.545875386086577,
+     "test": "paired_t"
+    },
+    "wilcoxon": {
+     "p_value": 0.03125,
+     "significant_at_0.01": false,
+     "significant_at_0.05": true,
+     "statistic": 3.0,
+     "test": "wilcoxon"
+    }
+   },
+   "FINAL_PIPELINE vs BM25": {
+    "direction": "better",
+    "mean_diff": 0.17500000000000002,
+    "n_queries": 8,
+    "t_test": {
+     "p_value": 0.003120383434329842,
+     "significant_at_0.01": true,
+     "significant_at_0.05": true,
+     "t_statistic": 4.409585518440983,
+     "test": "paired_t"
+    },
+    "wilcoxon": {
+     "p_value": 0.0078125,
+     "significant_at_0.01": true,
+     "significant_at_0.05": true,
+     "statistic": 0.0,
+     "test": "wilcoxon"
+    }
+   },
+   "TF_IDF vs BM25": {
+    "direction": "better",
+    "mean_diff": 0.04375000000000001,
+    "n_queries": 8,
+    "t_test": {
+     "p_value": 0.13951958313684446,
+     "significant_at_0.01": false,
+     "significant_at_0.05": false,
+     "t_statistic": 1.6666666666666663,
+     "test": "paired_t"
+    },
+    "wilcoxon": {
+     "p_value": 0.1171875,
+     "significant_at_0.01": false,
+     "significant_at_0.05": false,
+     "statistic": 8.0,
+     "test": "wilcoxon"
+    }
+   }
+  },
+  "F1@20": {
+   "BM25_RRF vs BM25": {
+    "direction": "better",
+    "mean_diff": 0.13125,
+    "n_queries": 8,
+    "t_test": {
+     "p_value": 0.01120143255409014,
+     "significant_at_0.01": false,
+     "significant_at_0.05": true,
+     "t_statistic": 3.415650255319866,
+     "test": "paired_t"
+    },
+    "wilcoxon": {
+     "p_value": 0.0625,
+     "significant_at_0.01": false,
+     "significant_at_0.05": false,
+     "statistic": 0.0,
+     "test": "wilcoxon"
+    }
+   },
+   "COSINE_SIMILARITY vs BM25": {
+    "direction": "better",
+    "mean_diff": 0.0875,
+    "n_queries": 8,
+    "t_test": {
+     "p_value": 0.03833372883603095,
+     "significant_at_0.01": false,
+     "significant_at_0.05": true,
+     "t_statistic": 2.545875386086577,
+     "test": "paired_t"
+    },
+    "wilcoxon": {
+     "p_value": 0.03125,
+     "significant_at_0.01": false,
+     "significant_at_0.05": true,
+     "statistic": 3.0,
+     "test": "wilcoxon"
+    }
+   },
+   "FINAL_PIPELINE vs BM25": {
+    "direction": "better",
+    "mean_diff": 0.17500000000000002,
+    "n_queries": 8,
+    "t_test": {
+     "p_value": 0.003120383434329839,
+     "significant_at_0.01": true,
+     "significant_at_0.05": true,
+     "t_statistic": 4.409585518440984,
+     "test": "paired_t"
+    },
+    "wilcoxon": {
+     "p_value": 0.0078125,
+     "significant_at_0.01": true,
+     "significant_at_0.05": true,
+     "statistic": 0.0,
+     "test": "wilcoxon"
+    }
+   },
+   "TF_IDF vs BM25": {
+    "direction": "better",
+    "mean_diff": 0.04375000000000001,
+    "n_queries": 8,
+    "t_test": {
+     "p_value": 0.13951958313684446,
+     "significant_at_0.01": false,
+     "significant_at_0.05": false,
+     "t_statistic": 1.666666666666666,
+     "test": "paired_t"
+    },
+    "wilcoxon": {
+     "p_value": 0.1171875,
+     "significant_at_0.01": false,
+     "significant_at_0.05": false,
+     "statistic": 8.0,
+     "test": "wilcoxon"
+    }
+   }
+  },
+  "P@20": {
+   "BM25_RRF vs BM25": {
+    "direction": "better",
+    "mean_diff": 0.13124999999999998,
+    "n_queries": 8,
+    "t_test": {
+     "p_value": 0.01120143255409014,
+     "significant_at_0.01": false,
+     "significant_at_0.05": true,
+     "t_statistic": 3.415650255319866,
+     "test": "paired_t"
+    },
+    "wilcoxon": {
+     "p_value": 0.0625,
+     "significant_at_0.01": false,
+     "significant_at_0.05": false,
+     "statistic": 0.0,
+     "test": "wilcoxon"
+    }
+   },
+   "COSINE_SIMILARITY vs BM25": {
+    "direction": "better",
+    "mean_diff": 0.08749999999999997,
+    "n_queries": 8,
+    "t_test": {
+     "p_value": 0.03833372883603095,
+     "significant_at_0.01": false,
+     "significant_at_0.05": true,
+     "t_statistic": 2.545875386086577,
+     "test": "paired_t"
+    },
+    "wilcoxon": {
+     "p_value": 0.03125,
+     "significant_at_0.01": false,
+     "significant_at_0.05": true,
+     "statistic": 3.0,
+     "test": "wilcoxon"
+    }
+   },
+   "FINAL_PIPELINE vs BM25": {
+    "direction": "better",
+    "mean_diff": 0.175,
+    "n_queries": 8,
+    "t_test": {
+     "p_value": 0.003120383434329842,
+     "significant_at_0.01": true,
+     "significant_at_0.05": true,
+     "t_statistic": 4.409585518440983,
+     "test": "paired_t"
+    },
+    "wilcoxon": {
+     "p_value": 0.0078125,
+     "significant_at_0.01": true,
+     "significant_at_0.05": true,
+     "statistic": 0.0,
+     "test": "wilcoxon"
+    }
+   },
+   "TF_IDF vs BM25": {
+    "direction": "better",
+    "mean_diff": 0.04374999999999998,
+    "n_queries": 8,
+    "t_test": {
+     "p_value": 0.13951958313684426,
+     "significant_at_0.01": false,
+     "significant_at_0.05": false,
+     "t_statistic": 1.6666666666666667,
+     "test": "paired_t"
+    },
+    "wilcoxon": {
+     "p_value": 0.1171875,
+     "significant_at_0.01": false,
+     "significant_at_0.05": false,
+     "statistic": 8.0,
+     "test": "wilcoxon"
+    }
+   }
+  },
+  "R@20": {
+   "BM25_RRF vs BM25": {
+    "direction": "better",
+    "mean_diff": 0.13125,
+    "n_queries": 8,
+    "t_test": {
+     "p_value": 0.01120143255409014,
+     "significant_at_0.01": false,
+     "significant_at_0.05": true,
+     "t_statistic": 3.415650255319866,
+     "test": "paired_t"
+    },
+    "wilcoxon": {
+     "p_value": 0.0625,
+     "significant_at_0.01": false,
+     "significant_at_0.05": false,
+     "statistic": 0.0,
+     "test": "wilcoxon"
+    }
+   },
+   "COSINE_SIMILARITY vs BM25": {
+    "direction": "better",
+    "mean_diff": 0.0875,
+    "n_queries": 8,
+    "t_test": {
+     "p_value": 0.03833372883603095,
+     "significant_at_0.01": false,
+     "significant_at_0.05": true,
+     "t_statistic": 2.545875386086577,
+     "test": "paired_t"
+    },
+    "wilcoxon": {
+     "p_value": 0.03125,
+     "significant_at_0.01": false,
+     "significant_at_0.05": true,
+     "statistic": 3.0,
+     "test": "wilcoxon"
+    }
+   },
+   "FINAL_PIPELINE vs BM25": {
+    "direction": "better",
+    "mean_diff": 0.17500000000000002,
+    "n_queries": 8,
+    "t_test": {
+     "p_value": 0.003120383434329842,
+     "significant_at_0.01": true,
+     "significant_at_0.05": true,
+     "t_statistic": 4.409585518440983,
+     "test": "paired_t"
+    },
+    "wilcoxon": {
+     "p_value": 0.0078125,
+     "significant_at_0.01": true,
+     "significant_at_0.05": true,
+     "statistic": 0.0,
+     "test": "wilcoxon"
+    }
+   },
+   "TF_IDF vs BM25": {
+    "direction": "better",
+    "mean_diff": 0.04375000000000001,
+    "n_queries": 8,
+    "t_test": {
+     "p_value": 0.13951958313684446,
+     "significant_at_0.01": false,
+     "significant_at_0.05": false,
+     "t_statistic": 1.6666666666666663,
+     "test": "paired_t"
+    },
+    "wilcoxon": {
+     "p_value": 0.1171875,
+     "significant_at_0.01": false,
+     "significant_at_0.05": false,
+     "statistic": 8.0,
+     "test": "wilcoxon"
+    }
+   }
+  },
+  "RR": {
+   "BM25_RRF vs BM25": {
+    "direction": "better",
+    "mean_diff": 0.13124999999999998,
+    "n_queries": 8,
+    "t_test": {
+     "p_value": 0.01120143255409014,
+     "significant_at_0.01": false,
+     "significant_at_0.05": true,
+     "t_statistic": 3.415650255319866,
+     "test": "paired_t"
+    },
+    "wilcoxon": {
+     "p_value": 0.0625,
+     "significant_at_0.01": false,
+     "significant_at_0.05": false,
+     "statistic": 0.0,
+     "test": "wilcoxon"
+    }
+   },
+   "COSINE_SIMILARITY vs BM25": {
+    "direction": "better",
+    "mean_diff": 0.08749999999999997,
+    "n_queries": 8,
+    "t_test": {
+     "p_value": 0.03833372883603095,
+     "significant_at_0.01": false,
+     "significant_at_0.05": true,
+     "t_statistic": 2.545875386086577,
+     "test": "paired_t"
+    },
+    "wilcoxon": {
+     "p_value": 0.03125,
+     "significant_at_0.01": false,
+     "significant_at_0.05": true,
+     "statistic": 3.0,
+     "test": "wilcoxon"
+    }
+   },
+   "FINAL_PIPELINE vs BM25": {
+    "direction": "better",
+    "mean_diff": 0.175,
+    "n_queries": 8,
+    "t_test": {
+     "p_value": 0.003120383434329842,
+     "significant_at_0.01": true,
+     "significant_at_0.05": true,
+     "t_statistic": 4.409585518440983,
+     "test": "paired_t"
+    },
+    "wilcoxon": {
+     "p_value": 0.0078125,
+     "significant_at_0.01": true,
+     "significant_at_0.05": true,
+     "statistic": 0.0,
+     "test": "wilcoxon"
+    }
+   },
+   "TF_IDF vs BM25": {
+    "direction": "better",
+    "mean_diff": 0.04374999999999998,
+    "n_queries": 8,
+    "t_test": {
+     "p_value": 0.13951958313684426,
+     "significant_at_0.01": false,
+     "significant_at_0.05": false,
+     "t_statistic": 1.6666666666666667,
+     "test": "paired_t"
+    },
+    "wilcoxon": {
+     "p_value": 0.1171875,
+     "significant_at_0.01": false,
+     "significant_at_0.05": false,
+     "statistic": 8.0,
+     "test": "wilcoxon"
+    }
+   }
+  },
+  "nDCG@20": {
+   "BM25_RRF vs BM25": {
+    "direction": "better",
+    "mean_diff": 0.21,
+    "n_queries": 8,
+    "t_test": {
+     "p_value": 0.0,
+     "significant_at_0.01": true,
+     "significant_at_0.05": true,
+     "t_statistic": Infinity,
+     "test": "paired_t"
+    },
+    "wilcoxon": {
+     "p_value": 0.0078125,
+     "significant_at_0.01": true,
+     "significant_at_0.05": true,
+     "statistic": 0.0,
+     "test": "wilcoxon"
+    }
+   },
+   "COSINE_SIMILARITY vs BM25": {
+    "direction": "better",
+    "mean_diff": 0.13999999999999999,
+    "n_queries": 8,
+    "t_test": {
+     "p_value": 0.0,
+     "significant_at_0.01": true,
+     "significant_at_0.05": true,
+     "t_statistic": Infinity,
+     "test": "paired_t"
+    },
+    "wilcoxon": {
+     "p_value": 0.0078125,
+     "significant_at_0.01": true,
+     "significant_at_0.05": true,
+     "statistic": 0.0,
+     "test": "wilcoxon"
+    }
+   },
+   "FINAL_PIPELINE vs BM25": {
+    "direction": "better",
+    "mean_diff": 0.28,
+    "n_queries": 8,
+    "t_test": {
+     "p_value": 0.0,
+     "significant_at_0.01": true,
+     "significant_at_0.05": true,
+     "t_statistic": Infinity,
+     "test": "paired_t"
+    },
+    "wilcoxon": {
+     "p_value": 0.0078125,
+     "significant_at_0.01": true,
+     "significant_at_0.05": true,
+     "statistic": 0.0,
+     "test": "wilcoxon"
+    }
+   },
+   "TF_IDF vs BM25": {
+    "direction": "better",
+    "mean_diff": 0.07,
+    "n_queries": 8,
+    "t_test": {
+     "p_value": 0.0,
+     "significant_at_0.01": true,
+     "significant_at_0.05": true,
+     "t_statistic": Infinity,
+     "test": "paired_t"
+    },
+    "wilcoxon": {
+     "p_value": 0.0078125,
+     "significant_at_0.01": true,
+     "significant_at_0.05": true,
+     "statistic": 0.0,
+     "test": "wilcoxon"
+    }
+   }
+  }
+ },
+ "summary": {
+  "best_systems": {
+   "AP": "FINAL_PIPELINE",
+   "F1@20": "FINAL_PIPELINE",
+   "P@20": "FINAL_PIPELINE",
+   "R@20": "FINAL_PIPELINE",
+   "RR": "FINAL_PIPELINE",
+   "nDCG@20": "FINAL_PIPELINE"
+  }
+ }
+}

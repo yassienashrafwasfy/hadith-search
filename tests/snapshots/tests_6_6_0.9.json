@@ -1,0 +1,16 @@
+{
+ "t": {
+  "p_value": 3.3742305225948245e-05,
+  "significant_at_0.01": true,
+  "significant_at_0.05": true,
+  "t_statistic": 13.973913920955367,
+  "test": "paired_t"
+ },
+ "w": {
+  "p_value": 0.03125,
+  "significant_at_0.01": false,
+  "significant_at_0.05": true,
+  "statistic": 0.0,
+  "test": "wilcoxon"
+ }
+}

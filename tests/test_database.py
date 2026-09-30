@@ -1,0 +1,113 @@
+"""ORM layer: helpers used by the build scripts, plus a guard that no raw SQL creeps back in."""
+
+import pathlib
+import re
+
+import pandas as pd
+import pytest
+
+import database
+from models import Hadith
+
+_BACKEND = pathlib.Path(__file__).resolve().parent.parent / "backend"
+
+
+def test_get_hadith_row(_patched_paths):
+    row = database.get_hadith_row(2)
+    assert row["Book"] == "Muslim"
+    assert row["English_Text"] == "fasting is a shield"
+    assert database.get_hadith_row(999) is None
+
+
+def test_read_hadiths_df_all_and_subset(_patched_paths):
+    everything = database.read_hadiths_df()
+    assert set(everything["id"]) == {1, 2, 3}
+    assert "Preprocessed_English_Matn" in everything.columns
+
+    subset = database.read_hadiths_df(Hadith.id, Hadith.Book, order_by=Hadith.id.desc())
+    assert list(subset.columns) == ["id", "Book"]
+    assert subset["id"].tolist() == [3, 2, 1]
+
+
+def test_hadiths_loader_indexes_by_id(_patched_paths):
+    from scripts import loading
+
+    loading.get_hadiths_df.cache_clear()
+    try:
+        df = loading.get_hadiths_df()
+    finally:
+        loading.get_hadiths_df.cache_clear()
+    assert df.loc[1, "Book"] == "Bukhari"
+
+
+def test_hadith_records_convert_nan_and_ints():
+    from scripts.data_creation import _hadith_records
+
+    columns = [c.name for c in Hadith.__table__.c]
+    row = {c: "x" for c in columns}
+    row.update(id=1, Chapter_Number=3.0, Section_Number=float("nan"), Hadith_Number=7.0)
+    for c in ("Has_English_Content", "Has_Arabic_Content", "Has_English_Matn", "Has_Arabic_Matn"):
+        row[c] = 1
+    (rec,) = _hadith_records(pd.DataFrame([row]))
+    assert rec["Chapter_Number"] == 3 and isinstance(rec["Chapter_Number"], int)
+    assert rec["Section_Number"] is None
+    assert rec["Book"] == "x"
+
+
+def test_create_database_roundtrip(_patched_paths, monkeypatch):
+    from sqlalchemy import Integer
+
+    from scripts import data_creation
+
+    frame = pd.DataFrame(
+        [
+            {c.name: (i if isinstance(c.type, Integer) else "t") for c in Hadith.__table__.c}
+            for i in (1, 2)
+        ]
+    )
+    monkeypatch.setattr(data_creation, "DB_PATH", pathlib.Path(database.DB_PATH))
+    data_creation.create_database(frame)
+    assert database.read_hadiths_df()["id"].tolist() == [1, 2]
+
+
+def test_build_all_checks(_patched_paths, monkeypatch):
+    from scripts import build_all
+
+    monkeypatch.setattr(build_all, "DB_PATH", database.DB_PATH)
+    assert build_all._has_columns(["Book", "Preprocessed_English"])
+    assert not build_all._has_columns(["not_a_column"])
+    assert build_all._row_count() == 3
+    assert build_all._has_preprocessed_data()
+
+
+def test_preprocess_run_updates_columns(_patched_paths, monkeypatch):
+    from scripts import preprocess
+
+    monkeypatch.setattr(preprocess, "preprocess_english", lambda t: t.upper())
+    monkeypatch.setattr(preprocess, "preprocess_arabic", lambda t: t + "!")
+    preprocess.run()
+    row = database.get_hadith_row(2)
+    assert row["Preprocessed_English"] == "FASTING IS A SHIELD"
+    assert row["Preprocessed_Arabic_Matn"].endswith("!")
+
+
+@pytest.mark.parametrize(
+    "pattern",
+    [
+        r"\bsqlite3\b",
+        r"\.execute\(\s*f?[\"']",  # execute("...raw sql...")
+        r"read_sql\(\s*f?[\"']",
+        r"\.to_sql\(",
+        r"\bPRAGMA\b",
+        r"\b(SELECT|INSERT INTO|UPDATE \w+ SET|DELETE FROM|CREATE TABLE|ALTER TABLE)\b",
+    ],
+)
+def test_no_raw_sql_in_backend(pattern):
+    offenders = []
+    for path in _BACKEND.rglob("*.py"):
+        if "data" in path.relative_to(_BACKEND).parts[:1]:
+            continue
+        for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            if re.search(pattern, line):
+                offenders.append(f"{path.relative_to(_BACKEND)}:{n}: {line.strip()}")
+    assert not offenders, "raw SQL found; use the ORM:\n" + "\n".join(offenders)

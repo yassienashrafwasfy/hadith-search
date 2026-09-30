@@ -1,0 +1,17 @@
+{
+ "t": {
+  "p_value": null,
+  "significant_at_0.01": false,
+  "significant_at_0.05": false,
+  "t_statistic": null,
+  "test": "paired_t"
+ },
+ "w": {
+  "note": "all differences are zero",
+  "p_value": 1.0,
+  "significant_at_0.01": false,
+  "significant_at_0.05": false,
+  "statistic": null,
+  "test": "wilcoxon"
+ }
+}

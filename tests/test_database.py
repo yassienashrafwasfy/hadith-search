@@ -54,7 +54,7 @@ def test_hadith_records_convert_nan_and_ints():
     assert rec["Book"] == "x"
 
 
-def test_create_database_roundtrip(_patched_paths, monkeypatch):
+def test_create_database_roundtrip(_patched_paths):
     from sqlalchemy import Integer
 
     from scripts import data_creation
@@ -65,15 +65,13 @@ def test_create_database_roundtrip(_patched_paths, monkeypatch):
             for i in (1, 2)
         ]
     )
-    monkeypatch.setattr(data_creation, "DB_PATH", pathlib.Path(database.DB_PATH))
     data_creation.create_database(frame)
     assert database.read_hadiths_df()["id"].tolist() == [1, 2]
 
 
-def test_build_all_checks(_patched_paths, monkeypatch):
+def test_build_all_checks(_patched_paths):
     from scripts import build_all
 
-    monkeypatch.setattr(build_all, "DB_PATH", database.DB_PATH)
     assert build_all._has_columns(["Book", "Preprocessed_English"])
     assert not build_all._has_columns(["not_a_column"])
     assert build_all._row_count() == 3

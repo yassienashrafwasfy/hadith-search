@@ -20,7 +20,6 @@ LLM_TIMEOUT = int(os.getenv("LLM_TIMEOUT", "60"))
 
 SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(SCRIPTS_DIR, "..", "data")
-DB_PATH = os.path.join(DATA_DIR, "hadiths.db")
 
 TOPICS = [
     "prayer (salah)",
@@ -244,14 +243,14 @@ def generate_all(pairs_per_topic=PAIRS_PER_TOPIC, topics=None):
     print(f"LLM model: {LLM_MODEL}")
     print()
 
-    from database import init_kv_pairs_table
+    from database import init_schema_sync
     from scripts import (
         get_arabic_inverted_index,
         get_document_lengths,
         get_english_inverted_index,
     )
 
-    asyncio.run(init_kv_pairs_table())
+    init_schema_sync()
 
     print("Loading retrieval resources...")
     en_index = get_english_inverted_index()

@@ -7,7 +7,6 @@ from database import get_sync_session
 from models import Hadith
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
-DB_PATH = os.path.join(DATA_DIR, "hadiths.db")
 POOLING_MANIFEST_PATH = os.path.join(DATA_DIR, "pooling_manifest.json")
 QUERIES_PATH = os.path.join(DATA_DIR, "queries.json")
 QRELS_UNGRADED_PATH = os.path.join(DATA_DIR, "qrels_ungraded.json")

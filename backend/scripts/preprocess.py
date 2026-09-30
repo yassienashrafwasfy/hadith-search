@@ -1,3 +1,4 @@
+import os
 import re
 
 import pyarabic.araby as araby
@@ -13,6 +14,8 @@ from nltk.corpus import stopwords, wordnet
 from nltk.tokenize import word_tokenize
 
 from scripts.loading import get_english_lemmatizer, get_mle
+
+DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data")
 
 
 def get_wordnet_pos(tag):  # this is needed to convert nltk pos to wordnet pos
@@ -286,16 +289,15 @@ def _report_drops(path, empty_en, empty_ar):
             print(f"  Sample {name}-empty IDs: {sorted(ids)[:SAMPLE_IDS]}")
 
 
-def _drop_empty_matn(session, df, results, db_path):
+def _drop_empty_matn(session, df, results, data_dir):
     """Delete rows whose preprocessed matn is empty in either language; returns their ids."""
-    import os
 
     empty_en = _empty_ids(df, results["Preprocessed_English_Matn"])
     empty_ar = _empty_ids(df, results["Preprocessed_Arabic_Matn"])
     drop_ids = sorted(empty_en | empty_ar)
     if not drop_ids:
         return set()
-    path = os.path.join(os.path.dirname(db_path), "dropped_lk_rows.json")
+    path = os.path.join(data_dir, "dropped_lk_rows.json")
     _write_drop_audit(path, df, empty_en, empty_ar)
     _delete_hadiths(session, drop_ids)
     _report_drops(path, empty_en, empty_ar)
@@ -311,18 +313,15 @@ def _build_updates(df, results, dropped):
 
 
 def run():
-    import os
     import time
 
     from sqlalchemy import update
 
-    import database
-    from database import get_sync_session, init_hadiths_table, read_hadiths_df
+    from database import get_sync_session, init_schema_sync, read_hadiths_df
     from models import Hadith
 
     start = time.perf_counter()
-    print(os.path.abspath(database.DB_PATH))
-    init_hadiths_table()
+    init_schema_sync()
     df = read_hadiths_df()
 
     results = {
@@ -330,7 +329,7 @@ def run():
         for label, source, target, language in _COLUMNS
     }
     with get_sync_session() as session:
-        dropped = _drop_empty_matn(session, df, results, database.DB_PATH)
+        dropped = _drop_empty_matn(session, df, results, DATA_DIR)
         session.execute(update(Hadith), _build_updates(df, results, dropped))
         session.commit()
 

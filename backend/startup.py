@@ -50,7 +50,6 @@ def preload_resources(features: Features) -> None:
 
 
 async def init_database() -> None:
-    from database import init_annotation_tables, init_kv_pairs_table
+    from database import init_schema
 
-    await init_annotation_tables()
-    await init_kv_pairs_table()
+    await init_schema()

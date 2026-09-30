@@ -5,7 +5,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 from sqlalchemy import select
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from database import get_session, now_iso
 from models import Annotation, AnnotationProgress, Assignment, Hadith
@@ -103,7 +103,7 @@ async def get_progress(annotator_id: int, query_id: str, session) -> int:
 
 
 async def set_progress(annotator_id: int, query_id: str, index: int, session):
-    stmt = sqlite_insert(AnnotationProgress).values(
+    stmt = pg_insert(AnnotationProgress).values(
         annotator_id=annotator_id, query_id=query_id, current_index=index
     )
     await session.execute(
@@ -221,7 +221,7 @@ async def _upsert_label(session, annotator_id: int, query_id: str, hadith_id: in
     )
     created = existing.first() is None
     ts = now_iso()
-    stmt = sqlite_insert(Annotation).values(
+    stmt = pg_insert(Annotation).values(
         annotator_id=annotator_id,
         query_id=query_id,
         hadith_id=hadith_id,

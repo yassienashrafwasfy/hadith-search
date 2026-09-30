@@ -8,7 +8,6 @@ import pandas as pd
 from database import read_hadiths_df
 
 SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
-DB_PATH = os.path.join(SCRIPTS_DIR, "..", "data", "hadiths.db")
 DROPPED_ROWS_PATH = os.path.join(SCRIPTS_DIR, "..", "data", "dropped_lk_rows.json")
 
 TEXT_COLUMNS = [
@@ -533,10 +532,6 @@ def profile_hadith_df(df):
 
 
 def run():
-    print(os.path.abspath(DB_PATH))
-    if not os.path.exists(DB_PATH):
-        raise FileNotFoundError(f"Database not found: {DB_PATH}")
-
     df = read_hadiths_df()
 
     profile_hadith_df(df)

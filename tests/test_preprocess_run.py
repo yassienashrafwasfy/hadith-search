@@ -89,6 +89,7 @@ def test_report_drops_prints_samples(capsys):
 
 
 def test_run_drops_rows_with_empty_matn(_patched_paths, monkeypatch, tmp_path):
+    monkeypatch.setattr(p, "DATA_DIR", str(_patched_paths))
     monkeypatch.setattr(p, "preprocess_english", lambda t: "" if "fasting is a shield" == t else t)
     monkeypatch.setattr(p, "preprocess_arabic", lambda t: t)
     p.run()
@@ -114,5 +115,5 @@ def test_drop_empty_matn_noop_when_nothing_empty(_patched_paths, ids):
         "Preprocessed_Arabic_Matn": ["x", "x" if not ids else "", "x"],
     }
     with database.get_sync_session() as session:
-        dropped = p._drop_empty_matn(session, df, results, database.DB_PATH)
+        dropped = p._drop_empty_matn(session, df, results, str(_patched_paths))
     assert dropped == set(ids)

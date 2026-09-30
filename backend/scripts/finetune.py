@@ -28,7 +28,6 @@ from models import Hadith
 
 SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(SCRIPTS_DIR, "..", "data")
-DB_PATH = os.path.join(DATA_DIR, "hadiths.db")
 
 MODEL_NAME = "intfloat/multilingual-e5-large"
 MAX_LENGTH = 512

@@ -6,7 +6,10 @@ stand-in. Query preprocessing (NLTK / CAMeL) is mocked to a whitespace split
 in `_mock_preprocess`.
 """
 
+import asyncio
 import json
+import os
+import uuid
 
 import numpy as np
 import pandas as pd
@@ -14,9 +17,17 @@ import pytest
 import pytest_asyncio
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import insert
+from sqlalchemy import DDL, create_engine, func, insert, select
+from sqlalchemy.engine import make_url
+from sqlalchemy.exc import OperationalError
+from sqlalchemy.pool import NullPool
 
 from models import Hadith
+
+TEST_DATABASE_URL = os.environ.get(
+    "TEST_DATABASE_URL",
+    "postgresql+psycopg://postgres:test-only-password@localhost:55432/hadith_test",
+)
 
 # ---------- tiny corpus ----------
 
@@ -159,7 +170,50 @@ def _graded_relevant() -> dict[int, int]:
     return {1: 2, 2: 1, 3: 0}
 
 
-# ---------- API / SQLite ----------
+# ---------- PostgreSQL (one schema per test) ----------
+
+
+@pytest.fixture(scope="session")
+def _pg_ready():
+    """Skip DB tests with a clear message when no Postgres is reachable; enable pgvector once."""
+    engine = create_engine(TEST_DATABASE_URL, poolclass=NullPool)
+    try:
+        with engine.begin() as conn:
+            # xdist workers start together; the lock stops them racing on CREATE EXTENSION
+            conn.execute(select(func.pg_advisory_xact_lock(7_301)))
+            conn.execute(DDL("CREATE EXTENSION IF NOT EXISTS vector"))
+    except OperationalError as exc:
+        pytest.skip(
+            "No PostgreSQL with pgvector reachable at TEST_DATABASE_URL "
+            f"({exc.orig.__class__.__name__}). Start one, e.g.: docker run -d -p 55432:5432 "
+            "-e POSTGRES_PASSWORD=test-only-password -e POSTGRES_DB=hadith_test "
+            "pgvector/pgvector:pg17"
+        )
+    finally:
+        engine.dispose()
+    return TEST_DATABASE_URL
+
+
+@pytest.fixture
+def _pg_schema(_pg_ready, monkeypatch):
+    """A fresh empty schema for this test; DATABASE_URL points at it and it is dropped after."""
+    import database
+
+    name = f"t_{uuid.uuid4().hex[:12]}"
+    admin = create_engine(_pg_ready, poolclass=NullPool, isolation_level="AUTOCOMMIT")
+    with admin.connect() as conn:
+        conn.execute(DDL(f'CREATE SCHEMA "{name}"'))
+    url = make_url(_pg_ready).update_query_dict({"options": f"-csearch_path={name},public"})
+    monkeypatch.setenv("DATABASE_URL", url.render_as_string(hide_password=False))
+    monkeypatch.setattr(database, "ENGINE_KWARGS", {"poolclass": NullPool})
+    yield name
+    asyncio.run(database.dispose_engines())
+    with admin.connect() as conn:
+        conn.execute(DDL(f'DROP SCHEMA "{name}" CASCADE'))
+    admin.dispose()
+
+
+# ---------- API ----------
 
 
 @pytest.fixture
@@ -171,21 +225,14 @@ def _data_dir(tmp_path):
     return d
 
 
-@pytest.fixture
-def _db_path(_data_dir):
-    """Per-test SQLite file (tmp_path), so tests are isolated and safe under pytest-xdist."""
-    return _data_dir / "hadiths.db"
-
-
 @pytest_asyncio.fixture
-async def _patched_paths(monkeypatch, _data_dir, _db_path, _hadiths_df):
+async def _patched_paths(monkeypatch, _data_dir, _pg_schema, _hadiths_df):
     """Point every module-level path constant at the temp data dir and create tables."""
     import database
     import routers.annotation as annotation
     import routers.auth as auth
     import routers.benchmark as benchmark
 
-    monkeypatch.setattr(database, "DB_PATH", str(_db_path))
     for mod in (annotation, auth, benchmark):
         monkeypatch.setattr(mod, "QUERIES_PATH", str(_data_dir / "queries.json"))
     monkeypatch.setattr(annotation, "QRELS_UNGRADED_PATH", str(_data_dir / "qrels_ungraded.json"))
@@ -197,7 +244,7 @@ async def _patched_paths(monkeypatch, _data_dir, _db_path, _hadiths_df):
     monkeypatch.setattr(
         benchmark, "FINETUNED_STATS_TEMPLATE", str(_data_dir / "finetuned_stats_{mode}.json")
     )
-    database.init_hadiths_table()
+    await database.init_schema()
     columns = {c.name for c in Hadith.__table__.c}
     rows = [
         {k: v for k, v in row.items() if k in columns}
@@ -206,8 +253,6 @@ async def _patched_paths(monkeypatch, _data_dir, _db_path, _hadiths_df):
     with database.get_sync_session() as session:
         session.execute(insert(Hadith), rows)
         session.commit()
-    await database.init_annotation_tables()
-    await database.init_kv_pairs_table()
     return _data_dir
 
 

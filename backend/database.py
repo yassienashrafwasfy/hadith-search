@@ -1,8 +1,15 @@
+"""PostgreSQL access: async sessions for the API, sync sessions for build/evaluation scripts.
+
+Set `DATABASE_URL` to a SQLAlchemy URL using the psycopg driver, e.g.
+`postgresql+psycopg://user:password@host:5432/hadith`. The database needs the pgvector
+extension available; `init_schema` turns it on.
+"""
+
 import os
 from datetime import datetime, timezone
 
 import pandas as pd
-from sqlalchemy import create_engine, select
+from sqlalchemy import DDL, create_engine, select
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -10,7 +17,6 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 from sqlalchemy.orm import Session
-from sqlalchemy.pool import NullPool
 
 from models import (
     Annotation,
@@ -19,61 +25,92 @@ from models import (
     Assignment,
     Base,
     Hadith,
+    HadithEmbedding,
+    HadithLength,
     KvPair,
+    Posting,
+    Term,
 )
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DATA_DIR = os.path.join(BASE_DIR, "data")
-DB_PATH = os.path.join(DATA_DIR, "hadiths.db")
-
 __all__ = [
-    "ANNOTATION_TABLES",
     "Annotation",
     "AnnotationProgress",
     "Annotator",
     "Assignment",
     "Base",
-    "DB_PATH",
+    "CORPUS_TABLES",
     "Hadith",
+    "HadithEmbedding",
+    "HadithLength",
     "KvPair",
-    "drop_hadiths_table",
+    "Posting",
+    "Term",
+    "database_url",
+    "dispose_engines",
+    "drop_corpus_tables",
     "get_async_engine",
     "get_hadith_row",
     "get_session",
     "get_sync_engine",
     "get_sync_session",
-    "init_annotation_tables",
-    "init_hadiths_table",
-    "init_kv_pairs_table",
+    "init_schema",
+    "init_schema_sync",
     "now_iso",
     "read_hadiths_df",
 ]
 
-ANNOTATION_TABLES = [
-    Annotator.__table__,
-    Assignment.__table__,
-    Annotation.__table__,
-    AnnotationProgress.__table__,
+# The corpus and everything derived from it; dropped together when the corpus is rebuilt.
+CORPUS_TABLES = [
+    Posting.__table__,
+    Term.__table__,
+    HadithLength.__table__,
+    HadithEmbedding.__table__,
+    Hadith.__table__,
 ]
 
-# Engines are keyed by DB_PATH so tests can point the module at a temp file.
-# NullPool: SQLite connections are cheap and this keeps them from crossing event loops.
+_ENABLE_VECTOR = DDL("CREATE EXTENSION IF NOT EXISTS vector")
+
+# Extra keyword arguments for both engines (tests swap in NullPool so engines don't outlive
+# their event loop).
+ENGINE_KWARGS: dict = {"pool_pre_ping": True}
+
+# Engines are cached per URL so tests can point each test at its own schema.
 _async_engines: dict[str, AsyncEngine] = {}
 _sync_engines: dict = {}
 
 
-def get_async_engine() -> AsyncEngine:
-    if DB_PATH not in _async_engines:
-        _async_engines[DB_PATH] = create_async_engine(
-            f"sqlite+aiosqlite:///{DB_PATH}", poolclass=NullPool
+def database_url() -> str:
+    url = os.environ.get("DATABASE_URL")
+    if not url:
+        raise RuntimeError(
+            "DATABASE_URL is not set. Example: "
+            "postgresql+psycopg://user:password@localhost:5432/hadith"
         )
-    return _async_engines[DB_PATH]
+    return url
+
+
+def get_async_engine() -> AsyncEngine:
+    url = database_url()
+    if url not in _async_engines:
+        _async_engines[url] = create_async_engine(url, **ENGINE_KWARGS)
+    return _async_engines[url]
 
 
 def get_sync_engine():
-    if DB_PATH not in _sync_engines:
-        _sync_engines[DB_PATH] = create_engine(f"sqlite:///{DB_PATH}", poolclass=NullPool)
-    return _sync_engines[DB_PATH]
+    url = database_url()
+    if url not in _sync_engines:
+        _sync_engines[url] = create_engine(url, **ENGINE_KWARGS)
+    return _sync_engines[url]
+
+
+async def dispose_engines() -> None:
+    """Close every pooled connection (tests and shutdown)."""
+    for engine in _async_engines.values():
+        await engine.dispose()
+    for engine in _sync_engines.values():
+        engine.dispose()
+    _async_engines.clear()
+    _sync_engines.clear()
 
 
 def get_session() -> AsyncSession:
@@ -86,25 +123,22 @@ def get_sync_session() -> Session:
     return Session(get_sync_engine(), expire_on_commit=False)
 
 
-async def _create_tables(tables) -> None:
+async def init_schema() -> None:
+    """Enable pgvector and create any missing table (no migrations: existing tables are kept)."""
     async with get_async_engine().begin() as conn:
-        await conn.run_sync(Base.metadata.create_all, tables=tables)
+        await conn.execute(_ENABLE_VECTOR)
+        await conn.run_sync(Base.metadata.create_all)
 
 
-async def init_annotation_tables() -> None:
-    await _create_tables(ANNOTATION_TABLES)
+def init_schema_sync() -> None:
+    with get_sync_engine().begin() as conn:
+        conn.execute(_ENABLE_VECTOR)
+        Base.metadata.create_all(conn)
 
 
-async def init_kv_pairs_table() -> None:
-    await _create_tables([KvPair.__table__])
-
-
-def init_hadiths_table() -> None:
-    Base.metadata.create_all(get_sync_engine(), tables=[Hadith.__table__])
-
-
-def drop_hadiths_table() -> None:
-    Base.metadata.drop_all(get_sync_engine(), tables=[Hadith.__table__])
+def drop_corpus_tables() -> None:
+    """Drop the corpus and its derived tables; `init_schema_sync` recreates them."""
+    Base.metadata.drop_all(get_sync_engine(), tables=CORPUS_TABLES)
 
 
 def read_hadiths_df(*columns, order_by=None) -> pd.DataFrame:

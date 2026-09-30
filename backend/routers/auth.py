@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
-from database import get_session, init_annotation_tables, now_iso
+from database import get_session, now_iso
 from models import Annotator, Assignment
 from rest import API_PREFIX, href, json_response, link
 from tokens import AuthSettings, auth_settings, issue_token, read_token
@@ -150,8 +150,6 @@ async def create_annotator(
     settings: AuthSettings = Depends(auth_settings),
 ):
     """Sign up: creates the annotator, assigns queries and returns a first token."""
-    await init_annotation_tables()
-
     async with get_session() as session:
         existing = await session.execute(
             select(Annotator.id).where(Annotator.username == credentials.username)
@@ -179,8 +177,6 @@ async def create_annotator(
 @router.post("/tokens", status_code=201)
 async def create_token(credentials: Credentials, settings: AuthSettings = Depends(auth_settings)):
     """Sign in: exchanges a username and password for a bearer token."""
-    await init_annotation_tables()
-
     async with get_session() as session:
         result = await session.execute(
             select(Annotator).where(Annotator.username == credentials.username)

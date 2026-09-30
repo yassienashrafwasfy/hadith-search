@@ -1,5 +1,6 @@
-"""SQLAlchemy ORM models for hadiths.db (corpus + annotation platform + KV pairs)."""
+"""SQLAlchemy ORM models (PostgreSQL): corpus, search index, annotation platform, KV pairs."""
 
+from pgvector.sqlalchemy import VECTOR
 from sqlalchemy import ForeignKey, Index, Integer, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -69,6 +70,54 @@ class Hadith(Base):
     Preprocessed_Arabic_Isnad = _text()
     Preprocessed_English_Matn = _text()
     Preprocessed_Arabic_Matn = _text()
+
+
+class HadithEmbedding(Base):
+    """One E5 vector per language. No fixed dimension, so a different model needs no migration."""
+
+    __tablename__ = "hadith_embeddings"
+
+    hadith_id: Mapped[int] = mapped_column(
+        ForeignKey("hadiths.id", ondelete="CASCADE"), primary_key=True, autoincrement=False
+    )
+    english = mapped_column(VECTOR(), nullable=True)
+    arabic = mapped_column(VECTOR(), nullable=True)
+
+
+class HadithLength(Base):
+    """Token counts of the preprocessed matn, the document lengths BM25 normalises by."""
+
+    __tablename__ = "hadith_lengths"
+
+    hadith_id: Mapped[int] = mapped_column(
+        ForeignKey("hadiths.id", ondelete="CASCADE"), primary_key=True, autoincrement=False
+    )
+    english_len: Mapped[int] = mapped_column(Integer)
+    arabic_len: Mapped[int] = mapped_column(Integer)
+
+
+class Term(Base):
+    """A term of the inverted index with its document frequency. `language` is "EN" or "AR"."""
+
+    __tablename__ = "terms"
+
+    language: Mapped[str] = mapped_column(Text, primary_key=True)
+    term: Mapped[str] = mapped_column(Text, primary_key=True)
+    df: Mapped[int] = mapped_column(Integer)
+
+
+class Posting(Base):
+    """Inverted index row: `term` occurs `tf` times in the matn of `hadith_id`."""
+
+    __tablename__ = "postings"
+    __table_args__ = (Index("ix_postings_hadith_id", "hadith_id"),)
+
+    language: Mapped[str] = mapped_column(Text, primary_key=True)
+    term: Mapped[str] = mapped_column(Text, primary_key=True)
+    hadith_id: Mapped[int] = mapped_column(
+        ForeignKey("hadiths.id", ondelete="CASCADE"), primary_key=True, autoincrement=False
+    )
+    tf: Mapped[int] = mapped_column(Integer)
 
 
 class Annotator(Base):

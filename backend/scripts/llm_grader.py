@@ -22,7 +22,6 @@ LLM_TIMEOUT = int(os.getenv("LLM_TIMEOUT", "30"))
 
 SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(SCRIPTS_DIR, "..", "data")
-DB_PATH = os.path.join(DATA_DIR, "hadiths.db")
 
 SYSTEM_PROMPT_EN = (
     "You are an expert in Islamic Hadith science and jurisprudence. "

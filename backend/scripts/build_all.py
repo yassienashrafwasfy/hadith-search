@@ -19,13 +19,10 @@ from models import Hadith
 from scripts import data_creation
 
 DATA_DIR = os.path.join(SCRIPTS_DIR, "..", "data")
-DB_PATH = os.path.join(DATA_DIR, "hadiths.db")
 MANIFEST_PATH = os.path.join(DATA_DIR, "build_manifest.json")
 
 
 def _has_columns(required_columns):
-    if not os.path.isfile(DB_PATH):
-        return False
     try:
         cols = {c["name"] for c in inspect(get_sync_engine()).get_columns("hadiths")}
         return set(required_columns).issubset(cols)
@@ -66,8 +63,6 @@ def _has_preprocessed_data():
 
 
 def _row_count():
-    if not os.path.isfile(DB_PATH):
-        return None
     try:
         with get_sync_session() as session:
             return session.execute(select(func.count()).select_from(Hadith)).scalar_one()
@@ -105,9 +100,9 @@ def _prompt_overwrite(name):
 def _make_steps(skip_embeddings):
     steps = [
         {
-            "name": "Creating SQLite database from LK Hadith Corpus",
+            "name": "Loading LK Hadith Corpus into PostgreSQL",
             "module": "scripts.data_creation",
-            "markers": [DB_PATH],
+            "check": lambda: bool(_row_count()),
         },
         {
             "name": "Profiling loaded corpus",
@@ -186,7 +181,6 @@ def write_manifest(step_results, skip_embeddings):
         "source_path": str(source_path),
         "source_commit": data_creation.get_source_commit(source_path),
         "row_count": _row_count(),
-        "db_path": DB_PATH,
         "skip_embeddings": skip_embeddings,
         "canonical_corpus": "bilingual_matn",
         "drop_policy": "drop rows missing English_Matn or Arabic_Matn after deterministic reconstruction",

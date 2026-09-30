@@ -11,7 +11,11 @@ from models.orm import (
     Assignment,
     Base,
     Hadith,
+    HadithEmbedding,
+    HadithLength,
     KvPair,
+    Posting,
+    Term,
 )
 from models.schemas import (
     DocLengths,
@@ -37,9 +41,12 @@ __all__ = [
     "DocLengths",
     "Grade",
     "Hadith",
+    "HadithEmbedding",
+    "HadithLength",
     "HadithSchema",
     "InvertedIndex",
     "KvPair",
+    "Posting",
     "Lang",
     "Metrics",
     "QrelEntry",
@@ -48,4 +55,5 @@ __all__ = [
     "SearchRequest",
     "SearchResponse",
     "SearchResult",
+    "Term",
 ]

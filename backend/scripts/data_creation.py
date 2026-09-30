@@ -8,14 +8,13 @@ from pathlib import Path
 import pandas as pd
 from sqlalchemy import Integer, insert
 
-from database import drop_hadiths_table, get_sync_session, init_hadiths_table
+from database import drop_corpus_tables, get_sync_session, init_schema_sync
 from models import Hadith
 
 LK_REPO_URL = "https://github.com/ShathaTm/LK-Hadith-Corpus.git"
 
 SCRIPTS_DIR = Path(__file__).resolve().parent
 DATA_DIR = SCRIPTS_DIR.parent / "data"
-DB_PATH = DATA_DIR / "hadiths.db"
 DROPPED_ROWS_PATH = DATA_DIR / "dropped_lk_rows.json"
 RAW_DATA_DIR = DATA_DIR / "raw"
 DEFAULT_LK_PATH = RAW_DATA_DIR / "LK-Hadith-Corpus"
@@ -382,11 +381,8 @@ def _hadith_records(df):
 
 def create_database(df):
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    if DB_PATH.exists():
-        DB_PATH.unlink()
-
-    drop_hadiths_table()
-    init_hadiths_table()
+    drop_corpus_tables()
+    init_schema_sync()
     with get_sync_session() as session:
         session.execute(insert(Hadith), _hadith_records(df))
         session.commit()
@@ -412,7 +408,7 @@ def run():
     write_dropped_rows_audit(db_df.attrs.get("dropped_rows", []))
     create_database(db_df)
 
-    print(f"Created {DB_PATH} with {len(db_df)} hadiths")
+    print(f"Loaded {len(db_df)} hadiths")
     print("Reconstruction summary:")
     for key, count in db_df.attrs.get("reconstruction_summary", {}).items():
         print(f"  {key}: {count}")

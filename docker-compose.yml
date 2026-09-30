@@ -6,7 +6,11 @@ x-app: &app
     - "8000"
   environment:
     # annotation = lightweight (no E5/index preload), search = lazy E5, research = eager E5
-    - APP_MODE=annotation
+    # Set these in .env to change what the app serves. The defaults match the annotation preset.
+    - APP_MODE=${APP_MODE:-annotation}
+    - FEATURE_ANNOTATION=${FEATURE_ANNOTATION:-true}
+    - FEATURE_BENCHMARK=${FEATURE_BENCHMARK:-false}
+    - FEATURE_DENSE_RETRIEVAL=${FEATURE_DENSE_RETRIEVAL:-false}
     # Comma-separated origins, or * for all (disables credentials)
     - CORS_ORIGINS=*
     # The password goes into a URL, so keep it to letters, digits, "-" and "_"

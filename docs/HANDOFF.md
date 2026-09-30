@@ -310,6 +310,17 @@ tools/deploy.sh stop-idle           # when you are sure, stop the old colour
 - Some dependency findings are unfixed, and the Docker image was not rebuilt or rescanned after the PostgreSQL and deploy changes.
 - CI has no job for the PostgreSQL tests: they need a pgvector database (see the quick start).
 
+## First run on a new machine
+
+What was done to get a working site, and what you still need:
+
+1. `.env` with `POSTGRES_PASSWORD`, `AUTH_SECRET` and, to serve keyword search, `APP_MODE=search`, `FEATURE_ANNOTATION=false`, `FEATURE_BENCHMARK=false`, `FEATURE_DENSE_RETRIEVAL=false`. Compose passes these through (defaults: annotation mode).
+2. `docker build -t hadith-search:blue .`, then `tools/deploy.sh init`.
+3. Load the corpus and the BM25 index inside the image, with a clone of the LK corpus mounted (the image has no git): `python scripts/build_all.py --force --skip-embeddings` with `LK_HADITH_CORPUS_PATH` set. It took about 50 minutes on 4 CPU cores, almost all of it Arabic preprocessing. Result: 33,064 hadiths and 1.4 million postings.
+4. `Section_Number` and `Hadith_Number` are text, because the corpus has ranges such as `622 -623` (129 rows) and `5, 6` (153 rows).
+
+**Missing on this machine:** `backend/data/queries.json` (the 20 evaluation queries) is git-ignored and is not in the GitHub repository, so sign-up, annotation and the benchmark fail without it (sign-up returns a 500). Get it from Marawan and copy it into the `hadith-search_hadith-data` volume, then set `FEATURE_ANNOTATION=true` and `FEATURE_BENCHMARK=true`. Semantic search needs `scripts/build_embeddings.py`, which needs a GPU to be practical.
+
 ## Quick start after pulling
 
 ```bash

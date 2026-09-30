@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 
 from models import Hadith, HadithEmbedding, HadithLength, Posting, Term
 from scripts.preprocess import normalize_arabic_text, preprocess_arabic, preprocess_english
-from scripts.search import cross_encoder_rerank, rrf_fusion
+from scripts.search import rrf_fusion
 
 K1 = 1.2
 B = 0.75
@@ -272,40 +272,3 @@ def bm25_dense_rrf(
     """Reciprocal rank fusion of the BM25 and dense rankings."""
     fused = _fused_candidates(session, query, lang, model, candidate_k, restrict)
     return dict(list(fused.items())[:top_k])
-
-
-def _texts(session: Session, lang: str, ids: list[int]) -> dict[int, str]:
-    """Display text of the given hadiths (what the cross-encoder reads), missing ones omitted."""
-    text = Hadith.Arabic_Text if lang == "AR" else Hadith.English_Text
-    rows = session.execute(select(Hadith.id, text).where(Hadith.id.in_(ids)))
-    return {int(hadith_id): value for hadith_id, value in rows if value is not None}
-
-
-def cross_encode(session: Session, query: str, lang: str, ids: list[int], top_k: int) -> Scores:
-    return cross_encoder_rerank(query, lang, ids, _texts(session, lang, ids), top_k)
-
-
-def bm25_cross_encoder(
-    session: Session,
-    query: str,
-    lang: str,
-    candidate_k: int = 100,
-    top_k: int = 100,
-) -> Scores:
-    candidates = list(bm25(session, query, lang, limit=candidate_k))
-    return cross_encode(session, query, lang, candidates, top_k)
-
-
-def final_pipeline(
-    session: Session,
-    query: str,
-    lang: str,
-    model,
-    restrict: Collection[int] | None = None,
-    candidate_k: int = 1000,
-    rerank_k: int = 100,
-    final_k: int = 100,
-) -> Scores:
-    """BM25 + dense candidates, fused with RRF, then reranked by the Jina cross-encoder."""
-    fused = _fused_candidates(session, query, lang, model, candidate_k, restrict)
-    return cross_encode(session, query, lang, list(fused)[:rerank_k], final_k)

@@ -40,15 +40,6 @@ def pool_query(
         "BM25_RRF": lambda: ranking.bm25_dense_rrf(
             session, query, language, model, candidate_k=500, top_k=per_system_size
         ),
-        "FINAL_PIPELINE": lambda: ranking.final_pipeline(
-            session,
-            query,
-            language,
-            model,
-            candidate_k=1000,
-            rerank_k=per_system_size,
-            final_k=per_system_size,
-        ),
     }
 
     pooled_ids: set[int] = set()
@@ -96,7 +87,6 @@ def run():
             "COSINE_SIMILARITY",
             "BM25_SEMANTIC_RERANK",
             "BM25_RRF",
-            "FINAL_PIPELINE",
         ],
         "queries": {},
     }

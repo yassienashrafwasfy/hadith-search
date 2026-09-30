@@ -138,7 +138,7 @@ After training, each adapter is evaluated by:
 
 1. Loading the base E5 model with the LoRA adapter applied
 2. Re-encoding all hadith passages with the adapted model
-3. Running all E5-dependent retrieval systems (cosine, semantic rerank, RRF, cross-encoder rerank, final pipeline) against the new embeddings
+3. Running all E5-dependent retrieval systems (cosine, semantic rerank, RRF) against the new embeddings
 4. Computing IR metrics against human-graded qrels
 
 **Run command**:

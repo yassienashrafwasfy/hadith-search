@@ -14,7 +14,6 @@ import { sortByGradeAndRelevance, sortByRelevance } from '../utils/sort';
 import type { Lang, SearchResult, SearchRequest } from '../types';
 
 const DEFAULT_ALGORITHM = 'bm25-prf';
-const ADVANCED_ALGORITHM = 'final-pipeline';
 const PAGE_SIZE = 20;
 
 const UserSearchPage = () => {
@@ -27,7 +26,6 @@ const UserSearchPage = () => {
   const [lang, setLang] = useState<Lang>((searchParams.get('lang') as Lang) || 'en');
   const [selectedGrade, setSelectedGrade] = useState<string | null>(searchParams.get('grade') || null);
   const [selectedBook, setSelectedBook] = useState<string | null>(searchParams.get('book') || null);
-  const [advancedMode, setAdvancedMode] = useState(searchParams.get('advanced') === 'true');
   const [rawResults, setRawResults] = useState<SearchResult[]>([]);
   const [responseTime, setResponseTime] = useState<number | null>(null);
   const [selectedResult, setSelectedResult] = useState<SearchResult | null>(null);
@@ -39,30 +37,26 @@ const UserSearchPage = () => {
     overrideLang?: Lang,
     overrideGrade?: string | null,
     overrideBook?: string | null,
-    overrideAdvanced?: boolean,
   ) => {
     const effectiveQuery = overrideQuery ?? query;
     const effectiveLang = overrideLang ?? lang;
     const effectiveGrade = overrideGrade ?? selectedGrade;
     const effectiveBook = overrideBook ?? selectedBook;
-    const effectiveAdvanced = overrideAdvanced ?? advancedMode;
     if (!effectiveQuery.trim()) return;
     const params = new URLSearchParams();
     params.set('q', effectiveQuery);
     params.set('lang', effectiveLang);
     if (effectiveGrade) params.set('grade', effectiveGrade);
     if (effectiveBook) params.set('book', effectiveBook);
-    if (effectiveAdvanced) params.set('advanced', 'true');
     setSearchParams(params, { replace: true });
 
-    const algorithm = effectiveAdvanced ? ADVANCED_ALGORITHM : DEFAULT_ALGORITHM;
     const request: SearchRequest = {
       query: effectiveQuery,
       lang: effectiveLang,
       grade_filter: effectiveGrade,
       book_filter: effectiveBook,
     };
-    search(algorithm, request).then((response) => {
+    search(DEFAULT_ALGORITHM, request).then((response) => {
       setRawResults(response.results);
       setResponseTime(response.response_time_ms ?? null);
       setCurrentPage(1);
@@ -80,14 +74,6 @@ const UserSearchPage = () => {
     setSelectedBook(book);
     if (query.trim()) {
       doSearch(undefined, undefined, grade, book);
-    }
-  };
-
-  const handleAdvancedToggle = () => {
-    const newAdvanced = !advancedMode;
-    setAdvancedMode(newAdvanced);
-    if (query.trim()) {
-      doSearch(undefined, undefined, undefined, undefined, newAdvanced);
     }
   };
 
@@ -138,20 +124,6 @@ const UserSearchPage = () => {
       <div className="flex flex-col sm:flex-row gap-4 flex-wrap items-start sm:items-end">
         <GradeFilter value={selectedGrade} onChange={(g) => handleFilterChange(g, selectedBook)} />
         <BookFilter value={selectedBook} onChange={(b) => handleFilterChange(selectedGrade, b)} />
-        <button
-          onClick={handleAdvancedToggle}
-          className={`flex items-center gap-2 px-4 py-2.5 rounded-lg font-ui-label text-ui-label transition-all border ${
-            advancedMode
-              ? 'bg-primary dark:bg-dark-primary text-on-primary dark:text-dark-on-primary border-primary dark:border-dark-primary'
-              : 'bg-surface dark:bg-dark-surface text-on-surface-variant dark:text-dark-on-surface-variant border-outline dark:border-dark-outline hover:border-primary dark:hover:border-dark-primary'
-          }`}
-          title={t('user.advancedSearchDesc')}
-        >
-          <span className="material-symbols-outlined text-[18px]">
-            {advancedMode ? 'auto_awesome' : 'psychology'}
-          </span>
-          {t('user.advancedSearch')}
-        </button>
       </div>
 
       {errors.search && (

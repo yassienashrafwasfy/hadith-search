@@ -106,19 +106,6 @@ def test_bm25_candidates_are_restricted_to_the_eval_pool(monkeypatch):
     }
 
 
-def test_cross_encoder_gets_the_bm25_candidates(monkeypatch):
-    seen = {}
-    monkeypatch.setattr(ep.ranking, "bm25", lambda *a, **k: {3: 5.0, 1: 2.0})
-
-    def fake(session, query, lang, ids, top_k):
-        seen.update(ids=ids, top_k=top_k)
-        return {1: 1.0}
-
-    monkeypatch.setattr(ep.ranking, "cross_encode", fake)
-    assert ep.simulated_pipeline(_Res, "prayer", "EN", "cross-encoder") == {1: 1.0}
-    assert seen == {"ids": [3, 1], "top_k": 100}
-
-
 def test_every_system_is_registered():
     assert set(ep.build_systems(_Res)) == {
         "BM25",
@@ -130,6 +117,4 @@ def test_every_system_is_registered():
         "COSINE_SIMILARITY",
         "BM25_SEMANTIC_RERANK",
         "BM25_RRF",
-        "BM25_CROSS_ENCODER",
-        "FINAL_PIPELINE",
     }

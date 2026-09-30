@@ -214,17 +214,13 @@ Both pipelines are run over three text fields (full text, isnad, matn) independe
 | BM25 + PRF | Sparse | BM25 with pseudo-relevance feedback query expansion |
 | BM25 + TF-IDF + PRF | Sparse | Hybrid with PRF |
 | Cosine Similarity | Dense | E5 embeddings, cosine similarity |
-| Semantic Rerank | Dense | Cosine results reranked by cross-encoder |
+| Semantic Rerank | Dense | BM25 candidates reranked by cosine similarity |
 | Semantic RRF | Dense+Sparse | Reciprocal Rank Fusion of BM25 and cosine |
-| Cross-Encoder Rerank | Dense | BM25 results reranked by Jina reranker API |
-| Final Pipeline | Dense | BM25 → Cosine rerank → Jina rerank |
 
 **Dense retrieval details**:
 - Model: `intfloat/multilingual-e5-large`
 - Query prefix: `query: {text}`
 - Passage prefix: `passage: {Matn}`; Arabic passages use query-side light normalization and diacritic removal. Building, training, and fine-tuned re-encoding share this representation. Existing embedding files require regeneration before claiming matn-only provenance.
-- Reranker: Jina AI `jina-reranker-v3` via API (`JINA_API_KEY` env var)
-- Rate limit: 30-second wait enforced between Jina API calls
 
 **Sparse retrieval details**:
 - Index: `terms`, `postings`, `hadith_lengths` tables
@@ -307,7 +303,7 @@ The annotation platform is a web UI where human annotators rate hadith relevance
 3. Grades are stored per-annotator in PostgreSQL
 4. The annotation router exports merged qrels and computes inter-annotator Kappa on demand
 
-**Pooling** (`pooling.py`): Candidates are the union of top-50 results from six selected systems: BM25, BM25_ROCCHIO, COSINE_SIMILARITY, BM25_SEMANTIC_RERANK, BM25_RRF, and FINAL_PIPELINE. Outputs: `qrels_ungraded.json` and `pooling_manifest.json`, including contribution counts and failures. A failed contributor blocks pool export unless partial pooling is explicitly enabled.
+**Pooling** (`pooling.py`): Candidates are the union of top-50 results from five selected systems: BM25, BM25_ROCCHIO, COSINE_SIMILARITY, BM25_SEMANTIC_RERANK and BM25_RRF. Outputs: `qrels_ungraded.json` and `pooling_manifest.json`, including contribution counts and failures. A failed contributor blocks pool export unless partial pooling is explicitly enabled.
 
 **Important**: If the corpus changes (new `hadiths.db`), existing annotation assignments reference stale hadith IDs. Annotation must be restarted from scratch after any corpus rebuild.
 
@@ -363,7 +359,6 @@ The annotation platform is a web UI where human annotators rate hadith relevance
 
 | Variable | Purpose |
 |----------|---------|
-| `JINA_API_KEY` | Jina reranker API key |
 | `LK_HADITH_CORPUS_PATH` | Override path to LK clone |
 | `APP_MODE` | Control which app features load |
 | `FINETUNED_ADAPTER_PATH` | Path to a LoRA adapter to load for search |
@@ -446,6 +441,4 @@ These are design constraints that must be maintained for the system to function 
 
 5. **`APP_MODE=annotation` must not import E5 or BM25 loaders.** The annotation deployment environment does not have enough RAM. Routers that depend on search/benchmark functionality are conditionally loaded in `main.py`.
 
-6. **Jina reranker calls must respect the 30-second rate limit.** `wait_for_jina_rate_limit()` in `search.py` enforces this. Do not remove it.
-
-7. **Evaluation must use human-annotated qrels, not LLM-graded ones.** LLM grades are used only for the training data (`training_qrels_graded.json`). The 20 eval queries use `qrels_graded.json` from human annotators. These must not be mixed.
+6. **Evaluation must use human-annotated qrels, not LLM-graded ones.** LLM grades are used only for the training data (`training_qrels_graded.json`). The 20 eval queries use `qrels_graded.json` from human annotators. These must not be mixed.

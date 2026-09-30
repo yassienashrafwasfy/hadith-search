@@ -21,13 +21,13 @@
 │       │              │               │                       │
 │  ┌────▼──────────────▼───────────────▼──────────────────┐   │
 │  │                  scripts/search.py                    │   │
-│  │           11 retrieval systems                        │   │
+│  │           8 retrieval systems                         │   │
 │  └───────────┬──────────────────────┬────────────────────┘   │
 │              │                      │                        │
 │  ┌───────────▼──────┐  ┌────────────▼────────────────────┐  │
 │  │  Sparse Index    │  │  Dense Index                    │  │
 │  │  BM25 / TF-IDF   │  │  E5 embeddings (pgvector)       │  │
-│  │  (postings SQL)  │  │  + Jina reranker API            │  │
+│  │  (postings SQL)  │  │                                 │  │
 │  └───────────┬──────┘  └────────────┬────────────────────┘  │
 │              │                      │                        │
 │  ┌───────────▼──────────────────────▼────────────────────┐  │
@@ -35,12 +35,6 @@
 │  │   33,064 rows × bilingual matn-complete corpus         │  │
 │  └────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────┘
-                             │
-              ┌──────────────▼──────────────┐
-              │       Jina AI API           │
-              │  jina-reranker-v3           │
-              │  (external, rate-limited)   │
-              └─────────────────────────────┘
 ```
 
 ---
@@ -109,8 +103,7 @@ routers/search.py
   └── Dense path:
         ├── Format: "query: {query_text}"
         ├── Encode with E5 model (loading.py LRU cache)
-        ├── Cosine similarity against embedding array (npy)
-        └── Optional: rerank with Jina API
+        └── Cosine distance against the embeddings in PostgreSQL (pgvector)
                 │
                 ▼
         Top-k hadith IDs → fetch from the hadiths table → return JSON

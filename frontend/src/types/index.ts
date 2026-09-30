@@ -71,9 +71,7 @@ export type Algorithm =
   | 'bm25-prf'
   | 'semantic-rerank'
   | 'cosine-similarity'
-  | 'semantic-rrf'
-  | 'final-pipeline'
-  | 'cross-encoder-rerank';
+  | 'semantic-rrf';
 
 export const ALGORITHMS: { value: Algorithm; label: string; endpoint: string }[] = [
   { value: 'term-overlap', label: 'Term Overlap', endpoint: 'term-overlap' },
@@ -84,6 +82,4 @@ export const ALGORITHMS: { value: Algorithm; label: string; endpoint: string }[]
   { value: 'semantic-rerank', label: 'Semantic Rerank', endpoint: 'semantic-rerank' },
   { value: 'cosine-similarity', label: 'Cosine Similarity', endpoint: 'cosine-similarity' },
   { value: 'semantic-rrf', label: 'Semantic RRF', endpoint: 'semantic-rrf' },
-  { value: 'final-pipeline', label: 'Final Pipeline', endpoint: 'final-pipeline' },
-  { value: 'cross-encoder-rerank', label: 'Cross-Encoder Rerank', endpoint: 'cross-encoder-rerank' },
 ];

@@ -19,8 +19,6 @@ const ALGO_LABELS: Record<string, string> = {
   'Cosine Similarity': 'Cosine Similarity',
   'BM25 + Semantic Rerank': 'BM25 + Semantic Rerank',
   'BM25 + RRF': 'BM25 + RRF',
-  'BM25 + Cross-Encoder': 'BM25 + Cross-Encoder',
-  'Final Pipeline': 'Final Pipeline',
 };
 
 const DevBenchmarkPage = () => {

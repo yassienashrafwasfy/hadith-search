@@ -19,7 +19,6 @@ _PRESETS: dict[str, dict[str, bool]] = {
         "search": False,
         "benchmark": False,
         "dense_retrieval": False,
-        "cross_encoder": False,
         "eager_model": False,
     },
     "search": {"eager_model": False},
@@ -34,7 +33,6 @@ class Features:
     benchmark: bool = True
     search: bool = True
     dense_retrieval: bool = True  # E5 embeddings + model (semantic endpoints)
-    cross_encoder: bool = True  # Jina reranker (needs JINA_API_KEY)
     eager_model: bool = False  # load the E5 model at startup instead of on first request
     finetuned_adapter_path: str = ""  # LoRA adapter merged into the E5 model when set
 
@@ -57,7 +55,7 @@ def load_features(env: Mapping[str, str] | None = None) -> Features:
         load_dotenv()
         env = os.environ
 
-    values: dict = {"cross_encoder": bool(env.get("JINA_API_KEY"))}
+    values: dict = {}
     values.update(_PRESETS.get(env.get("APP_MODE", "search"), {}))
     for field in fields(Features):
         if field.type is bool:

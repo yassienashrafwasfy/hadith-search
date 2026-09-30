@@ -25,13 +25,9 @@ def test_router_groups_toggle_independently():
     assert not any(p.startswith(prefixes) for p in paths)
 
 
-def test_dense_and_cross_encoder_gate_endpoints():
-    lexical = {
-        s.slug for s in enabled_systems(Features(dense_retrieval=False, cross_encoder=False))
-    }
+def test_dense_flag_gates_endpoints():
+    lexical = {s.slug for s in enabled_systems(Features(dense_retrieval=False))}
     assert lexical == {"term-overlap", "tfidf", "bm25", "bm25-tf-idf", "bm25-prf"}
-    no_jina = {s.slug for s in enabled_systems(Features(cross_encoder=False))}
-    assert "semantic-rrf" in no_jina and "final-pipeline" not in no_jina
     assert {s.slug for s in enabled_systems(Features())} == set(SYSTEMS)
     assert enabled_systems(Features(search=False)) == []
 

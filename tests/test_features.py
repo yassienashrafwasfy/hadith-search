@@ -3,14 +3,9 @@ import pytest
 from features import Features, load_features
 
 
-def test_defaults_follow_jina_key():
-    assert load_features({}).cross_encoder is False
-    assert load_features({"JINA_API_KEY": "k"}).cross_encoder is True
-
-
 def test_annotation_preset_disables_search_stack():
     f = load_features({"APP_MODE": "annotation"})
-    assert (f.search, f.benchmark, f.dense_retrieval, f.cross_encoder) == (False,) * 4
+    assert (f.search, f.benchmark, f.dense_retrieval) == (False,) * 3
     assert f.annotation and f.kv_pairs
 
 

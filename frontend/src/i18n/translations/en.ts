@@ -10,8 +10,6 @@ const en: Record<string, string> = {
   'user.subtitle': 'Search across 33,000+ authenticated prophetic narrations with ease. Explore the six canonical collections.',
   'user.searchTitle': 'Search Hadith',
   'user.searchSubtitle': 'Enter your query below and use filters to refine your search.',
-  'user.advancedSearch': 'Advanced Search',
-  'user.advancedSearchDesc': 'Uses the full pipeline (BM25 → Semantic Rerank → Cross-Encoder) for highest quality results. May take longer.',
   'dev.homeTitle': 'Dev Mode — Hadith Search',
   'dev.homeSubtitle': 'Search, benchmark, and compare retrieval algorithms.',
   'dev.baseQuery': 'Query',

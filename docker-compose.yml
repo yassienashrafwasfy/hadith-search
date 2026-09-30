@@ -17,7 +17,6 @@ x-app: &app
     - DATABASE_URL=postgresql+psycopg://hadith:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/hadith
     # Must be the same on both colours so a token from one is accepted by the other
     - AUTH_SECRET=${AUTH_SECRET:?Set AUTH_SECRET in .env}
-    # - JINA_API_KEY=your_key_here
   volumes:
     # Query lists, qrels and evaluation outputs (the corpus, index and embeddings are in postgres)
     - hadith-data:/app/backend/data

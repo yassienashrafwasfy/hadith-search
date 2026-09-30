@@ -1,5 +1,24 @@
 {
  "AP": {
+  "BM25_ROCCHIO vs BM25": {
+   "direction": "better",
+   "mean_diff": 0.17500000000000002,
+   "n_queries": 8,
+   "t_test": {
+    "p_value": 0.003120383434329842,
+    "significant_at_0.01": true,
+    "significant_at_0.05": true,
+    "t_statistic": 4.409585518440983,
+    "test": "paired_t"
+   },
+   "wilcoxon": {
+    "p_value": 0.0078125,
+    "significant_at_0.01": true,
+    "significant_at_0.05": true,
+    "statistic": 0.0,
+    "test": "wilcoxon"
+   }
+  },
   "BM25_RRF vs BM25": {
    "direction": "better",
    "mean_diff": 0.13125,
@@ -35,25 +54,6 @@
     "significant_at_0.01": false,
     "significant_at_0.05": true,
     "statistic": 3.0,
-    "test": "wilcoxon"
-   }
-  },
-  "FINAL_PIPELINE vs BM25": {
-   "direction": "better",
-   "mean_diff": 0.17500000000000002,
-   "n_queries": 8,
-   "t_test": {
-    "p_value": 0.003120383434329842,
-    "significant_at_0.01": true,
-    "significant_at_0.05": true,
-    "t_statistic": 4.409585518440983,
-    "test": "paired_t"
-   },
-   "wilcoxon": {
-    "p_value": 0.0078125,
-    "significant_at_0.01": true,
-    "significant_at_0.05": true,
-    "statistic": 0.0,
     "test": "wilcoxon"
    }
   },
@@ -78,6 +78,25 @@
   }
  },
  "F1@20": {
+  "BM25_ROCCHIO vs BM25": {
+   "direction": "better",
+   "mean_diff": 0.17500000000000002,
+   "n_queries": 8,
+   "t_test": {
+    "p_value": 0.003120383434329839,
+    "significant_at_0.01": true,
+    "significant_at_0.05": true,
+    "t_statistic": 4.409585518440984,
+    "test": "paired_t"
+   },
+   "wilcoxon": {
+    "p_value": 0.0078125,
+    "significant_at_0.01": true,
+    "significant_at_0.05": true,
+    "statistic": 0.0,
+    "test": "wilcoxon"
+   }
+  },
   "BM25_RRF vs BM25": {
    "direction": "better",
    "mean_diff": 0.13125,
@@ -113,25 +132,6 @@
     "significant_at_0.01": false,
     "significant_at_0.05": true,
     "statistic": 3.0,
-    "test": "wilcoxon"
-   }
-  },
-  "FINAL_PIPELINE vs BM25": {
-   "direction": "better",
-   "mean_diff": 0.17500000000000002,
-   "n_queries": 8,
-   "t_test": {
-    "p_value": 0.003120383434329839,
-    "significant_at_0.01": true,
-    "significant_at_0.05": true,
-    "t_statistic": 4.409585518440984,
-    "test": "paired_t"
-   },
-   "wilcoxon": {
-    "p_value": 0.0078125,
-    "significant_at_0.01": true,
-    "significant_at_0.05": true,
-    "statistic": 0.0,
     "test": "wilcoxon"
    }
   },
@@ -156,6 +156,25 @@
   }
  },
  "P@20": {
+  "BM25_ROCCHIO vs BM25": {
+   "direction": "better",
+   "mean_diff": 0.175,
+   "n_queries": 8,
+   "t_test": {
+    "p_value": 0.003120383434329842,
+    "significant_at_0.01": true,
+    "significant_at_0.05": true,
+    "t_statistic": 4.409585518440983,
+    "test": "paired_t"
+   },
+   "wilcoxon": {
+    "p_value": 0.0078125,
+    "significant_at_0.01": true,
+    "significant_at_0.05": true,
+    "statistic": 0.0,
+    "test": "wilcoxon"
+   }
+  },
   "BM25_RRF vs BM25": {
    "direction": "better",
    "mean_diff": 0.13124999999999998,
@@ -194,25 +213,6 @@
     "test": "wilcoxon"
    }
   },
-  "FINAL_PIPELINE vs BM25": {
-   "direction": "better",
-   "mean_diff": 0.175,
-   "n_queries": 8,
-   "t_test": {
-    "p_value": 0.003120383434329842,
-    "significant_at_0.01": true,
-    "significant_at_0.05": true,
-    "t_statistic": 4.409585518440983,
-    "test": "paired_t"
-   },
-   "wilcoxon": {
-    "p_value": 0.0078125,
-    "significant_at_0.01": true,
-    "significant_at_0.05": true,
-    "statistic": 0.0,
-    "test": "wilcoxon"
-   }
-  },
   "TF_IDF vs BM25": {
    "direction": "better",
    "mean_diff": 0.04374999999999998,
@@ -234,6 +234,25 @@
   }
  },
  "R@20": {
+  "BM25_ROCCHIO vs BM25": {
+   "direction": "better",
+   "mean_diff": 0.17500000000000002,
+   "n_queries": 8,
+   "t_test": {
+    "p_value": 0.003120383434329842,
+    "significant_at_0.01": true,
+    "significant_at_0.05": true,
+    "t_statistic": 4.409585518440983,
+    "test": "paired_t"
+   },
+   "wilcoxon": {
+    "p_value": 0.0078125,
+    "significant_at_0.01": true,
+    "significant_at_0.05": true,
+    "statistic": 0.0,
+    "test": "wilcoxon"
+   }
+  },
   "BM25_RRF vs BM25": {
    "direction": "better",
    "mean_diff": 0.13125,
@@ -272,25 +291,6 @@
     "test": "wilcoxon"
    }
   },
-  "FINAL_PIPELINE vs BM25": {
-   "direction": "better",
-   "mean_diff": 0.17500000000000002,
-   "n_queries": 8,
-   "t_test": {
-    "p_value": 0.003120383434329842,
-    "significant_at_0.01": true,
-    "significant_at_0.05": true,
-    "t_statistic": 4.409585518440983,
-    "test": "paired_t"
-   },
-   "wilcoxon": {
-    "p_value": 0.0078125,
-    "significant_at_0.01": true,
-    "significant_at_0.05": true,
-    "statistic": 0.0,
-    "test": "wilcoxon"
-   }
-  },
   "TF_IDF vs BM25": {
    "direction": "better",
    "mean_diff": 0.04375000000000001,
@@ -312,6 +312,25 @@
   }
  },
  "RR": {
+  "BM25_ROCCHIO vs BM25": {
+   "direction": "better",
+   "mean_diff": 0.175,
+   "n_queries": 8,
+   "t_test": {
+    "p_value": 0.003120383434329842,
+    "significant_at_0.01": true,
+    "significant_at_0.05": true,
+    "t_statistic": 4.409585518440983,
+    "test": "paired_t"
+   },
+   "wilcoxon": {
+    "p_value": 0.0078125,
+    "significant_at_0.01": true,
+    "significant_at_0.05": true,
+    "statistic": 0.0,
+    "test": "wilcoxon"
+   }
+  },
   "BM25_RRF vs BM25": {
    "direction": "better",
    "mean_diff": 0.13124999999999998,
@@ -350,25 +369,6 @@
     "test": "wilcoxon"
    }
   },
-  "FINAL_PIPELINE vs BM25": {
-   "direction": "better",
-   "mean_diff": 0.175,
-   "n_queries": 8,
-   "t_test": {
-    "p_value": 0.003120383434329842,
-    "significant_at_0.01": true,
-    "significant_at_0.05": true,
-    "t_statistic": 4.409585518440983,
-    "test": "paired_t"
-   },
-   "wilcoxon": {
-    "p_value": 0.0078125,
-    "significant_at_0.01": true,
-    "significant_at_0.05": true,
-    "statistic": 0.0,
-    "test": "wilcoxon"
-   }
-  },
   "TF_IDF vs BM25": {
    "direction": "better",
    "mean_diff": 0.04374999999999998,
@@ -390,6 +390,25 @@
   }
  },
  "nDCG@20": {
+  "BM25_ROCCHIO vs BM25": {
+   "direction": "better",
+   "mean_diff": 0.28,
+   "n_queries": 8,
+   "t_test": {
+    "p_value": 0.0,
+    "significant_at_0.01": true,
+    "significant_at_0.05": true,
+    "t_statistic": Infinity,
+    "test": "paired_t"
+   },
+   "wilcoxon": {
+    "p_value": 0.0078125,
+    "significant_at_0.01": true,
+    "significant_at_0.05": true,
+    "statistic": 0.0,
+    "test": "wilcoxon"
+   }
+  },
   "BM25_RRF vs BM25": {
    "direction": "better",
    "mean_diff": 0.21,
@@ -412,25 +431,6 @@
   "COSINE_SIMILARITY vs BM25": {
    "direction": "better",
    "mean_diff": 0.13999999999999999,
-   "n_queries": 8,
-   "t_test": {
-    "p_value": 0.0,
-    "significant_at_0.01": true,
-    "significant_at_0.05": true,
-    "t_statistic": Infinity,
-    "test": "paired_t"
-   },
-   "wilcoxon": {
-    "p_value": 0.0078125,
-    "significant_at_0.01": true,
-    "significant_at_0.05": true,
-    "statistic": 0.0,
-    "test": "wilcoxon"
-   }
-  },
-  "FINAL_PIPELINE vs BM25": {
-   "direction": "better",
-   "mean_diff": 0.28,
    "n_queries": 8,
    "t_test": {
     "p_value": 0.0,

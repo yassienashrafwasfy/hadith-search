@@ -1,12 +1,12 @@
 # Handoff: changes since Marawan's last commit
 
-Marawan's last commit is `93a4ff9` ("Align matn embeddings, training passages, and evaluation"). Everything below was added on top of it in 31 commits (the last ones are the REST API, items 16 and 17, the security pass, item 18, nginx with the sign-in limit, item 19, PostgreSQL with pgvector, item 20, and blue/green and canary releases, item 21): about 140 files. All 425 tests pass (1 skipped: it needs NLTK data). The tests need a PostgreSQL with pgvector, see item 20. The work sits on the branch `feat/blue-green-canary`, which builds on `feat/postgres-pgvector`, `feat/rest-api-v1`, `chore/dockerfile-hardening` and `chore/precommit-hooks`, and has not been pushed.
+Marawan's last commit is `93a4ff9` ("Align matn embeddings, training passages, and evaluation"). Everything below was added on top of it in 34 commits (the last ones are the REST API, items 16 and 17, the security pass, item 18, nginx with the sign-in limit, item 19, PostgreSQL with pgvector, item 20, and blue/green and canary releases, item 21): about 140 files. All 418 tests pass (1 skipped: it needs NLTK data). The tests need a PostgreSQL with pgvector, see item 20. The work sits on the branch `feat/blue-green-canary`, which builds on `feat/postgres-pgvector`, `feat/rest-api-v1`, `chore/dockerfile-hardening` and `chore/precommit-hooks`, and has not been pushed.
 
 Each change has the same three lines: which files, why this is the normal way to do it, and what you get out of it.
 
 ## Read this first
 
-1. **The Jina key was renamed.** The code used to read `JINA_API_KEY2`. It now reads `JINA_API_KEY`. Rename it in your `.env` and in the server settings, or reranking stops working.
+1. **The Jina reranker is gone** (item 22). `JINA_API_KEY` is no longer read, so you can delete it from your `.env` and server settings.
 2. **The database (now PostgreSQL, item 20) enforces foreign keys.** Links between tables are declared in the models and Postgres blocks a bad link and cascades deletes. Tables are created with `create_all`: it adds missing tables and never changes existing ones, and there are no migrations.
 3. **The diff looks bigger than the real change.** Every Python file was reformatted to one style, so many lines only moved or wrapped differently. Read the commit messages first, then the files.
 4. **Libraries were upgraded** to fix known security holes: numpy 1.26 to 2.5, transformers 4.43 to 5.17, starlette 0.52 to 1.3, nltk 3.9 to 3.10. The tests pass, but I could not test saved index files (`.pkl`) built with the old numpy, because this copy has no real data. If loading fails, rebuild them. A full fine-tuning run and the real E5 model were also not re-run.
@@ -48,7 +48,7 @@ Each change has the same three lines: which files, why this is the normal way to
 
 **Files:** `tests/` (22 test files), `tests/conftest.py`, `pyproject.toml`, `requirements-dev.txt`
 
-**Why it's best practice:** Tests need no real data, internet or GPU. `conftest.py` builds a 3-hadith corpus, a small search index, fake embeddings, a fake E5 model and a fake Jina API. Every test gets its own temporary database file, so `pytest-xdist` can run them in parallel (`-n auto`) without clashing. Fixtures and helpers start with `_` so it is clear they are not called directly. The virtual environment is named `.venv` and uses Python 3.12, the same as the Dockerfile.
+**Why it's best practice:** Tests need no real data, internet or GPU. `conftest.py` builds a 3-hadith corpus, a small search index, fake embeddings, and a fake E5 model. Every test gets its own temporary database file, so `pytest-xdist` can run them in parallel (`-n auto`) without clashing. Fixtures and helpers start with `_` so it is clear they are not called directly. The virtual environment is named `.venv` and uses Python 3.12, the same as the Dockerfile.
 
 **Benefit:** The full suite takes under half a minute and runs the same on any machine. Run it with `.venv/bin/python -m pytest`.
 
@@ -74,7 +74,7 @@ Each change has the same three lines: which files, why this is the normal way to
 
 **Files:** `backend/features.py` (new), `backend/main.py`, `.env.example` (new)
 
-**Why it's best practice:** `main.py` used to read environment variables and build the app at import time. Now `create_app()` builds it and takes its settings as arguments, so tests can build an app with any combination of switches. Switches for optional parts (annotation, key-value pairs, benchmark, search, dense retrieval, Jina reranking, fine-tuned adapter) live in `features.py`. `APP_MODE` still works as a preset, and any `FEATURE_<NAME>` variable overrides it.
+**Why it's best practice:** `main.py` used to read environment variables and build the app at import time. Now `create_app()` builds it and takes its settings as arguments, so tests can build an app with any combination of switches. Switches for optional parts (annotation, key-value pairs, benchmark, search, dense retrieval, fine-tuned adapter) live in `features.py`. `APP_MODE` still works as a preset, and any `FEATURE_<NAME>` variable overrides it.
 
 **Benefit:** You can run a light version (annotation only) or the full search stack without editing code. `.env.example` lists every variable without holding real keys.
 
@@ -302,6 +302,22 @@ tools/deploy.sh stop-idle           # when you are sure, stop the old colour
 - **Behind another proxy** (see item 19) every client may share one address, so a canary would send all or none of them to the new colour. Fix the real address first.
 - **One colour is live at a time in the state file.** Do not run two `deploy.sh` commands at once.
 
+### 22. The Jina reranker methods are removed
+
+**Files:** `backend/scripts/search.py`, `backend/services/ranking.py`, `backend/services/retrieval.py`, `backend/features.py`, `backend/scripts/eval_pipeline.py`, `backend/scripts/pooling.py`, `backend/scripts/stats_tests.py`, `frontend/src/pages/UserSearchPage.tsx`, `frontend/src/types/index.ts`, tests and snapshots, `.env.example`, `docker-compose.yml`, `README.md`, `CLAUDE.md`, `docs/`
+
+**What changed:** the two search methods that called an outside API are gone: `cross-encoder-rerank` and `final-pipeline` (both used the Jina `jina-reranker-v3` API). With them went the `FEATURE_CROSS_ENCODER` flag, `JINA_API_KEY`, the 30-second Jina rate limit, the "Advanced search" button on the user search page, and the `BM25_CROSS_ENCODER` and `FINAL_PIPELINE` systems in the evaluation and pooling code. The app now has 8 search methods, and none of them calls an outside service. The LLM scripts (`llm_grader.py`, `kv_generator.py`) are offline tools, not search methods, and were left alone.
+
+**Effects you should know about:**
+
+- **The user search page** always uses `bm25-prf`. The toggle that switched it to `final-pipeline` is removed.
+- **Pooling** now takes the union of five systems instead of six, and `E5_DEPENDENT_SYSTEMS` lost `FINAL_PIPELINE`. If you already built `qrels_ungraded.json` with the old six, the pool and any human labels made on it still stand, but a fresh pooling run gives a pool without the Jina system's top results. Do not mix the two when comparing.
+- **Earlier evaluation results** that include `BM25_CROSS_ENCODER` or `FINAL_PIPELINE` can no longer be reproduced by this code.
+- **Snapshot tests:** the synthetic systems in `tests/test_snapshots.py` changed (its fifth system is now `BM25_ROCCHIO`) and the golden files were regenerated.
+- **Docs:** `README.md`, `docs/WIKI.md`, `docs/ARCHITECTURE.md`, `docs/EVALUATION.md` and `docs/FINE_TUNING.md` no longer list the two methods. Older items in this note that mention Jina describe how things were then.
+
+**Not checked here:** I did not open the frontend in a browser after removing the toggle. `tsc` shows the same 6 errors as before the change, none in the files I touched.
+
 ## Still open
 
 - Nothing has been pushed and no PR exists. Everything is on local branches.
@@ -328,7 +344,7 @@ uv venv --python 3.12 .venv
 uv pip install --python .venv/bin/python -r requirements-dev.txt
 .venv/bin/pre-commit install
 .venv/bin/python -m pytest
-cp .env.example .env    # then fill in DATABASE_URL, POSTGRES_PASSWORD, AUTH_SECRET, JINA_API_KEY and anything else you need
+cp .env.example .env    # then fill in DATABASE_URL, POSTGRES_PASSWORD, AUTH_SECRET and anything else you need
 docker run -d -p 55432:5432 -e POSTGRES_PASSWORD=test-only-password -e POSTGRES_DB=hadith_test pgvector/pgvector:pg17   # for the tests
 tools/test-nginx.sh     # nginx limits and blue/green routing (needs Docker)
 ```

@@ -15,7 +15,6 @@ from services import ranking
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data")
 
 BM25_CANDIDATES = 500
-CROSS_ENCODER_CANDIDATES = 100
 COSINE_TOP_K = 20
 METRIC_NAMES = ("AP", "RR", "P@20", "R@20", "F1@20")
 
@@ -87,12 +86,7 @@ def _rrf(res, query, language):
     return ranking.bm25_dense_rrf(res.session, query, language, res.model, restrict=res.eval_ids)
 
 
-def _cross_encoder(res, query, language):
-    candidates = _bm25_candidates(res, query, language)[:CROSS_ENCODER_CANDIDATES]
-    return ranking.cross_encode(res.session, query, language, candidates, top_k=100)
-
-
-_SIMULATED = {"bi-encoder": _bi_encoder, "rrf": _rrf, "cross-encoder": _cross_encoder}
+_SIMULATED = {"bi-encoder": _bi_encoder, "rrf": _rrf}
 
 
 def simulated_pipeline(res, query, language, model_type):
@@ -129,15 +123,11 @@ def _hybrid_systems(res):
     simulated = {
         "BM25_SEMANTIC_RERANK": "bi-encoder",
         "BM25_RRF": "rrf",
-        "BM25_CROSS_ENCODER": "cross-encoder",
     }
     systems = {
         name: (lambda q, lang, kind=kind: simulated_pipeline(res, q, lang, kind))
         for name, kind in simulated.items()
     }
-    systems["FINAL_PIPELINE"] = lambda q, lang: ranking.final_pipeline(
-        res.session, q, lang, res.model, restrict=res.eval_ids
-    )
     return systems
 
 

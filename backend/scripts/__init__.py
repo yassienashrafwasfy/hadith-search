@@ -11,7 +11,6 @@ from lazy_exports import exports_by_module, install
 
 _EXPORTS = {
     "scripts.search": [
-        "cross_encoder_rerank",
         "rrf_fusion",
     ],
     "scripts.loading": [
@@ -77,6 +76,5 @@ if TYPE_CHECKING:  # static analysis / IDE completion only
         preprocess_english,
     )
     from scripts.search import (  # noqa: F401
-        cross_encoder_rerank,
         rrf_fusion,
     )

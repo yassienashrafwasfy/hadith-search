@@ -95,16 +95,6 @@ def _semantic_rrf(ctx, query, lang):
     return ranking.bm25_dense_rrf(ctx.session, query, lang, ctx.model())
 
 
-@_system("cross-encoder-rerank", "cross_encoder")
-def _cross_encoder(ctx, query, lang):
-    return ranking.bm25_cross_encoder(ctx.session, query, lang)
-
-
-@_system("final-pipeline", "dense_retrieval", "cross_encoder")
-def _final_pipeline(ctx, query, lang):
-    return ranking.final_pipeline(ctx.session, query, lang, ctx.model())
-
-
 def enabled_systems(features: Features) -> list[RetrievalSystem]:
     return [system for system in SYSTEMS.values() if system.enabled(features)]
 

@@ -156,15 +156,6 @@ def _mock_preprocess(monkeypatch):
     return fake
 
 
-@pytest.fixture
-def _jina_env(monkeypatch):
-    """Set a fake Jina key and disable the 30s rate-limit sleep."""
-    import scripts.search as s
-
-    monkeypatch.setattr(s, "JINA_API_KEY", "test-key")
-    monkeypatch.setattr(s, "wait_for_jina_rate_limit", lambda: None)
-
-
 # ---------- evaluation data ----------
 
 
@@ -350,8 +341,8 @@ async def _search_index(_patched_paths, _hadiths_df, _embeddings):
 
 
 @pytest_asyncio.fixture
-async def _search_client(_search_index, _fake_model, _mock_preprocess, _jina_env, monkeypatch):
-    """App with every search endpoint over the test schema; model and Jina are fakes."""
+async def _search_client(_search_index, _fake_model, _mock_preprocess):
+    """App with every search endpoint over the test schema; the model is a fake."""
     from collections.abc import Iterator
 
     import database
@@ -367,27 +358,7 @@ async def _search_client(_search_index, _fake_model, _mock_preprocess, _jina_env
 
     app = FastAPI()
     install_error_handlers(app)
-    app.include_router(
-        make_search_router(Features(search=True, dense_retrieval=True, cross_encoder=True))
-    )
+    app.include_router(make_search_router(Features(search=True, dense_retrieval=True)))
     app.dependency_overrides[get_search_context] = context
-    # Jina API replaced: score by document order, no network
-    import scripts.search as s
-
-    class _FakeResp:
-        status_code = 200
-        text = ""
-
-        def __init__(self, n):
-            self._n = n
-
-        def json(self):
-            return {
-                "results": [{"index": i, "relevance_score": 1.0 - i * 0.1} for i in range(self._n)]
-            }
-
-    monkeypatch.setattr(
-        s.requests, "post", lambda url, headers, json: _FakeResp(len(json["documents"]))
-    )
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         yield c

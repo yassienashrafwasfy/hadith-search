@@ -347,7 +347,6 @@ E5_DEPENDENT_SYSTEMS = [
     "COSINE_SIMILARITY",
     "BM25_SEMANTIC_RERANK",
     "BM25_RRF",
-    "FINAL_PIPELINE",
 ]
 
 FINETUNE_MODES = ["triplet", "kv_pairs", "combined"]

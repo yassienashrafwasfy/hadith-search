@@ -1,34 +1,34 @@
 {
  "averages": {
   "AP": {
-   "combined": 16.35,
+   "combined": 17.45,
    "kv_pairs": -18.78,
-   "triplet": 39.23
+   "triplet": 41.89
   },
   "F1@20": {
-   "combined": 16.35,
+   "combined": 17.45,
    "kv_pairs": -18.78,
-   "triplet": 39.23
+   "triplet": 41.89
   },
   "P@20": {
-   "combined": 16.35,
+   "combined": 17.45,
    "kv_pairs": -18.78,
-   "triplet": 39.23
+   "triplet": 41.89
   },
   "R@20": {
-   "combined": 16.35,
+   "combined": 17.45,
    "kv_pairs": -18.78,
-   "triplet": 39.23
+   "triplet": 41.89
   },
   "RR": {
-   "combined": 16.35,
+   "combined": 17.45,
    "kv_pairs": -18.78,
-   "triplet": 39.23
+   "triplet": 41.89
   },
   "nDCG@20": {
-   "combined": 16.71,
+   "combined": 18.48,
    "kv_pairs": -20.83,
-   "triplet": 40.1
+   "triplet": 44.36
   }
  },
  "per_system": {
@@ -237,92 +237,6 @@
      "delta": 0.11999999999999994,
      "delta_pct": 50.0,
      "finetuned": 0.35999999999999993
-    }
-   }
-  },
-  "FINAL_PIPELINE": {
-   "AP": {
-    "combined": {
-     "baseline": 0.35374999999999995,
-     "delta": 0.0500000000000001,
-     "delta_pct": 14.13,
-     "finetuned": 0.40375000000000005
-    },
-    "triplet": {
-     "baseline": 0.35374999999999995,
-     "delta": 0.12,
-     "delta_pct": 33.92,
-     "finetuned": 0.47374999999999995
-    }
-   },
-   "F1@20": {
-    "combined": {
-     "baseline": 0.35375,
-     "delta": 0.050000000000000044,
-     "delta_pct": 14.13,
-     "finetuned": 0.40375000000000005
-    },
-    "triplet": {
-     "baseline": 0.35375,
-     "delta": 0.12,
-     "delta_pct": 33.92,
-     "finetuned": 0.47375
-    }
-   },
-   "P@20": {
-    "combined": {
-     "baseline": 0.35375,
-     "delta": 0.04999999999999999,
-     "delta_pct": 14.13,
-     "finetuned": 0.40375
-    },
-    "triplet": {
-     "baseline": 0.35375,
-     "delta": 0.12,
-     "delta_pct": 33.92,
-     "finetuned": 0.47375
-    }
-   },
-   "R@20": {
-    "combined": {
-     "baseline": 0.35374999999999995,
-     "delta": 0.050000000000000044,
-     "delta_pct": 14.13,
-     "finetuned": 0.40375
-    },
-    "triplet": {
-     "baseline": 0.35374999999999995,
-     "delta": 0.12000000000000005,
-     "delta_pct": 33.92,
-     "finetuned": 0.47375
-    }
-   },
-   "RR": {
-    "combined": {
-     "baseline": 0.35375,
-     "delta": 0.04999999999999999,
-     "delta_pct": 14.13,
-     "finetuned": 0.40375
-    },
-    "triplet": {
-     "baseline": 0.35375,
-     "delta": 0.12,
-     "delta_pct": 33.92,
-     "finetuned": 0.47375
-    }
-   },
-   "nDCG@20": {
-    "combined": {
-     "baseline": 0.37999999999999995,
-     "delta": 0.0500000000000001,
-     "delta_pct": 13.16,
-     "finetuned": 0.43000000000000005
-    },
-    "triplet": {
-     "baseline": 0.37999999999999995,
-     "delta": 0.12000000000000005,
-     "delta_pct": 31.58,
-     "finetuned": 0.5
     }
    }
   }

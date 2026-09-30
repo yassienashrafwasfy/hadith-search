@@ -14,8 +14,6 @@ SEARCH = "/api/v1/searches"
         "semantic-rerank",
         "cosine-similarity",
         "semantic-rrf",
-        "final-pipeline",
-        "cross-encoder-rerank",
     ],
 )
 async def test_every_search_method_returns_results(_search_client, method):
@@ -91,7 +89,7 @@ async def test_bad_search_requests_are_422(_search_client, params):
 async def test_search_methods_lists_links(_search_client):
     body = (await _search_client.get("/api/v1/search-methods")).json()
     slugs = [m["slug"] for m in body["methods"]]
-    assert "bm25" in slugs and "final-pipeline" in slugs
+    assert "bm25" in slugs and "semantic-rrf" in slugs
     template = body["methods"][0]["_links"]["search"]
     assert template["templated"] is True and "{q}" in template["href"]
 

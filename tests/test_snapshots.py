@@ -11,7 +11,7 @@ from scripts import llm_validation as lv
 from scripts import stats_tests as st
 
 _METRICS = ["AP", "RR", "P@20", "R@20", "F1@20", "nDCG@20"]
-_SYSTEMS = ["BM25", "TF_IDF", "COSINE_SIMILARITY", "BM25_RRF", "FINAL_PIPELINE"]
+_SYSTEMS = ["BM25", "TF_IDF", "COSINE_SIMILARITY", "BM25_RRF", "BM25_ROCCHIO"]
 
 
 def _results(offset, systems=_SYSTEMS, n=8):

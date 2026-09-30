@@ -34,14 +34,7 @@ camel_data -i disambig-mle-calima-msa-r13
 
 ### Environment Variables
 
-| Variable | Required For | Description |
-|----------|-------------|-------------|
-| `JINA_API_KEY` | Cross-encoder reranker & final pipeline | Jina AI API key for `jina-reranker-v3`. Not needed for the build pipeline or basic search. |
-
-Create a `.env` file in the project root:
-```
-JINA_API_KEY="your_key_here"
-```
+No API keys are needed for search or the build pipeline. Copy `.env.example` to `.env` and set `DATABASE_URL` (see the file for the other settings).
 
 ### Frontend
 
@@ -164,15 +157,12 @@ hadith-search/
 | **BM25 + TF-IDF (Hybrid)** | Combines BM25 and TF-IDF scores with weighted fusion |
 | **BM25 + PRF** | BM25 with pseudo-relevance feedback (query expansion) |
 | **Cosine Similarity** | Dense retrieval using vector embeddings and cosine similarity |
-| **Semantic Rerank** | Cosine similarity results reranked by cross-encoder |
+| **Semantic Rerank** | BM25 candidates reranked by cosine similarity |
 | **Semantic RRF** | Reciprocal Rank Fusion combining sparse (BM25) and dense (cosine) results |
-| **Cross-Encoder Rerank** | Direct reranking of BM25 results using Jina AI's reranker API |
-| **Final Pipeline** | Full pipeline: BM25 → Semantic Reranking → Cross Encoding |
 
 ### Search Architecture
 - **Sparse Retrieval**: BM25, TF-IDF, Term Overlap — Fast, interpretable, language-independent
 - **Dense Retrieval**: Cosine Similarity using `intfloat/multilingual-e5-large` embeddings
-- **Reranking**: Jina AI `jina-reranker-v3` API for precision improvement (requires `JINA_API_KEY`)
 - **Fusion**: Reciprocal Rank Fusion (RRF) for combining multiple retrieval methods
 
 ## Tech Stack

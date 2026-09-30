@@ -179,7 +179,9 @@ def _graded_relevant() -> dict[int, int]:
 @pytest.fixture(scope="session")
 def _pg_ready():
     """Skip DB tests with a clear message when no Postgres is reachable; enable pgvector once."""
-    engine = create_engine(TEST_DATABASE_URL, poolclass=NullPool)
+    engine = create_engine(
+        TEST_DATABASE_URL, poolclass=NullPool, connect_args={"connect_timeout": 3}
+    )
     try:
         with engine.begin() as conn:
             # xdist workers start together; the lock stops them racing on CREATE EXTENSION

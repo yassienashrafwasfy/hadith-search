@@ -54,6 +54,6 @@ def test_overall_summary():
 
 
 async def test_agreement_endpoint(_client, _auth_headers):
-    res = await _client.get("/annotation/stats/agreement", headers=_auth_headers)
+    res = await _client.get("/api/v1/agreement", headers=_auth_headers)
     assert res.status_code == 200
     assert res.json()["overall"]["total_queries"] == 3

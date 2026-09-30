@@ -12,16 +12,17 @@ def _paths(app):
 def test_annotation_mode_has_no_search_or_benchmark_routes():
     app = create_app(Features(search=False, benchmark=False), static_dir="")
     paths = _paths(app)
-    assert not any(p.startswith("/search") for p in paths)
-    assert not any(p.startswith("/benchmark") for p in paths)
-    assert any(p.startswith("/auth") for p in paths)
+    assert not any(p.startswith("/api/v1/search") for p in paths)
+    assert not any(p.startswith("/api/v1/benchmark") for p in paths)
+    assert "/api/v1/annotators" in paths and "/api/v1/tokens" in paths
 
 
 def test_router_groups_toggle_independently():
     app = create_app(Features(annotation=False, kv_pairs=False, benchmark=False), static_dir="")
     paths = _paths(app)
-    assert "/search/bm25" in paths
-    assert not any(p.startswith(("/auth", "/annotation", "/kv")) for p in paths)
+    assert "/api/v1/searches" in paths
+    prefixes = tuple(f"/api/v1/{name}" for name in ("annotators", "tokens", "assignments", "kv"))
+    assert not any(p.startswith(prefixes) for p in paths)
 
 
 def test_dense_and_cross_encoder_gate_endpoints():
@@ -54,6 +55,9 @@ async def test_spa_fallback(tmp_path):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
         assert (await c.get("/robots.txt")).text == "ok"
         assert "spa" in (await c.get("/some/route")).text
+        unknown_api = await c.get("/api/v1/nothing-here")
+        assert unknown_api.status_code == 404
+        assert unknown_api.headers["content-type"] == "application/problem+json"
 
 
 async def test_lifespan_initialises_db_and_preloads(_patched_paths, monkeypatch, capsys):
@@ -71,9 +75,8 @@ async def test_lifespan_initialises_db_and_preloads(_patched_paths, monkeypatch,
 async def test_hadith_route(_patched_paths):
     app = create_app(Features(search=False, benchmark=False), static_dir="")
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
-        found = (await c.get("/hadith/1")).json()
-        assert found["Book"] == "Bukhari"
-        assert (await c.get("/hadith/999")).json() == {"error": "not found"}
+        assert (await c.get("/api/v1/hadiths/1")).json()["Book"] == "Bukhari"
+        assert (await c.get("/api/v1/hadiths/999")).status_code == 404
 
 
 async def test_lifespan_reports_static_dir(_patched_paths, tmp_path, monkeypatch, capsys):

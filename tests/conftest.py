@@ -75,6 +75,9 @@ _HADITHS = {
 }
 
 
+TEST_SECRET = "test-secret-" * 4  # 44 characters, above the HS256 minimum
+
+
 @pytest.fixture
 def _hadiths_df() -> pd.DataFrame:
     return pd.DataFrame.from_dict(_HADITHS, orient="index").rename_axis("id")
@@ -211,11 +214,15 @@ async def _patched_paths(monkeypatch, _data_dir, _db_path, _hadiths_df):
 @pytest_asyncio.fixture
 async def _client(_patched_paths):
     """App with the annotation/auth/kv/benchmark routers only (no model or index loading)."""
-    from routers import annotation, auth, benchmark, kv_pairs
+    from rest import install_error_handlers
+    from routers import annotation, auth, benchmark, hadiths, kv_pairs
+    from tokens import AuthSettings, auth_settings
 
     app = FastAPI()
-    for r in (annotation.router, auth.router, kv_pairs.router, benchmark.router):
+    install_error_handlers(app)
+    for r in (annotation.router, auth.router, kv_pairs.router, benchmark.router, hadiths.router):
         app.include_router(r)
+    app.dependency_overrides[auth_settings] = lambda: AuthSettings(TEST_SECRET, ttl_seconds=3600)
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         yield c
 
@@ -223,9 +230,11 @@ async def _client(_patched_paths):
 @pytest_asyncio.fixture
 async def _auth_headers(_client):
     """Sign up a fresh annotator; returns an Authorization header (auto-assigned q1, q2)."""
-    res = await _client.post("/auth/signup", json={"username": "alice", "password": "secret123"})
-    assert res.status_code == 200
-    return {"Authorization": f"Bearer {res.json()['token']}"}
+    res = await _client.post(
+        "/api/v1/annotators", json={"username": "alice", "password": "secret123"}
+    )
+    assert res.status_code == 201
+    return {"Authorization": f"Bearer {res.json()['access_token']}"}
 
 
 @pytest_asyncio.fixture
@@ -280,7 +289,10 @@ async def _search_client(
         hadiths_df=lambda: _hadiths_df,
         get_hadith=lambda hid: _hadiths_df.loc[hid].to_dict(),
     )
+    from rest import install_error_handlers
+
     app = FastAPI()
+    install_error_handlers(app)
     app.include_router(
         make_search_router(Features(search=True, dense_retrieval=True, cross_encoder=True))
     )

@@ -1,10 +1,10 @@
 import pytest
 
-BODY = {"query": "prayer", "lang": "en"}
+SEARCH = "/api/v1/searches"
 
 
 @pytest.mark.parametrize(
-    "endpoint",
+    "method",
     [
         "term-overlap",
         "tfidf",
@@ -18,37 +18,85 @@ BODY = {"query": "prayer", "lang": "en"}
         "cross-encoder-rerank",
     ],
 )
-async def test_every_search_endpoint_returns_results(_search_client, endpoint):
-    res = await _search_client.post(f"/search/{endpoint}", json=BODY)
+async def test_every_search_method_returns_results(_search_client, method):
+    res = await _search_client.get(SEARCH, params={"q": "prayer", "method": method})
     assert res.status_code == 200, res.text
     body = res.json()
     assert body["number_of_results"] == len(body["results"]) > 0
-    assert body["response_time_ms"] is not None
+    assert res.headers["server-timing"].startswith("search;dur=")
 
 
 async def test_bm25_result_shape_and_order(_search_client):
-    results = (await _search_client.post("/search/bm25", json=BODY)).json()["results"]
+    body = (await _search_client.get(SEARCH, params={"q": "prayer", "method": "bm25"})).json()
+    results = body["results"]
     assert {r["hadith"]["hadith_id"] for r in results} == {1, 3}
     assert results[0]["hadith"]["book"] in {"Bukhari", "Muslim"}
     assert results[0]["score"] >= results[1]["score"]
+    assert "response_time_ms" not in body  # timing is in the Server-Timing header
+
+
+async def test_search_is_cacheable_with_etag(_search_client):
+    params = {"q": "prayer", "method": "bm25"}
+    first = await _search_client.get(SEARCH, params=params)
+    assert first.headers["cache-control"] == "public, max-age=300"
+    again = await _search_client.get(
+        SEARCH, params=params, headers={"If-None-Match": first.headers["etag"]}
+    )
+    assert again.status_code == 304 and again.content == b""
+
+
+async def test_search_links(_search_client):
+    body = (
+        await _search_client.get(
+            SEARCH, params={"q": "fasting", "method": "bm25", "book_filter": "Muslim"}
+        )
+    ).json()
+    assert body["_links"]["self"]["href"] == (
+        "/api/v1/searches?q=fasting&method=bm25&lang=en&book_filter=Muslim"
+    )
+    assert body["_links"]["methods"]["href"] == "/api/v1/search-methods"
 
 
 async def test_book_and_grade_filters(_search_client):
     only_muslim = (
-        await _search_client.post(
-            "/search/bm25", json={"query": "fasting", "book_filter": "Muslim"}
+        await _search_client.get(
+            SEARCH, params={"q": "fasting", "method": "bm25", "book_filter": "Muslim"}
         )
     ).json()
     assert [r["hadith"]["hadith_id"] for r in only_muslim["results"]] == [2]
     none = (
-        await _search_client.post(
-            "/search/bm25", json={"query": "fasting", "grade_filter": "Da'if (Weak)"}
+        await _search_client.get(
+            SEARCH, params={"q": "fasting", "method": "bm25", "grade_filter": "Da'if (Weak)"}
         )
     ).json()
     assert none["number_of_results"] == 0
 
 
-async def test_invalid_lang_rejected(_search_client):
-    assert (
-        await _search_client.post("/search/bm25", json={"query": "x", "lang": "fr"})
-    ).status_code == 422
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"q": "x", "method": "bm25", "lang": "fr"},
+        {"q": "", "method": "bm25"},
+        {"method": "bm25"},
+        {"q": "x"},
+        {"q": "x", "method": "nope"},
+    ],
+)
+async def test_bad_search_requests_are_422(_search_client, params):
+    res = await _search_client.get(SEARCH, params=params)
+    assert res.status_code == 422
+    assert res.headers["content-type"] == "application/problem+json"
+
+
+async def test_search_methods_lists_links(_search_client):
+    body = (await _search_client.get("/api/v1/search-methods")).json()
+    slugs = [m["slug"] for m in body["methods"]]
+    assert "bm25" in slugs and "final-pipeline" in slugs
+    template = body["methods"][0]["_links"]["search"]
+    assert template["templated"] is True and "{q}" in template["href"]
+
+
+async def test_post_to_searches_is_405(_search_client):
+    res = await _search_client.post(SEARCH, json={"query": "x"})
+    assert res.status_code == 405
+    assert res.headers["content-type"] == "application/problem+json"

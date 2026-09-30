@@ -255,7 +255,7 @@ class TestRetrievalService:
         }
         assert all(SYSTEMS[s].slug == s for s in SYSTEMS)
 
-    def test_run_search_reports_counts_and_time(self, _hadiths_df):
+    def test_run_search_reports_counts(self, _hadiths_df):
         from models import SearchRequest
         from services.retrieval import RetrievalSystem, SearchContext, run_search
 
@@ -270,5 +270,5 @@ class TestRetrievalService:
             get_hadith=lambda h: {},
         )
         res = run_search(system, ctx, SearchRequest(query="q", lang="en"))
-        assert res.number_of_results == 2 and res.response_time_ms >= 0
+        assert res.number_of_results == 2
         assert [r.score for r in res.results] == [2.0, 1.0]

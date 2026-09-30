@@ -12,15 +12,35 @@ services:
       - APP_MODE=annotation
       # Comma-separated origins, or * for all (disables credentials)
       - CORS_ORIGINS=*
+      # The password goes into a URL, so keep it to letters, digits, "-" and "_"
+      - DATABASE_URL=postgresql+psycopg://hadith:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/hadith
       # Path to frontend build (defaults to ../static or ../frontend/dist)
       # - STATIC_DIR=/app/static
       # Jina API keys for cross-encoder reranking (search mode only)
       # - JINA_API_KEY=your_key_here
     volumes:
-      # Mount the entire data directory as a persistent volume
-      # Upload hadiths.db, queries.json, qrels_ungraded.json here
-      # For search mode: also upload embeddings (.npy) and indexes (.pkl)
+      # Query lists, qrels and evaluation outputs (the corpus, index and embeddings are in postgres)
       - hadith-data:/app/backend/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Corpus, BM25 index, embeddings and annotation data. Not published to the host.
+  postgres:
+    image: pgvector/pgvector:pg17
+    container_name: hadith-postgres
+    environment:
+      - POSTGRES_USER=hadith
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      - POSTGRES_DB=hadith
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hadith -d hadith"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
     restart: unless-stopped
 
   # Public edge: proxies to the app and rate-limits sign-in and sign-up (see nginx/default.conf).
@@ -39,3 +59,4 @@ services:
 
 volumes:
   hadith-data:
+  postgres-data:

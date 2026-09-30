@@ -70,7 +70,7 @@ hadith-search/
 ├── backend/
 │   ├── data/                     # All generated artifacts (git-ignored except queries)
 │   │   ├── raw/LK-Hadith-Corpus/ # Cloned LK source (git-ignored)
-│   │   ├── hadiths.db            # SQLite canonical corpus (git-ignored)
+│   │   ├── (corpus, index and embeddings are in PostgreSQL)
 │   │   ├── queries.json          # 20 evaluation queries (committed)
 │   │   ├── training_queries.json # 100 training queries (committed)
 │   │   ├── dropped_lk_rows.json  # Drop audit (git-ignored, generated)
@@ -102,7 +102,7 @@ hadith-search/
 │   │   ├── kv_generator.py       # Concept-entity pair generation
 │   │   ├── stats_tests.py        # Paired t-test, Wilcoxon, bootstrap CI, LaTeX
 │   │   └── pooling.py            # Retrieval pool for annotation
-│   ├── database.py               # SQLite annotation/auth/kv table init
+│   ├── database.py               # PostgreSQL engines, sessions and schema init
 │   └── main.py                   # FastAPI app, APP_MODE, lifespan
 ├── frontend/
 │   └── src/
@@ -136,11 +136,11 @@ python scripts\build_all.py --force --skip-embeddings
 
 | Step | Script | Input | Output |
 |------|--------|-------|--------|
-| 1 | `data_creation.py` | LK-Hadith-Corpus CSVs | `hadiths.db`, `dropped_lk_rows.json` |
-| 2 | `profile.py` | `hadiths.db` | Console audit report (read-only) |
-| 3 | `preprocess.py` | `hadiths.db` | 6 `Preprocessed_*` columns added to DB |
-| 4 | `build_inverted_index.py` | `hadiths.db` | `english_inverted_index.pkl`, `arabic_inverted_index.pkl`, `document_lengths.pkl` |
-| 5 | `build_embeddings.py` | `hadiths.db` | `english_embeddings.npy`, `arabic_embeddings.npy`, `hadith_ids.npy` |
+| 1 | `data_creation.py` | LK-Hadith-Corpus CSVs | `hadiths` table, `dropped_lk_rows.json` |
+| 2 | `profile.py` | `hadiths` table | Console audit report (read-only) |
+| 3 | `preprocess.py` | `hadiths` table | 6 `Preprocessed_*` columns added to DB |
+| 4 | `build_inverted_index.py` | `hadiths` table | `terms`, `postings`, `hadith_lengths` tables |
+| 5 | `build_embeddings.py` | `hadiths` table | `hadith_embeddings` table |
 | 6 | `pooling.py` | All of the above | `qrels_ungraded.json` |
 
 `build_all.py` writes `build_manifest.json` at the end recording the LK source commit SHA, corpus size, and artifact checksums.
@@ -151,7 +151,7 @@ python scripts\build_all.py --force --skip-embeddings
 
 **Source**: LK Hadith Corpus (6 canonical Sunni collections)  
 **Canonical size**: ~33,064 rows (exact count pending current pipeline rerun)  
-**Schema**: See `hadiths.db` — key columns:
+**Schema**: See the `hadiths` table (`backend/models/orm.py`) — key columns:
 
 | Column | Description |
 |--------|-------------|
@@ -227,7 +227,7 @@ Both pipelines are run over three text fields (full text, isnad, matn) independe
 - Rate limit: 30-second wait enforced between Jina API calls
 
 **Sparse retrieval details**:
-- Indexes: `english_inverted_index.pkl`, `arabic_inverted_index.pkl`, `document_lengths.pkl`
+- Index: `terms`, `postings`, `hadith_lengths` tables
 - Input field: `Preprocessed_English_Matn` / `Preprocessed_Arabic_Matn` only
 - Language detection: query is routed to the appropriate index by script
 
@@ -304,7 +304,7 @@ The annotation platform is a web UI where human annotators rate hadith relevance
 **Flow**:
 1. Annotator signs up → account created, query assignments auto-generated
 2. Annotator works through assigned queries, grading each pooled hadith as relevant (1) or not (0)
-3. Grades are stored per-annotator in `hadiths.db`
+3. Grades are stored per-annotator in PostgreSQL
 4. The annotation router exports merged qrels and computes inter-annotator Kappa on demand
 
 **Pooling** (`pooling.py`): Candidates are the union of top-50 results from six selected systems: BM25, BM25_ROCCHIO, COSINE_SIMILARITY, BM25_SEMANTIC_RERANK, BM25_RRF, and FINAL_PIPELINE. Outputs: `qrels_ungraded.json` and `pooling_manifest.json`, including contribution counts and failures. A failed contributor blocks pool export unless partial pooling is explicitly enabled.
@@ -339,7 +339,7 @@ The annotation platform is a web UI where human annotators rate hadith relevance
 
 **Generation flow**:
 1. LLM extracts concept-entity pairs from hadith matn text
-2. Generated pairs are stored in `hadiths.db`
+2. Generated pairs are stored in PostgreSQL
 3. Human verifier uses the web UI (`/dev/kv-pairs`) to mark pairs as verified or rejected
 4. Verified pairs are exported to `kv_pairs_verified.json`
 
@@ -436,11 +436,11 @@ React + TypeScript + Tailwind CSS + Vite SPA.
 
 These are design constraints that must be maintained for the system to function correctly. Any change that would violate these requires explicit discussion.
 
-1. **English and Arabic indices must cover exactly the same set of hadith IDs.** `hadith_ids.npy` is shared between English and Arabic embeddings. If any row is indexable in one language but not the other, the alignment breaks.
+1. **English and Arabic indices must cover exactly the same set of hadith IDs.** `hadith_lengths` holds both lengths on one row, and `build_inverted_index.py` refuses to run if any hadith has an empty matn in either language.
 
 2. **Retrieval fields are matn-only for both sparse and dense systems.** Isnad tokens must not appear in `Preprocessed_English_Matn` or `Preprocessed_Arabic_Matn`. Custom stopwords handle this.
 
-3. **`hadith_ids.npy` must be aligned with both `english_embeddings.npy` and `arabic_embeddings.npy`.** All three arrays must have identical length. This is asserted at the end of `build_embeddings.py`.
+3. **Embeddings are keyed by hadith id, not by position.** `hadith_embeddings` has one row per hadith with a foreign key to `hadiths.id`, so there is no array alignment to keep. Every vector in a column must come from the same model.
 
 4. **The corpus must be rebuilt deterministically.** No random sampling during corpus construction. Reconstruction rules are rule-based only. The LK source commit SHA is recorded for reproducibility.
 

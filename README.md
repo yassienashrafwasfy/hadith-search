@@ -80,11 +80,11 @@ You can also run steps individually:
 
 | Step | Command | Description | Output |
 |------|---------|-------------|--------|
-| 1 | `python scripts\data_creation.py` | Loads LK Hadith Corpus, applies deterministic reconstruction, and keeps the bilingual matn-complete corpus | `backend/data/hadiths.db` |
+| 1 | `python scripts\data_creation.py` | Loads LK Hadith Corpus, applies deterministic reconstruction, and keeps the bilingual matn-complete corpus | `hadiths` table in PostgreSQL |
 | 2 | `python scripts\profile.py` | Profiles the loaded corpus without modifying it | Console report |
 | 3 | `python scripts\preprocess.py` | Tokenizes, lemmatizes, and removes stopwords for full text, isnad, and matn | Adds/updates six `Preprocessed_*` columns |
-| 4 | `python scripts\build_inverted_index.py` | Builds BM25 inverted indices over matn only | `english_inverted_index.pkl`, `arabic_inverted_index.pkl`, `document_lengths.pkl` |
-| 5 | `python scripts\build_embeddings.py` | Generates dense embeddings using `intfloat/multilingual-e5-large` over chapter title + matn only | `english_embeddings.npy`, `arabic_embeddings.npy`, `hadith_ids.npy` |
+| 4 | `python scripts\build_inverted_index.py` | Builds the BM25 index over matn only | `terms`, `postings` and `hadith_lengths` tables |
+| 5 | `python scripts\build_embeddings.py` | Generates dense embeddings using `intfloat/multilingual-e5-large` over chapter title + matn only | `hadith_embeddings` table (float32 vectors) |
 | 6 | `python scripts\pooling.py` | Pools candidate documents for relevance judgment | `qrels_ungraded.json` |
 
 > **Note:** Step 5 requires significant VRAM (~12GB recommended). If you don't have a GPU, the script will prompt you before falling back to CPU (extremely slow).
@@ -147,8 +147,8 @@ hadith-search/
 ### Data Processing
 - `build_all.py` - Run the full build pipeline (recommended)
 - `build_embeddings.py` - Generate dense embeddings (requires CUDA, with CPU fallback prompt)
-- `build_inverted_index.py` - Build BM25 inverted index
-- `data_creation.py` - Load LK Hadith Corpus into SQLite
+- `build_inverted_index.py` - Build the BM25 index in PostgreSQL
+- `data_creation.py` - Load LK Hadith Corpus into PostgreSQL
 - `profile.py` - Profile the loaded corpus without mutating it
 - `preprocess.py` - Preprocess hadith text
 - `pooling.py` - Pool candidate documents for relevance judgment
@@ -177,6 +177,6 @@ hadith-search/
 
 ## Tech Stack
 
-- **Backend**: FastAPI, SQLite, NLTK, CAMeL Tools, Sentence Transformers
+- **Backend**: FastAPI, PostgreSQL + pgvector, NLTK, CAMeL Tools, Sentence Transformers
 - **Frontend**: React, TypeScript, Tailwind CSS, Vite
 - **Retrieval**: BM25, BM25+PRF, Dense retrieval (multilingual-e5-large), Hybrid

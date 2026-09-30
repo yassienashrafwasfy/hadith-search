@@ -7,7 +7,7 @@ Each change has the same three lines: which files, why this is the normal way to
 ## Read this first
 
 1. **The Jina key was renamed.** The code used to read `JINA_API_KEY2`. It now reads `JINA_API_KEY`. Rename it in your `.env` and in the server settings, or reranking stops working.
-2. **The database no longer enforces foreign keys.** The old code turned on `PRAGMA foreign_keys`. We dropped it on purpose. The links between tables are still declared in the models, but SQLite will not block a bad link or cascade deletes. Tables are created with `create_all`: it adds missing tables and never changes existing ones, and there are no migrations.
+2. **The database (now PostgreSQL, item 20) enforces foreign keys.** Links between tables are declared in the models and Postgres blocks a bad link and cascades deletes. Tables are created with `create_all`: it adds missing tables and never changes existing ones, and there are no migrations.
 3. **The diff looks bigger than the real change.** Every Python file was reformatted to one style, so many lines only moved or wrapped differently. Read the commit messages first, then the files.
 4. **Libraries were upgraded** to fix known security holes: numpy 1.26 to 2.5, transformers 4.43 to 5.17, starlette 0.52 to 1.3, nltk 3.9 to 3.10. The tests pass, but I could not test saved index files (`.pkl`) built with the old numpy, because this copy has no real data. If loading fails, rebuild them. A full fine-tuning run and the real E5 model were also not re-run.
 5. **Every API URL changed, and there are no old aliases.** Everything now lives under `/api/v1`, the frontend is updated, and anything else that calls the API (scripts, bookmarks) must move. The map is in item 16 below. Sign-in also works differently: set `AUTH_SECRET` (32+ characters) in `.env`, and use the same value on every server.
@@ -212,7 +212,7 @@ Behavior that differs from before:
 - **The token lives in `localStorage`**, so an XSS bug would expose it. The CSP and the absence of raw HTML rendering reduce that risk; an httpOnly cookie would remove it but needs CSRF handling.
 - **Tokens cannot be revoked** before they expire (12 hours by default).
 - **Some dependency reports are not fixed:** `torch` (2.11 to 2.13), `datasets` (4 to 5), `setuptools`, `accelerate`, `nltk`, and React Router (needs version 7). The Python ones are build and training tools, or need a wider retest. React Router's open redirect needs a `<Link>` or `navigate()` fed a user-controlled URL, which this app does not do. Bump them when you can retest.
-- **`.pkl` index files are loaded with `pickle`**, which runs code from the file. They are built by us and never uploaded, so keep `backend/data` writable only by the app and never load a pickle from someone else.
+- **Pickle loading is gone** (item 20). Only `migrate_to_postgres.py` touches the old files, and it reads `.npy` with `allow_pickle=False` and never opens the `.pkl` ones.
 - **The LLM scripts** (`llm_grader.py`, `kv_generator.py`) send hadith text to a model. It is offline tooling and its output is a label, so prompt injection has little to hit, but treat its output as untrusted.
 
 ### 19. nginx in front of the app, with a sign-in rate limit
@@ -234,6 +234,29 @@ Behavior that differs from before:
 **If another proxy sits in front of nginx** (Traefik, Dokploy, a cloud load balancer), nginx would see that proxy's address for everyone and all clients would share one counter. Then add nginx's `real_ip` settings (`set_real_ip_from <proxy address>; real_ip_header X-Forwarded-For;`) or move the limit into that proxy. Also note `docker-compose.yml` still has `CORS_ORIGINS=*`.
 
 **Docker on Windows or WSL** can hide the real client address (all requests look like the Docker gateway). The limit is correct on a Linux server; do not judge it from a Windows laptop.
+
+### 20. PostgreSQL with pgvector replaces SQLite, the pickles and the .npy files
+
+**Files:** `backend/database.py`, `backend/models/orm.py`, `backend/services/ranking.py` (new), `backend/services/retrieval.py`, `backend/services/results.py`, `backend/scripts/build_inverted_index.py`, `backend/scripts/build_embeddings.py`, `backend/scripts/embedding_store.py` (new), `backend/scripts/migrate_to_postgres.py` (new), `backend/scripts/search.py` (cut down), `backend/scripts/loading.py` (cut down), `docker-compose.yml`, `.env.example`, `tests/conftest.py`, `tests/test_ranking.py` (new), `tests/_legacy_search.py` (new)
+
+**Why it's best practice:** The embeddings and the BM25 index used to be files that were loaded whole into memory at startup, so every server held its own copy and any change meant rebuilding and reloading files. Now they live next to the hadiths they describe, and a search asks the database for what it needs. `.pkl` loading is gone too, which removes the "unpickling runs code" risk.
+
+**Benefit:** Startup no longer loads an index. The database enforces links between tables again (hadith to embedding, posting and length rows, annotator to labels) and deletes their dependents with them. Several app servers can share one database. The tests run against a real Postgres, one schema per test.
+
+**What changed and why:**
+
+- **Everything is in PostgreSQL** (decided with you): hadiths, embeddings, BM25 postings, annotators, assignments, labels and KV pairs. SQLite is gone. `DATABASE_URL` is required (`postgresql+psycopg://...`).
+- **BM25 and TF-IDF run in SQL** over `postings`, `terms` and `hadith_lengths`, with the same formula as before (k1 1.2, b 0.75, idf `ln((N-df+0.5)/(df+0.5))`). `tests/test_ranking.py` runs the old in-memory code (kept as `tests/_legacy_search.py`) on the same data and checks the scores match to 9 decimals, for English and Arabic queries, all lexical systems and the pseudo relevance feedback ones.
+- **Dense search is exact** (no vector index), float32, cosine distance from pgvector. At this corpus size an index would add recall loss for no speed you would notice; add an HNSW index later if the corpus grows by an order of magnitude.
+- **Ties are now broken by hadith id.** Scores that agree to 9 decimals count as tied and the lower id comes first, so the same query always returns the same order (the old code's tie order depended on dict order).
+- **The BM25 + TF-IDF hybrid now returns its results sorted by score.** The old function returned them in set order, so the `bm25-tf-idf` endpoint listed hadiths in an arbitrary order. The scores are unchanged.
+- **The eval pool restriction is a `WHERE hadith_id IN (...)`** inside the query (`restrict=`), not a masked array.
+
+**Moving an old install:** start Postgres, set `DATABASE_URL`, then run `python scripts/migrate_to_postgres.py` from `backend/`. It copies `hadiths.db`, loads the `.npy` embeddings and rebuilds the BM25 index from the preprocessed text columns. It does not read the `.pkl` files. It refuses to run if the hadiths table already has rows. `finetune_eval.py` still overwrites the stored embeddings with the fine-tuned ones, as it overwrote the `.npy` files before; run `build_embeddings.py` again to get the base vectors back.
+
+**Test it:** the tests need a Postgres with pgvector. Without one they skip with a message that shows the `docker run` line. Set `TEST_DATABASE_URL` to use your own. There is no CI job that runs the tests yet; add one with a `pgvector/pgvector:pg17` service.
+
+**Not checked here:** I did not build the app image or run `docker compose up` with the real data, and the local NLTK data is missing so I could not run a real English query end to end (the ASGI tests use a stub preprocessor). The Docker image was not re-scanned.
 
 ## Quick start after pulling
 

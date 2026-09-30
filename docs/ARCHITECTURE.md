@@ -26,12 +26,12 @@
 │              │                      │                        │
 │  ┌───────────▼──────┐  ┌────────────▼────────────────────┐  │
 │  │  Sparse Index    │  │  Dense Index                    │  │
-│  │  BM25 / TF-IDF   │  │  E5 embeddings (npy)            │  │
-│  │  (pkl files)     │  │  + Jina reranker API            │  │
+│  │  BM25 / TF-IDF   │  │  E5 embeddings (pgvector)       │  │
+│  │  (postings SQL)  │  │  + Jina reranker API            │  │
 │  └───────────┬──────┘  └────────────┬────────────────────┘  │
 │              │                      │                        │
 │  ┌───────────▼──────────────────────▼────────────────────┐  │
-│  │                   hadiths.db (SQLite)                  │  │
+│  │                  PostgreSQL + pgvector                 │  │
 │  │   33,064 rows × bilingual matn-complete corpus         │  │
 │  └────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────┘
@@ -57,7 +57,7 @@ data_creation.py
   ├── Drop rows missing bilingual matn (first-stage drop)
   │     └── 597 rows dropped → dropped_lk_rows.json
   ├── Normalize grades
-  └── Write → hadiths.db (33,491 rows)
+  └── Write → hadiths table (33,491 rows)
         │
         ▼
 profile.py (read-only audit, no modifications)
@@ -67,24 +67,20 @@ preprocess.py
   ├── Preprocess English text, isnad, matn (3 columns)
   ├── Preprocess Arabic text, isnad, matn (3 columns)
   ├── Detect rows where preprocessed matn is empty (second-stage drop candidates)
-  └── Write 6 Preprocessed_* columns → hadiths.db
+  └── Write 6 Preprocessed_* columns → hadiths table
         │
         ▼
 build_inverted_index.py
   ├── Read Preprocessed_English_Matn, Preprocessed_Arabic_Matn
   ├── Build BM25 postings lists
-  └── Write → english_inverted_index.pkl
-              arabic_inverted_index.pkl
-              document_lengths.pkl
+  └── Replace rows in terms, postings, hadith_lengths
         │
         ▼
 build_embeddings.py
   ├── Read English_Matn, Arabic_Matn
   ├── Format: "passage: {matn}" (Arabic: query-side light normalization)
   ├── Encode with intfloat/multilingual-e5-large (CUDA)
-  └── Write → english_embeddings.npy
-              arabic_embeddings.npy
-              hadith_ids.npy
+  └── Upsert float32 vectors into hadith_embeddings (english, arabic)
         │
         ▼
 pooling.py
@@ -117,34 +113,28 @@ routers/search.py
         └── Optional: rerank with Jina API
                 │
                 ▼
-        Top-k hadith IDs → fetch from hadiths.db → return JSON
+        Top-k hadith IDs → fetch from the hadiths table → return JSON
 ```
 
 ---
 
 ## Loading and Caching (`loading.py`)
 
-All heavy objects are loaded lazily and cached with `functools.lru_cache`:
+Only the NLP and model objects are loaded lazily and cached with `functools.lru_cache`. The index and the embeddings are database tables, queried per request (`services/ranking.py`).
 
 | Loader | Object | Trigger |
 |--------|--------|---------|
-| `get_english_inverted_index()` | BM25 postings (pkl) | First sparse EN search |
-| `get_arabic_inverted_index()` | BM25 postings (pkl) | First sparse AR search |
-| `get_document_lengths()` | Document length dict (pkl) | First BM25 search |
-| `get_english_embeddings()` | EN embedding array (npy) | First dense search |
-| `get_arabic_embeddings()` | AR embedding array (npy) | First dense search |
-| `get_hadith_ids()` | ID alignment array (npy) | First dense search |
-| `get_e5_model()` | SentenceTransformer + optional LoRA adapter | First dense search |
+| `get_model()` | SentenceTransformer + optional LoRA adapter | First dense search |
 | `get_mle()` | CAMeL MLE disambiguator | First Arabic preprocessing |
 | `get_english_lemmatizer()` | NLTK WordNetLemmatizer | First English preprocessing |
 
-**LoRA adapter loading**: If `FINETUNED_ADAPTER_PATH` env var is set, `get_e5_model()` loads the base E5 model and applies the PEFT adapter from that path. Otherwise, the base model is loaded as-is.
+**LoRA adapter loading**: If `FINETUNED_ADAPTER_PATH` env var is set, `get_model()` loads the base E5 model and applies the PEFT adapter from that path. Otherwise, the base model is loaded as-is.
 
 **Warning**: Changing `FINETUNED_ADAPTER_PATH` at runtime does not invalidate the LRU cache. The server must be restarted to switch adapters.
 
 ---
 
-## Database Schema (`hadiths.db`)
+## Database Schema (PostgreSQL)
 
 Primary table: `HADITHS`
 
@@ -204,20 +194,4 @@ CREATE TABLE kv_pairs (id, concept, hadith_id, verified, created_at)
 
 ## Alignment Invariant
 
-`hadith_ids.npy`, `english_embeddings.npy`, and `arabic_embeddings.npy` must always have the same length and be generated from the same ordered query of `hadiths.db`. The mapping `hadith_ids[i] → embeddings[i]` is used to translate cosine similarity rank positions back to database IDs.
-
-This invariant is asserted at the end of `build_embeddings.py`. Any change to the corpus (rows added or removed) requires regenerating all three files together.
-
----
-
-## APP_MODE Conditional Loading
-
-`main.py` uses `APP_MODE` to conditionally include routers:
-
-```python
-if os.getenv("APP_MODE") != "annotation":
-    app.include_router(search_router)
-    app.include_router(benchmark_router)
-```
-
-This ensures the annotation-only deployment never triggers E5 model import or BM25 index load, keeping RAM usage minimal (~200MB vs ~3GB loaded).
+Embeddings, postings and lengths are keyed by `hadith_id` with a foreign key to `hadiths.id` and `ON DELETE CASCADE`, so they cannot point at a hadith that is gone. Changing the corpus (rows added or removed) means re-running `build_inverted_index.py` (its `write_index` replaces the index rows) and `build_embeddings.py` (it upserts vectors, so rows for new hadiths are added; rows for removed ones are deleted with the hadith). `hadith_embeddings` has no fixed vector dimension, so switching the embedding model needs no migration, but every row must be re-encoded with the same model.

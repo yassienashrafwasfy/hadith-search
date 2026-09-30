@@ -1,0 +1,41 @@
+# Install once: .venv/bin/pre-commit install   (run everything: .venv/bin/pre-commit run --all-files)
+# Lint/format hooks are local so they use the versions pinned in requirements-dev.txt.
+exclude: ^(frontend/|\.mutation/|mutants/|docs/.*\.(png|jpg|svg)$|tests/snapshots/)
+
+repos:
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.0
+    hooks:
+      - id: gitleaks
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: detect-private-key
+      - id: check-added-large-files
+        args: [--maxkb=500]
+      - id: check-merge-conflict
+      - id: check-yaml
+      - id: check-toml
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+        args: [--markdown-linebreak-ext=md]
+
+  - repo: local
+    hooks:
+      - id: ruff
+        name: ruff (lint + C901 complexity)
+        entry: .venv/bin/ruff check --fix --exit-non-zero-on-fix
+        language: system
+        types: [python]
+      - id: black
+        name: black (format)
+        entry: .venv/bin/black
+        language: system
+        types: [python]
+      - id: vulture
+        name: vulture (dead code)
+        entry: .venv/bin/vulture
+        language: system
+        types: [python]
+        pass_filenames: false

@@ -128,7 +128,13 @@ const DevSearchPage = () => {
         <h1 className="font-display-lg text-display-lg text-primary dark:text-dark-primary">
           {t('nav.search')}
         </h1>
-        <SearchBar onSearch={handleSearch} initialQuery={query} disabled={loading.search} />
+        <SearchBar
+          onSearch={handleSearch}
+          onLangChange={setLang}
+          initialLang={lang}
+          initialQuery={query}
+          disabled={loading.search}
+        />
       </div>
 
       <div className="flex flex-col sm:flex-row gap-4 flex-wrap items-start sm:items-end">

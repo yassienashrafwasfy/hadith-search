@@ -1,9 +1,12 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useLanguage } from '../i18n/useLanguage';
 import type { Lang } from '../types';
 
 interface SearchBarProps {
   onSearch: (query: string, lang: Lang) => void;
+  // Called whenever the language changes (typing Arabic or the EN / AR button), before any search.
+  onLangChange?: (lang: Lang) => void;
+  initialLang?: Lang;
   placeholder?: string;
   compact?: boolean;
   initialQuery?: string;
@@ -18,12 +21,20 @@ const detectArabic = (text: string): boolean => {
   return false;
 };
 
-const SearchBar = ({ onSearch, placeholder, compact = false, initialQuery = '', disabled = false }: SearchBarProps) => {
+const SearchBar = ({ onSearch, onLangChange, initialLang, placeholder, compact = false, initialQuery = '', disabled = false }: SearchBarProps) => {
   const { t, language } = useLanguage();
   const [query, setQuery] = useState(initialQuery);
   const [autoDetectedLang, setAutoDetectedLang] = useState<Lang>(detectArabic(initialQuery) ? 'ar' : 'en');
-  const [manualLang, setManualLang] = useState<Lang | null>(null);
+  // A language from the URL that differs from what the text suggests counts as a manual choice.
+  const [manualLang, setManualLang] = useState<Lang | null>(
+    initialLang && initialLang !== autoDetectedLang ? initialLang : null,
+  );
   const effectiveLang: Lang = manualLang ?? autoDetectedLang;
+
+  useEffect(() => {
+    onLangChange?.(effectiveLang);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [effectiveLang]);
 
   const handleChange = (value: string) => {
     setQuery(value);

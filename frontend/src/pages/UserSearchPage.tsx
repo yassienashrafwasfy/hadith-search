@@ -134,7 +134,13 @@ const UserSearchPage = () => {
       </div>
 
       <div className="w-full max-w-4xl">
-        <SearchBar onSearch={handleSearch} initialQuery={query} disabled={loading.search} />
+        <SearchBar
+          onSearch={handleSearch}
+          onLangChange={setLang}
+          initialLang={lang}
+          initialQuery={query}
+          disabled={loading.search}
+        />
       </div>
 
       <div className="flex flex-col sm:flex-row gap-4 flex-wrap items-start sm:items-end">

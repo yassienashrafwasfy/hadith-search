@@ -1,6 +1,6 @@
 # Handoff: changes since Marawan's last commit
 
-Marawan's last commit is `93a4ff9` ("Align matn embeddings, training passages, and evaluation"). Everything below was added on top of it in about 32 commits (the last ones are the REST API, items 16 and 17, the security pass, item 18, nginx with the sign-in limit, item 19, PostgreSQL with pgvector, item 20, and blue/green and canary releases, item 21): about 140 files. All 425 tests pass (1 skipped: it needs NLTK data). The tests need a PostgreSQL with pgvector, see item 20. The work sits on the branch `feat/blue-green-canary`, which builds on `feat/postgres-pgvector`, `feat/rest-api-v1`, `chore/dockerfile-hardening` and `chore/precommit-hooks`, and has not been pushed.
+Marawan's last commit is `93a4ff9` ("Align matn embeddings, training passages, and evaluation"). Everything below was added on top of it in 31 commits (the last ones are the REST API, items 16 and 17, the security pass, item 18, nginx with the sign-in limit, item 19, PostgreSQL with pgvector, item 20, and blue/green and canary releases, item 21): about 140 files. All 425 tests pass (1 skipped: it needs NLTK data). The tests need a PostgreSQL with pgvector, see item 20. The work sits on the branch `feat/blue-green-canary`, which builds on `feat/postgres-pgvector`, `feat/rest-api-v1`, `chore/dockerfile-hardening` and `chore/precommit-hooks`, and has not been pushed.
 
 Each change has the same three lines: which files, why this is the normal way to do it, and what you get out of it.
 
@@ -302,6 +302,14 @@ tools/deploy.sh stop-idle           # when you are sure, stop the old colour
 - **Behind another proxy** (see item 19) every client may share one address, so a canary would send all or none of them to the new colour. Fix the real address first.
 - **One colour is live at a time in the state file.** Do not run two `deploy.sh` commands at once.
 
+## Still open
+
+- Nothing has been pushed and no PR exists. Everything is on local branches.
+- Blue/green (item 21) was tested with a fake `docker` and stub apps, not with the real image on a real host. There is no automatic promotion on error rate because the app exports no metrics.
+- The sign-in limit is per address and not a hard lockout, JWTs cannot be revoked, and the token is kept in `localStorage`.
+- Some dependency findings are unfixed, and the Docker image was not rebuilt or rescanned after the PostgreSQL and deploy changes.
+- CI has no job for the PostgreSQL tests: they need a pgvector database (see the quick start).
+
 ## Quick start after pulling
 
 ```bash
@@ -314,4 +322,4 @@ docker run -d -p 55432:5432 -e POSTGRES_PASSWORD=test-only-password -e POSTGRES_
 tools/test-nginx.sh     # nginx limits and blue/green routing (needs Docker)
 ```
 
-The commit list, oldest first: `360399f` pre-commit hooks, `4d800cf` backend rewrite, `55d9704` tests and tooling, `92759cf` Docker stages and non-root user, `4b963eb` build caching, `8535ee5` library upgrades, `ea50b33` image scans, `56d8081` Hadolint, health check and labels, `5964375` and `1306ddc` this note, `1981518` REST routes and tokens, `65f4c77` tests for them, `111fb0d` frontend on the new URLs, `b88692b` docs for the REST changes, `a5aac74` security fixes, `bfda508` CI pins and dependency bumps. Later commits, newest last: the PostgreSQL move (`74f0ec6`, `50c892b`, `d4c9fec`, `367184f`), nginx and the sign-in limit (`a8bfda0`, after removing SlowAPI in `8dbcaed`), then blue/green and canary releases (item 21). The last edit to this note is the commit after those.
+The commit list, oldest first: `360399f` pre-commit hooks, `4d800cf` backend rewrite, `55d9704` tests and tooling, `92759cf` Docker stages and non-root user, `4b963eb` build caching, `8535ee5` library upgrades, `ea50b33` image scans, `56d8081` Hadolint, health check and labels, `5964375` and `1306ddc` this note, `1981518` REST routes and tokens, `65f4c77` tests for them, `111fb0d` frontend on the new URLs, `b88692b` docs for the REST changes, `a5aac74` security fixes, `bfda508` CI pins and dependency bumps. Later commits, newest last: the PostgreSQL move (`74f0ec6`, `50c892b`, `d4c9fec`, `367184f`), nginx and the sign-in limit (`a8bfda0`, after removing SlowAPI in `8dbcaed`), then blue/green and canary releases (`331dada`, item 21) and the note update for them (`3696e6b`). The sign-in limit went through several changes (`fa9260c`, `a4a5434`, `fb96e2b`) before settling on nginx. The last edit to this note is the commit after those.

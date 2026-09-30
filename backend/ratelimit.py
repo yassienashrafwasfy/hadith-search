@@ -20,7 +20,7 @@ from slowapi.util import get_remote_address
 from rest import problem_response
 
 DEFAULT_LIMIT = "120/minute"
-AUTH_LIMIT = "10/minute"
+AUTH_LIMIT = "10/20 minutes"
 
 
 def default_limit() -> str:

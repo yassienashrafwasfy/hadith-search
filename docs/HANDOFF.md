@@ -219,7 +219,7 @@ Behavior that differs from before:
 
 **Files:** `backend/ratelimit.py` (new), `backend/main.py`, `backend/routers/auth.py`, `backend/rest.py`, `requirements.txt`, `.env.example`, `tests/test_ratelimit.py` (new), `tests/conftest.py`
 
-**Why it's best practice:** Without a limit, one client can try thousands of passwords a minute or keep the search busy for everyone. SlowAPI (a FastAPI version of Flask-Limiter) counts requests per client address. Every route gets 120 a minute. Sign-in and sign-up get 10 a minute, since those are what an attacker hammers. Going over gets a 429 in the same error format as the rest of the API, with a `Retry-After` header, and normal responses show `X-RateLimit-*` headers so clients can slow down on their own.
+**Why it's best practice:** Without a limit, one client can try thousands of passwords a minute or keep the search busy for everyone. SlowAPI (a FastAPI version of Flask-Limiter) counts requests per client address. Every route gets 120 a minute. Sign-in and sign-up get 10 tries per 20 minutes (a locked-out client waits until its 20-minute window ends), since those are what an attacker hammers. Going over gets a 429 in the same error format as the rest of the API, with a `Retry-After` header, and normal responses show `X-RateLimit-*` headers so clients can slow down on their own.
 
 **Benefit:** Password guessing becomes slow enough to be pointless, and a runaway script cannot starve other users. The frontend needs no change: the sign-in form already shows the server's message. Static files and the frontend pages are not counted. Change the numbers with `RATE_LIMIT_DEFAULT` and `RATE_LIMIT_AUTH`, or turn it off with `RATE_LIMIT_ENABLED=false`.
 

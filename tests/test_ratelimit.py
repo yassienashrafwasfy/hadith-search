@@ -62,3 +62,13 @@ async def test_static_files_are_not_limited(tmp_path, _limits_on):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
         codes = {(await c.get("/some/page")).status_code for _ in range(10)}
     assert codes == {200}
+
+
+def test_auth_limit_is_ten_tries_per_twenty_minutes(monkeypatch):
+    from limits import parse
+
+    from ratelimit import auth_limit
+
+    monkeypatch.delenv("RATE_LIMIT_AUTH", raising=False)
+    item = parse(auth_limit())
+    assert (item.amount, item.get_expiry()) == (10, 20 * 60)

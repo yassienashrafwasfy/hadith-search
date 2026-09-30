@@ -1,6 +1,6 @@
 # Handoff: changes since Marawan's last commit
 
-Marawan's last commit is `93a4ff9` ("Align matn embeddings, training passages, and evaluation"). Everything below was added on top of it in 34 commits (the last ones are the REST API, items 16 and 17, the security pass, item 18, nginx with the sign-in limit, item 19, PostgreSQL with pgvector, item 20, and blue/green and canary releases, item 21): about 140 files. All 418 tests pass (1 skipped: it needs NLTK data). The tests need a PostgreSQL with pgvector, see item 20. The work sits on the branch `feat/blue-green-canary`, which builds on `feat/postgres-pgvector`, `feat/rest-api-v1`, `chore/dockerfile-hardening` and `chore/precommit-hooks`, and has not been pushed.
+Marawan's last commit is `93a4ff9` ("Align matn embeddings, training passages, and evaluation"). Everything below was added on top of it in 35 commits (the last ones are the REST API, items 16 and 17, the security pass, item 18, nginx with the sign-in limit, item 19, PostgreSQL with pgvector, item 20, and blue/green and canary releases, item 21): about 140 files. All 418 tests pass (1 skipped: it needs NLTK data). The tests need a PostgreSQL with pgvector, see item 20. The work sits on the branch `feat/blue-green-canary`, which builds on `feat/postgres-pgvector`, `feat/rest-api-v1`, `chore/dockerfile-hardening` and `chore/precommit-hooks`, and has not been pushed.
 
 Each change has the same three lines: which files, why this is the normal way to do it, and what you get out of it.
 

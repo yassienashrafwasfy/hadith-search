@@ -1,13 +1,15 @@
+import json
 import os
 import re
 import shutil
-import sqlite3
 import subprocess
-import json
 from pathlib import Path
 
 import pandas as pd
+from sqlalchemy import Integer, insert
 
+from database import drop_hadiths_table, get_sync_session, init_hadiths_table
+from models import Hadith
 
 LK_REPO_URL = "https://github.com/ShathaTm/LK-Hadith-Corpus.git"
 
@@ -80,7 +82,7 @@ def _remove_prefix(full, prefix):
     prefix_clean = _norm_ws(prefix)
     if not full_clean or not prefix_clean or not full_clean.startswith(prefix_clean):
         return ""
-    return full_clean[len(prefix_clean):].strip()
+    return full_clean[len(prefix_clean) :].strip()
 
 
 def _remove_suffix(full, suffix):
@@ -238,7 +240,9 @@ def transform_lk_dataframe(df):
     output["Arabic_Text_Source"] = output["Arabic_Text"].map(_source_for)
     output["Arabic_Isnad_Source"] = output["Arabic_Isnad"].map(_source_for)
     output["Arabic_Matn_Source"] = output["Arabic_Matn"].map(_source_for)
-    output["Arabic_Comment"] = df["Arabic_Comment"].map(_clean_text) if "Arabic_Comment" in df else ""
+    output["Arabic_Comment"] = (
+        df["Arabic_Comment"].map(_clean_text) if "Arabic_Comment" in df else ""
+    )
 
     output["English_Grade"] = df["English_Grade"].map(_clean_text)
     output["Arabic_Grade"] = df["Arabic_Grade"].map(_clean_text)
@@ -250,11 +254,18 @@ def transform_lk_dataframe(df):
 
     reconstruction_summary = apply_deterministic_reconstruction(output)
     output["Has_English_Content"] = [
-        int(any(_has_text(row[column]) for column in ["English_Text", "English_Isnad", "English_Matn"]))
+        int(
+            any(
+                _has_text(row[column])
+                for column in ["English_Text", "English_Isnad", "English_Matn"]
+            )
+        )
         for _, row in output.iterrows()
     ]
     output["Has_Arabic_Content"] = [
-        int(any(_has_text(row[column]) for column in ["Arabic_Text", "Arabic_Isnad", "Arabic_Matn"]))
+        int(
+            any(_has_text(row[column]) for column in ["Arabic_Text", "Arabic_Isnad", "Arabic_Matn"])
+        )
         for _, row in output.iterrows()
     ]
     output["Has_English_Matn"] = output["English_Matn"].map(lambda value: int(_has_text(value)))
@@ -272,54 +283,64 @@ def transform_lk_dataframe(df):
     return output
 
 
+_RECONSTRUCTION_KINDS = (
+    "Text_reconstructed_from_isnad_matn",
+    "Matn_reconstructed_from_full_minus_isnad",
+    "Isnad_reconstructed_from_full_minus_matn",
+)
+
+
+def _reconstruct_text(fields):
+    """Full text from isnad + matn: (value, source) or None."""
+    if _has_text(fields["Text"]) or not (_has_text(fields["Isnad"]) or _has_text(fields["Matn"])):
+        return None
+    joined = " ".join(p for p in [_clean_text(fields["Isnad"]), _clean_text(fields["Matn"])] if p)
+    return joined.strip() or None
+
+
+def _reconstruct_matn(fields):
+    if _has_text(fields["Matn"]) or not (_has_text(fields["Text"]) and _has_text(fields["Isnad"])):
+        return None
+    return _remove_prefix(fields["Text"], fields["Isnad"]) or None
+
+
+def _reconstruct_isnad(fields):
+    if _has_text(fields["Isnad"]) or not (_has_text(fields["Text"]) and _has_text(fields["Matn"])):
+        return None
+    return _remove_suffix(fields["Text"], fields["Matn"]) or None
+
+
+# (field, rebuild function, extra columns to fill, source label)
+_RECONSTRUCTION_STEPS = (
+    ("Text", _reconstruct_text, ("Hadith",), "reconstructed_from_isnad_matn"),
+    ("Matn", _reconstruct_matn, (), "reconstructed_from_full_minus_isnad"),
+    ("Isnad", _reconstruct_isnad, (), "reconstructed_from_full_minus_matn"),
+)
+
+
+def _reconstruct_row(df, idx, language, summary):
+    """Apply the three steps in order; later steps see values filled by earlier ones."""
+    fields = {f: df.at[idx, f"{language}_{f}"] for f in ("Text", "Isnad", "Matn")}
+    for field, rebuild, extra_columns, source in _RECONSTRUCTION_STEPS:
+        value = rebuild(fields)
+        if value is None:
+            continue
+        for column in (field, *extra_columns):
+            df.at[idx, f"{language}_{column}"] = value
+        df.at[idx, f"{language}_{field}_Source"] = source
+        summary[f"{language}_{field}_{source}"] += 1
+        fields[field] = value
+
+
 def apply_deterministic_reconstruction(df):
     summary = {
-        "English_Text_reconstructed_from_isnad_matn": 0,
-        "Arabic_Text_reconstructed_from_isnad_matn": 0,
-        "English_Matn_reconstructed_from_full_minus_isnad": 0,
-        "Arabic_Matn_reconstructed_from_full_minus_isnad": 0,
-        "English_Isnad_reconstructed_from_full_minus_matn": 0,
-        "Arabic_Isnad_reconstructed_from_full_minus_matn": 0,
+        f"{language}_{kind}": 0
+        for kind in _RECONSTRUCTION_KINDS
+        for language in ("English", "Arabic")
     }
-
-    for idx, row in df.iterrows():
-        for language in ["English", "Arabic"]:
-            text_col = f"{language}_Text"
-            hadith_col = f"{language}_Hadith"
-            isnad_col = f"{language}_Isnad"
-            matn_col = f"{language}_Matn"
-            text_source_col = f"{language}_Text_Source"
-            isnad_source_col = f"{language}_Isnad_Source"
-            matn_source_col = f"{language}_Matn_Source"
-
-            text = df.at[idx, text_col]
-            isnad = df.at[idx, isnad_col]
-            matn = df.at[idx, matn_col]
-
-            if not _has_text(text) and (_has_text(isnad) or _has_text(matn)):
-                reconstructed = " ".join(part for part in [_clean_text(isnad), _clean_text(matn)] if part).strip()
-                if reconstructed:
-                    df.at[idx, text_col] = reconstructed
-                    df.at[idx, hadith_col] = reconstructed
-                    df.at[idx, text_source_col] = "reconstructed_from_isnad_matn"
-                    summary[f"{language}_Text_reconstructed_from_isnad_matn"] += 1
-                    text = reconstructed
-
-            if not _has_text(matn) and _has_text(text) and _has_text(isnad):
-                reconstructed = _remove_prefix(text, isnad)
-                if reconstructed:
-                    df.at[idx, matn_col] = reconstructed
-                    df.at[idx, matn_source_col] = "reconstructed_from_full_minus_isnad"
-                    summary[f"{language}_Matn_reconstructed_from_full_minus_isnad"] += 1
-                    matn = reconstructed
-
-            if not _has_text(isnad) and _has_text(text) and _has_text(matn):
-                reconstructed = _remove_suffix(text, matn)
-                if reconstructed:
-                    df.at[idx, isnad_col] = reconstructed
-                    df.at[idx, isnad_source_col] = "reconstructed_from_full_minus_matn"
-                    summary[f"{language}_Isnad_reconstructed_from_full_minus_matn"] += 1
-
+    for idx in df.index:
+        for language in ("English", "Arabic"):
+            _reconstruct_row(df, idx, language, summary)
     return summary
 
 
@@ -330,16 +351,33 @@ def drop_rows_missing_bilingual_matn(df):
 
     audit_rows = []
     for row in dropped.itertuples(index=False):
-        audit_rows.append({
-            "id_before_drop": getattr(row, "id_before_drop"),
-            "LK_Book": getattr(row, "LK_Book"),
-            "Book": getattr(row, "Book"),
-            "Source_File": getattr(row, "Source_File"),
-            "Chapter_Number": getattr(row, "Chapter_Number"),
-            "Hadith_Number": getattr(row, "Hadith_Number"),
-        })
+        audit_rows.append(
+            {
+                "id_before_drop": getattr(row, "id_before_drop"),
+                "LK_Book": getattr(row, "LK_Book"),
+                "Book": getattr(row, "Book"),
+                "Source_File": getattr(row, "Source_File"),
+                "Chapter_Number": getattr(row, "Chapter_Number"),
+                "Hadith_Number": getattr(row, "Hadith_Number"),
+            }
+        )
 
     return kept.drop(columns=["id_before_drop"]), audit_rows
+
+
+_INT_COLUMNS = [c.name for c in Hadith.__table__.c if isinstance(c.type, Integer)]
+_MODEL_COLUMNS = [c.name for c in Hadith.__table__.c]
+
+
+def _hadith_records(df):
+    """DataFrame -> list of dicts for Hadith: NaN becomes None, integer columns become int."""
+    records = df[_MODEL_COLUMNS].astype(object).where(df[_MODEL_COLUMNS].notna(), None)
+    rows = records.to_dict("records")
+    for row in rows:
+        for column in _INT_COLUMNS:
+            if row[column] is not None:
+                row[column] = int(row[column])
+    return rows
 
 
 def create_database(df):
@@ -347,15 +385,11 @@ def create_database(df):
     if DB_PATH.exists():
         DB_PATH.unlink()
 
-    connection = sqlite3.connect(DB_PATH)
-    try:
-        df.to_sql("HADITHS", connection, if_exists="replace", index=False)
-        connection.execute("CREATE UNIQUE INDEX idx_hadiths_id ON HADITHS(id)")
-        connection.execute("CREATE INDEX idx_hadiths_book ON HADITHS(Book)")
-        connection.execute("CREATE INDEX idx_hadiths_grade ON HADITHS(Normalized_Grade)")
-        connection.commit()
-    finally:
-        connection.close()
+    drop_hadiths_table()
+    init_hadiths_table()
+    with get_sync_session() as session:
+        session.execute(insert(Hadith), _hadith_records(df))
+        session.commit()
 
 
 def write_dropped_rows_audit(dropped_rows):

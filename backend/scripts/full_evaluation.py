@@ -17,22 +17,22 @@ Usage:
     python -m scripts.full_evaluation --baseline BM25 --k 20
 """
 
-import os
-import json
 import argparse
+import json
+import os
 from datetime import datetime
 
 from scripts.stats_tests import (
-    METRICS,
     E5_DEPENDENT_SYSTEMS,
     FINETUNE_MODES,
-    run_cross_config_tests,
-    generate_comparison_latex_table,
-    generate_delta_table,
-    generate_delta_latex_table,
+    METRICS,
     filter_graded_queries,
-    run_analysis,
+    generate_comparison_latex_table,
+    generate_delta_latex_table,
+    generate_delta_table,
     generate_latex_table,
+    run_analysis,
+    run_cross_config_tests,
 )
 
 SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -46,127 +46,123 @@ def load_results(path):
         return json.load(f)
 
 
-def main():
+def _write_json(path, data):
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+
+
+def _write_text(path, text):
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(text)
+
+
+def _parse_args(argv=None):
     parser = argparse.ArgumentParser(
         description="Full evaluation: baseline + fine-tuned comparison"
     )
     parser.add_argument("--k", type=int, default=20)
     parser.add_argument(
-        "--baseline", default="BM25",
+        "--baseline",
+        default="BM25",
         help="Baseline system for significance tests",
     )
-    args = parser.parse_args()
+    return parser.parse_args(argv)
 
-    print("=" * 60)
-    print("FULL EVALUATION: Baseline + Fine-tuned Comparison")
-    print("=" * 60)
 
-    baseline_path = os.path.join(DATA_DIR, "qrels_results.json")
-    baseline_results = load_results(baseline_path)
-    if baseline_results is None:
-        print(f"ERROR: Baseline results not found at {baseline_path}")
+def _load_baseline(data_dir):
+    path = os.path.join(data_dir, "qrels_results.json")
+    results = load_results(path)
+    if results is None:
+        print(f"ERROR: Baseline results not found at {path}")
         print("Run: python -m scripts.evaluation")
-        return
+        return None
+    print(f"\nBaseline loaded: {len(results)} systems")
+    print(f"  Systems: {list(results.keys())}")
+    return results
 
-    print(f"\nBaseline loaded: {len(baseline_results)} systems")
-    print(f"  Systems: {list(baseline_results.keys())}")
 
-    finetuned_results = {}
+def _load_finetuned(data_dir):
+    loaded = {}
     for mode in FINETUNE_MODES:
-        path = os.path.join(DATA_DIR, f"finetuned_results_{mode}.json")
+        path = os.path.join(data_dir, f"finetuned_results_{mode}.json")
         results = load_results(path)
-        if results is not None:
-            finetuned_results[mode] = results
-            print(f"Fine-tuned loaded: {mode} ({len(results)} systems)")
-        else:
+        if results is None:
             print(f"WARNING: Fine-tuned results not found for '{mode}'")
             print(f"  Expected: {path}")
             print(f"  Run: python -m scripts.finetune_eval --mode {mode}")
+            continue
+        loaded[mode] = results
+        print(f"Fine-tuned loaded: {mode} ({len(results)} systems)")
+    return loaded
 
-    qrels_path = os.path.join(DATA_DIR, "qrels_graded.json")
-    if not os.path.exists(qrels_path):
-        print(f"ERROR: Graded qrels not found at {qrels_path}")
-        return
-    with open(qrels_path, encoding="utf-8") as f:
-        qrels_graded = json.load(f)
 
-    graded_qids = {qid for qid, data in qrels_graded.items() if data.get("grades")}
-    print(f"\nGraded queries: {len(graded_qids)}")
+def _load_graded_qids(data_dir):
+    path = os.path.join(data_dir, "qrels_graded.json")
+    qrels = load_results(path)
+    if qrels is None:
+        print(f"ERROR: Graded qrels not found at {path}")
+        return None
+    qids = {qid for qid, data in qrels.items() if data.get("grades")}
+    print(f"\nGraded queries: {len(qids)}")
+    return qids
 
-    baseline_filtered = filter_graded_queries(baseline_results, graded_qids)
-    finetuned_filtered = {}
-    for mode, results in finetuned_results.items():
-        finetuned_filtered[mode] = filter_graded_queries(results, graded_qids)
 
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-
+def _run_baseline_analysis(baseline, args, data_dir):
     print("\n--- Baseline Analysis ---")
-    baseline_stats = run_analysis(baseline_filtered, baseline=args.baseline, k=args.k)
-    baseline_latex = generate_latex_table(
-        baseline_filtered,
-        baseline_stats["pairwise_tests"],
-        baseline=args.baseline,
-        k=args.k,
+    stats = run_analysis(baseline, baseline=args.baseline, k=args.k)
+    latex = generate_latex_table(
+        baseline, stats["pairwise_tests"], baseline=args.baseline, k=args.k
     )
-
-    stats_path = os.path.join(DATA_DIR, "stats_results.json")
-    latex_path = os.path.join(DATA_DIR, "results_table.tex")
-    with open(stats_path, "w", encoding="utf-8") as f:
-        json.dump(baseline_stats, f, indent=2, ensure_ascii=False)
-    with open(latex_path, "w", encoding="utf-8") as f:
-        f.write(baseline_latex)
+    stats_path = os.path.join(data_dir, "stats_results.json")
+    latex_path = os.path.join(data_dir, "results_table.tex")
+    _write_json(stats_path, stats)
+    _write_text(latex_path, latex)
     print(f"  Stats  -> {stats_path}")
     print(f"  LaTeX  -> {latex_path}")
+    return stats
 
-    if not finetuned_filtered:
-        print("\nNo fine-tuned results found. Done.")
-        return
 
+def _count_comparisons(cross_config):
+    return sum(
+        len(metric_data) for sys_data in cross_config.values() for metric_data in sys_data.values()
+    )
+
+
+def _run_cross_config(baseline, finetuned):
     print("\n--- Cross-Config Significance Tests ---")
-    cross_config = run_cross_config_tests(
-        baseline_filtered,
-        finetuned_filtered,
-        e5_systems=E5_DEPENDENT_SYSTEMS,
-    )
-    n_tests = sum(
-        1 for sys_data in cross_config.values()
-        for metric_data in sys_data.values()
-        for _ in metric_data
-    )
-    print(f"  {n_tests} comparisons across {len(cross_config)} systems")
+    cross_config = run_cross_config_tests(baseline, finetuned, e5_systems=E5_DEPENDENT_SYSTEMS)
+    print(f"  {_count_comparisons(cross_config)} comparisons across {len(cross_config)} systems")
+    return cross_config
 
+
+def _write_comparison_tables(baseline, finetuned, cross_config, data_dir):
+    """Comparison + delta LaTeX tables; returns (delta_data, {path: content})."""
     print("\n--- Comparison LaTeX Table ---")
     comparison_latex = generate_comparison_latex_table(
-        baseline_filtered,
-        finetuned_filtered,
-        cross_config,
-        e5_systems=E5_DEPENDENT_SYSTEMS,
+        baseline, finetuned, cross_config, e5_systems=E5_DEPENDENT_SYSTEMS
     )
-    comparison_path = os.path.join(DATA_DIR, "comparison_table.tex")
-    with open(comparison_path, "w", encoding="utf-8") as f:
-        f.write(comparison_latex)
+    comparison_path = os.path.join(data_dir, "comparison_table.tex")
+    _write_text(comparison_path, comparison_latex)
     print(f"  -> {comparison_path}")
 
     print("\n--- Delta Table ---")
-    delta_data = generate_delta_table(
-        baseline_filtered,
-        finetuned_filtered,
-        e5_systems=E5_DEPENDENT_SYSTEMS,
-    )
+    delta_data = generate_delta_table(baseline, finetuned, e5_systems=E5_DEPENDENT_SYSTEMS)
     delta_latex = generate_delta_latex_table(delta_data)
-    delta_path = os.path.join(DATA_DIR, "delta_table.tex")
-    with open(delta_path, "w", encoding="utf-8") as f:
-        f.write(delta_latex)
+    delta_path = os.path.join(data_dir, "delta_table.tex")
+    _write_text(delta_path, delta_latex)
     print(f"  -> {delta_path}")
+    return delta_data, {comparison_path: comparison_latex, delta_path: delta_latex}
 
-    comparison_json = {
+
+def _comparison_json(graded_qids, finetuned, args, baseline_stats, cross_config, delta_data):
+    return {
         "metadata": {
             "timestamp": datetime.now().isoformat(timespec="seconds"),
             "n_graded_queries": len(graded_qids),
             "graded_qids": sorted(graded_qids),
             "baseline_system": args.baseline,
             "k": args.k,
-            "modes": list(finetuned_filtered.keys()),
+            "modes": list(finetuned.keys()),
             "e5_systems": E5_DEPENDENT_SYSTEMS,
             "metrics": METRICS,
         },
@@ -174,55 +170,98 @@ def main():
         "cross_config_tests": cross_config,
         "delta": delta_data,
     }
-    comparison_json_path = os.path.join(DATA_DIR, "comparison_results.json")
-    with open(comparison_json_path, "w", encoding="utf-8") as f:
-        json.dump(comparison_json, f, indent=2, ensure_ascii=False)
-    print(f"\n  Comparison JSON -> {comparison_json_path}")
 
-    for path in [comparison_path, delta_path, comparison_json_path]:
+
+def _archive(artifacts, timestamp):
+    """Write a timestamped copy of each {path: text-or-json-data} artifact."""
+    for path, content in artifacts.items():
         stamped = path.replace(".", f"_{timestamp}.")
-        with open(stamped, "w", encoding="utf-8") as f:
-            if path.endswith(".json"):
-                json.dump(comparison_json, f, indent=2, ensure_ascii=False)
-            elif path == comparison_path:
-                f.write(comparison_latex)
-            else:
-                f.write(delta_latex)
+        if path.endswith(".json"):
+            _write_json(stamped, content)
+        else:
+            _write_text(stamped, content)
         print(f"  Archived        -> {stamped}")
 
+
+def _mode_deltas(delta_data, system_name):
+    """Average delta % over all metrics, per fine-tuning mode, for one system."""
+    averages = delta_data["averages"].get(METRICS[0], {})
+    per_metric = delta_data["per_system"].get(system_name, {})
+    deltas = {}
+    for mode in FINETUNE_MODES:
+        pct = [per_metric[m][mode]["delta_pct"] for m in METRICS if per_metric.get(m, {}).get(mode)]
+        if mode in averages and pct:
+            deltas[mode] = sum(pct) / len(pct)
+    return deltas
+
+
+def _format_deltas(mode_deltas):
+    ranked = sorted(mode_deltas.items(), key=lambda x: x[1], reverse=True)
+    return "  ".join(f"{m}: {'+' if v >= 0 else ''}{v:.1f}%" for m, v in ranked)
+
+
+def _print_summary(baseline, finetuned, delta_data):
     print(f"\n{'=' * 60}")
     print("SUMMARY")
     print(f"{'=' * 60}")
-    print(f"Baseline systems:    {len(baseline_filtered)}")
-    print(f"Fine-tuned modes:    {list(finetuned_filtered.keys())}")
-    available_e5 = [s for s in E5_DEPENDENT_SYSTEMS if s in baseline_filtered]
+    print(f"Baseline systems:    {len(baseline)}")
+    print(f"Fine-tuned modes:    {list(finetuned.keys())}")
+    available_e5 = [s for s in E5_DEPENDENT_SYSTEMS if s in baseline]
     print(f"E5 systems analyzed: {len(available_e5)}")
     print(f"  {available_e5}")
 
-    print(f"\nBest fine-tuning mode per system (avg delta %):")
+    print("\nBest fine-tuning mode per system (avg delta %):")
     for system_name in E5_DEPENDENT_SYSTEMS:
         if system_name not in delta_data["per_system"]:
             continue
-        mode_deltas = {}
-        for mode in FINETUNE_MODES:
-            if mode not in delta_data["averages"].get(METRICS[0], {}):
-                continue
-            pct_vals = []
-            for metric in METRICS:
-                sys_data = delta_data["per_system"].get(system_name, {}).get(metric, {}).get(mode)
-                if sys_data:
-                    pct_vals.append(sys_data["delta_pct"])
-            if pct_vals:
-                mode_deltas[mode] = sum(pct_vals) / len(pct_vals)
+        mode_deltas = _mode_deltas(delta_data, system_name)
         if mode_deltas:
-            best_mode = max(mode_deltas, key=mode_deltas.get)
-            best_val = mode_deltas[best_mode]
-            sign = "+" if best_val >= 0 else ""
-            all_deltas = "  ".join(
-                f"{m}: {'+' if v >= 0 else ''}{v:.1f}%"
-                for m, v in sorted(mode_deltas.items(), key=lambda x: x[1], reverse=True)
-            )
-            print(f"  {system_name:30s}  {all_deltas}")
+            print(f"  {system_name:30s}  {_format_deltas(mode_deltas)}")
+
+
+def _load_inputs(data_dir):
+    """(baseline, finetuned, graded_qids) or None when a required input is missing."""
+    baseline = _load_baseline(data_dir)
+    if baseline is None:
+        return None
+    finetuned = _load_finetuned(data_dir)
+    graded_qids = _load_graded_qids(data_dir)
+    if graded_qids is None:
+        return None
+    return baseline, finetuned, graded_qids
+
+
+def _compare_finetuned(baseline, finetuned, graded_qids, baseline_stats, args, data_dir):
+    cross_config = _run_cross_config(baseline, finetuned)
+    delta_data, tables = _write_comparison_tables(baseline, finetuned, cross_config, data_dir)
+    comparison = _comparison_json(
+        graded_qids, finetuned, args, baseline_stats, cross_config, delta_data
+    )
+    json_path = os.path.join(data_dir, "comparison_results.json")
+    _write_json(json_path, comparison)
+    print(f"\n  Comparison JSON -> {json_path}")
+    _archive({**tables, json_path: comparison}, datetime.now().strftime("%Y%m%d_%H%M%S"))
+    _print_summary(baseline, finetuned, delta_data)
+
+
+def main(argv=None):
+    args = _parse_args(argv)
+    print("=" * 60)
+    print("FULL EVALUATION: Baseline + Fine-tuned Comparison")
+    print("=" * 60)
+
+    inputs = _load_inputs(DATA_DIR)
+    if inputs is None:
+        return
+    baseline_raw, finetuned_raw, graded_qids = inputs
+
+    baseline = filter_graded_queries(baseline_raw, graded_qids)
+    finetuned = {m: filter_graded_queries(r, graded_qids) for m, r in finetuned_raw.items()}
+    baseline_stats = _run_baseline_analysis(baseline, args, DATA_DIR)
+    if not finetuned:
+        print("\nNo fine-tuned results found. Done.")
+        return
+    _compare_finetuned(baseline, finetuned, graded_qids, baseline_stats, args, DATA_DIR)
 
 
 if __name__ == "__main__":

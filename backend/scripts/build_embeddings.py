@@ -1,10 +1,13 @@
 import os
 import sys
+
+import numpy as np
+import pandas as pd
 import torch
 from sentence_transformers import SentenceTransformer
-import numpy as np
-import sqlite3
-import pandas as pd
+
+from database import read_hadiths_df
+from models import Hadith
 
 BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if BACKEND_DIR not in sys.path:
@@ -12,8 +15,9 @@ if BACKEND_DIR not in sys.path:
 
 # Reuse the exact query-side Arabic normalization so passages and queries
 # land in the same token space. Do NOT reimplement these here.
-from scripts.preprocess import normalize_arabic_text
 from camel_tools.utils.dediac import dediac_ar
+
+from scripts import normalize_arabic_text
 
 
 def has_text(value):
@@ -32,75 +36,95 @@ def normalize_arabic_passage(text):
     return normalize_arabic_text(dediac_ar(text))
 
 
-def run():
-    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-    DB_PATH = os.path.join(BASE_DIR, "..", "data", "hadiths.db")
+EMBEDDING_BATCH_SIZE = 32
+MODEL_NAME = "intfloat/multilingual-e5-large"
+MAX_REPORTED_IDS = 20
+DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data")
 
-    if not torch.cuda.is_available():
-        print("CUDA is not available.")
-        choice = input("Proceed with CPU (extremely slow)? [Y/N]: ").strip().lower()
-        if choice != 'y':
-            print("Aborted.")
-            return
-        device = 'cpu'
-        print("Using CPU (this will be very slow)")
-    else:
-        device = 'cuda'
-        print(f"Using device: {device} ({torch.cuda.get_device_name(0)})")
 
-    conn = sqlite3.connect(DB_PATH)
-    df = pd.read_sql("""
-        SELECT id, English_Text, Arabic_Text,
-               Chapter_Title_English, Chapter_Title_Arabic,
-               English_Matn, Arabic_Matn
-        FROM hadiths
-    """, conn)
-    conn.close()
+def _choose_device():
+    """'cuda' when available, 'cpu' if the user confirms, None to abort."""
+    if torch.cuda.is_available():
+        print(f"Using device: cuda ({torch.cuda.get_device_name(0)})")
+        return "cuda"
+    print("CUDA is not available.")
+    choice = input("Proceed with CPU (extremely slow)? [Y/N]: ").strip().lower()
+    if choice != "y":
+        print("Aborted.")
+        return None
+    print("Using CPU (this will be very slow)")
+    return "cpu"
 
+
+def _load_corpus():
+    df = read_hadiths_df(
+        Hadith.id,
+        Hadith.English_Text,
+        Hadith.Arabic_Text,
+        Hadith.Chapter_Title_English,
+        Hadith.Chapter_Title_Arabic,
+        Hadith.English_Matn,
+        Hadith.Arabic_Matn,
+    )
     print(f"Loaded {len(df)} hadiths")
-    missing_english = df.loc[~df["English_Matn"].map(has_text), "id"].astype(int).tolist()
-    missing_arabic = df.loc[~df["Arabic_Matn"].map(has_text), "id"].astype(int).tolist()
-    if missing_english or missing_arabic:
+    missing = {
+        language: df.loc[~df[f"{language}_Matn"].map(has_text), "id"].astype(int).tolist()
+        for language in ("English", "Arabic")
+    }
+    if missing["English"] or missing["Arabic"]:
         raise ValueError(
             "Canonical bilingual-matn corpus contains missing matn: "
-            f"English ids={missing_english[:20]} Arabic ids={missing_arabic[:20]}"
+            f"English ids={missing['English'][:MAX_REPORTED_IDS]} "
+            f"Arabic ids={missing['Arabic'][:MAX_REPORTED_IDS]}"
         )
+    return df
 
-    model = SentenceTransformer("intfloat/multilingual-e5-large", device=device)
+
+def _passages(df, language, prepare):
+    """`passage: ...` strings from the raw matn; `prepare` maps a matn to the embedded text."""
+    column = f"{language}_Matn"
+    texts = []
+    for hadith_id, value in zip(df["id"], df[column]):
+        matn = clean_text(value)
+        if not matn:
+            raise ValueError(
+                f"Hadith id {hadith_id} is missing {column} in the canonical bilingual-matn corpus"
+            )
+        texts.append(f"passage: {prepare(matn)}")
+    return texts
+
+
+def _encode_and_save(model, texts, language, expected_rows):
+    embeddings = model.encode(texts, batch_size=EMBEDDING_BATCH_SIZE, show_progress_bar=True)
+    if len(embeddings) != expected_rows:
+        raise ValueError(
+            f"{language} embedding count mismatch: {len(embeddings)} embeddings "
+            f"for {expected_rows} rows"
+        )
+    np.save(os.path.join(DATA_DIR, f"{language.lower()}_embeddings.npy"), embeddings)
+    print(f"{language} embeddings saved")
+    return embeddings
+
+
+def run():
+    device = _choose_device()
+    if device is None:
+        return
+    df = _load_corpus()
+    model = SentenceTransformer(MODEL_NAME, device=device)
 
     # English: raw matn only (no chapter). E5 expects natural text; the query
     # path uses `query: {query}` with no preprocessing, so passages stay raw too.
     print("Generating English embeddings (passage: [Matn])...")
-    en_texts = []
-    for _, row in df.iterrows():
-        matn = clean_text(row.get("English_Matn"))
-        if not matn:
-            raise ValueError(f"Hadith id {row['id']} is missing English_Matn in the canonical bilingual-matn corpus")
-        en_texts.append(f"passage: {matn}")
-    en_embeddings = model.encode(en_texts, batch_size=32, show_progress_bar=True)
-    if len(en_embeddings) != len(df):
-        raise ValueError(f"English embedding count mismatch: {len(en_embeddings)} embeddings for {len(df)} rows")
-    np.save(os.path.join(BASE_DIR, "..", "data", "english_embeddings.npy"), en_embeddings)
-    print("English embeddings saved")
+    _encode_and_save(model, _passages(df, "English", str), "English", len(df))
 
     # Arabic: raw matn only (no chapter), normalized to mirror the query path
     # in search.py: `query: {normalize_arabic_text(dediac_ar(query))}`.
     print("Generating Arabic embeddings (passage: [normalized Matn])...")
-    ar_texts = []
-    for _, row in df.iterrows():
-        matn = clean_text(row.get("Arabic_Matn"))
-        if not matn:
-            raise ValueError(f"Hadith id {row['id']} is missing Arabic_Matn in the canonical bilingual-matn corpus")
-        ar_texts.append(f"passage: {normalize_arabic_passage(matn)}")
-    ar_embeddings = model.encode(ar_texts, batch_size=32, show_progress_bar=True)
-    if len(ar_embeddings) != len(df):
-        raise ValueError(f"Arabic embedding count mismatch: {len(ar_embeddings)} embeddings for {len(df)} rows")
-    np.save(os.path.join(BASE_DIR, "..", "data", "arabic_embeddings.npy"), ar_embeddings)
-    print("Arabic embeddings saved")
+    ar_texts = _passages(df, "Arabic", normalize_arabic_passage)
+    _encode_and_save(model, ar_texts, "Arabic", len(df))
 
-    np.save(os.path.join(BASE_DIR, "..", "data", "hadith_ids.npy"), df["id"].values)
-    if len(df["id"].values) != len(en_embeddings) or len(df["id"].values) != len(ar_embeddings):
-        raise ValueError("hadith_ids length does not match embedding arrays")
+    np.save(os.path.join(DATA_DIR, "hadith_ids.npy"), df["id"].values)
     print("Done")
 
 

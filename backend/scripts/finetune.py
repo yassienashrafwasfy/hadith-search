@@ -10,20 +10,21 @@ Loss: Multiple Negative Ranking Loss (MNRL) with in-batch negatives
 Split: 85/15 train/val with early stopping
 """
 
-import os
-import json
-import sqlite3
-import random
 import argparse
-import math
-from datetime import datetime
+import json
+import os
+import random
 
 import numpy as np
 import torch
 import torch.nn.functional as F
-from torch.utils.data import Dataset, DataLoader
-from transformers import AutoTokenizer, AutoModel
 from peft import LoraConfig, get_peft_model
+from sqlalchemy import select
+from torch.utils.data import DataLoader, Dataset
+from transformers import AutoModel, AutoTokenizer
+
+from database import get_sync_session
+from models import Hadith
 
 SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(SCRIPTS_DIR, "..", "data")
@@ -51,6 +52,7 @@ OUTPUT_DIR = os.path.join(DATA_DIR, "finetuned")
 # Data loading
 # ---------------------------------------------------------------------------
 
+
 def _clean_text(value):
     return str(value).strip() if value else ""
 
@@ -60,108 +62,102 @@ def _format_passage(language, matn):
     if not matn:
         return ""
     if language == "AR":
-        from scripts.preprocess import normalize_arabic_text
         from camel_tools.utils.dediac import dediac_ar
+
+        from scripts.preprocess import normalize_arabic_text
+
         matn = normalize_arabic_text(dediac_ar(matn))
     return f"passage: {matn}"
 
 
 def _load_hadith_passages(language, hadith_ids):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    matn_col = "Arabic_Matn" if language == "AR" else "English_Matn"
-    placeholders = ",".join("?" * len(hadith_ids))
-    cursor.execute(
-        f"SELECT id, {matn_col} FROM hadiths WHERE id IN ({placeholders})",
-        hadith_ids,
-    )
+    matn_col = Hadith.Arabic_Matn if language == "AR" else Hadith.English_Matn
+    with get_sync_session() as session:
+        rows = session.execute(
+            select(Hadith.id, matn_col).where(Hadith.id.in_([int(h) for h in hadith_ids]))
+        ).all()
     passages = {}
-    for row in cursor.fetchall():
+    for row in rows:
         passage = _format_passage(language, row[1])
         if passage:
             passages[row[0]] = passage
-    conn.close()
     return passages
+
+
+def _read_required_json(path, label):
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"{label} not found: {path}")
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def _query_anchor(language, text):
+    """E5 `query:` string; Arabic text is diacritic-stripped and normalised like the corpus."""
+    if language == "AR":
+        from camel_tools.utils.dediac import dediac_ar
+
+        from scripts.preprocess import normalize_arabic_text
+
+        text = normalize_arabic_text(dediac_ar(text))
+    return f"query: {text}"
+
+
+def _query_language(qid):
+    return "AR" if qid.startswith("AR") else "EN"
+
+
+def _triplet_pairs(qid, query_text, grades):
+    """(anchor, passage, qid) for every hadith graded >= 1 that has a passage."""
+    language = _query_language(qid)
+    passages = _load_hadith_passages(language, [int(hid) for hid in grades])
+    anchor = None
+    pairs = []
+    for hid_str, grade in grades.items():
+        passage = passages.get(int(hid_str))
+        if passage is None or grade < 1:
+            continue
+        anchor = anchor or _query_anchor(language, query_text)
+        pairs.append((anchor, passage, qid))
+    return pairs
 
 
 def load_triplet_data():
     """Load (query, positive hadith) pairs from LLM-graded training qrels."""
-    qrels_path = os.path.join(DATA_DIR, "training_qrels_graded.json")
-    queries_path = os.path.join(DATA_DIR, "training_queries.json")
-
-    if not os.path.exists(qrels_path):
-        raise FileNotFoundError(f"Training qrels not found: {qrels_path}")
-    if not os.path.exists(queries_path):
-        raise FileNotFoundError(f"Training queries not found: {queries_path}")
-
-    with open(qrels_path, encoding="utf-8") as f:
-        qrels = json.load(f)
-    with open(queries_path, encoding="utf-8") as f:
-        queries = json.load(f)
-
+    qrels = _read_required_json(
+        os.path.join(DATA_DIR, "training_qrels_graded.json"), "Training qrels"
+    )
+    queries = _read_required_json(
+        os.path.join(DATA_DIR, "training_queries.json"), "Training queries"
+    )
     pairs = []
     for qid, grades in qrels.items():
-        if qid not in queries:
-            continue
-        query_text = queries[qid]
-        language = "AR" if qid.startswith("AR") else "EN"
+        if qid in queries:
+            pairs.extend(_triplet_pairs(qid, queries[qid], grades))
+    return pairs
 
-        hadith_ids = [int(hid) for hid in grades.keys()]
-        passages = _load_hadith_passages(language, hadith_ids)
 
-        for hid_str, grade in grades.items():
-            hid = int(hid_str)
-            if hid not in passages:
-                continue
-            if grade >= 1:
-                if language == "AR":
-                    from scripts.preprocess import normalize_arabic_text
-                    from camel_tools.utils.dediac import dediac_ar
-                    anchor = f"query: {normalize_arabic_text(dediac_ar(query_text))}"
-                else:
-                    anchor = f"query: {query_text}"
-                pairs.append((anchor, passages[hid], qid))
-
+def _kv_pairs_for_row(kv, passages_by_language):
+    hadith_id = int(kv["hadith_id"]) if kv.get("hadith_id") else None
+    pairs = []
+    for language in ("EN", "AR"):
+        concept = kv.get(f"concept_{language.lower()}", "").strip()
+        passage = passages_by_language[language].get(hadith_id)
+        if concept and passage:
+            anchor = _query_anchor(language, concept)
+            pairs.append((anchor, passage, f"kv_{kv.get('id', 0)}_{language.lower()}"))
     return pairs
 
 
 def load_kv_data():
     """Load (concept, hadith) pairs from verified KV pairs."""
-    kv_path = os.path.join(DATA_DIR, "kv_pairs_verified.json")
-
-    if not os.path.exists(kv_path):
-        raise FileNotFoundError(f"Verified KV pairs not found: {kv_path}")
-
-    with open(kv_path, encoding="utf-8") as f:
-        kv_pairs = json.load(f)
-
-    pairs = []
+    kv_pairs = _read_required_json(
+        os.path.join(DATA_DIR, "kv_pairs_verified.json"), "Verified KV pairs"
+    )
     hadith_ids = [int(kv["hadith_id"]) for kv in kv_pairs if kv.get("hadith_id")]
-    en_passages = _load_hadith_passages("EN", hadith_ids) if hadith_ids else {}
-    ar_passages = _load_hadith_passages("AR", hadith_ids) if hadith_ids else {}
-
-    for kv in kv_pairs:
-        concept_en = kv.get("concept_en", "").strip()
-        concept_ar = kv.get("concept_ar", "").strip()
-        hadith_id = int(kv.get("hadith_id")) if kv.get("hadith_id") else None
-
-        if concept_en and hadith_id in en_passages:
-            pairs.append((
-                f"query: {concept_en}",
-                en_passages[hadith_id],
-                f"kv_{kv.get('id', 0)}_en",
-            ))
-        if concept_ar and hadith_id in ar_passages:
-            from scripts.preprocess import normalize_arabic_text
-            from camel_tools.utils.dediac import dediac_ar
-            normalized_ar = normalize_arabic_text(dediac_ar(concept_ar))
-            pairs.append((
-                f"query: {normalized_ar}",
-                ar_passages[hadith_id],
-                f"kv_{kv.get('id', 0)}_ar",
-            ))
-
-    return pairs
+    passages = {
+        lang: _load_hadith_passages(lang, hadith_ids) if hadith_ids else {} for lang in ("EN", "AR")
+    }
+    return [pair for kv in kv_pairs for pair in _kv_pairs_for_row(kv, passages)]
 
 
 def load_combined_data():
@@ -174,6 +170,7 @@ def load_combined_data():
 # ---------------------------------------------------------------------------
 # Model
 # ---------------------------------------------------------------------------
+
 
 def mean_pool(last_hidden_state, attention_mask):
     mask = attention_mask.unsqueeze(-1).float()
@@ -207,6 +204,7 @@ def mnrl_loss(anchor_embs, positive_embs, temperature=TEMPERATURE):
 # Dataset
 # ---------------------------------------------------------------------------
 
+
 class PairDataset(Dataset):
     def __init__(self, pairs):
         self.anchors = [p[0] for p in pairs]
@@ -229,12 +227,42 @@ def collate_fn(batch):
 # Training
 # ---------------------------------------------------------------------------
 
-def train(mode, output_dir=OUTPUT_DIR, epochs=EPOCHS, batch_size=BATCH_SIZE,
-          lr=LEARNING_RATE, patience=PATIENCE, seed=SEED):
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
 
+_LOADERS = {"triplet": load_triplet_data, "kv_pairs": load_kv_data, "combined": load_combined_data}
+
+
+def _load_pairs(mode):
+    if mode not in _LOADERS:
+        raise ValueError(f"Unknown mode: {mode}")
+    print("Loading training data...")
+    pairs = _LOADERS[mode]()
+    print(f"Total pairs: {len(pairs)}")
+    return pairs
+
+
+def _make_loaders(pairs, batch_size):
+    random.shuffle(pairs)
+    val_size = max(1, int(len(pairs) * VAL_SPLIT))
+    val_pairs, train_pairs = pairs[:val_size], pairs[val_size:]
+    print(f"Train: {len(train_pairs)}, Val: {len(val_pairs)}")
+    train_loader = DataLoader(
+        PairDataset(train_pairs),
+        batch_size=batch_size,
+        shuffle=True,
+        collate_fn=collate_fn,
+        drop_last=True,
+    )
+    val_loader = DataLoader(
+        PairDataset(val_pairs),
+        batch_size=batch_size,
+        shuffle=False,
+        collate_fn=collate_fn,
+        drop_last=False,
+    )
+    return train_loader, val_loader, len(train_pairs), len(val_pairs)
+
+
+def _print_config(mode, batch_size, lr, epochs, patience, seed):
     print(f"=== LoRA Fine-tuning ({mode}) ===")
     print(f"Model: {MODEL_NAME}")
     print(f"LoRA: r={LORA_R}, alpha={LORA_ALPHA}, dropout={LORA_DROPOUT}")
@@ -243,49 +271,10 @@ def train(mode, output_dir=OUTPUT_DIR, epochs=EPOCHS, batch_size=BATCH_SIZE,
     print(f"Seed: {seed}")
     print()
 
-    # Load data
-    print("Loading training data...")
-    if mode == "triplet":
-        pairs = load_triplet_data()
-    elif mode == "kv_pairs":
-        pairs = load_kv_data()
-    elif mode == "combined":
-        pairs = load_combined_data()
-    else:
-        raise ValueError(f"Unknown mode: {mode}")
 
-    print(f"Total pairs: {len(pairs)}")
-
-    random.shuffle(pairs)
-    val_size = max(1, int(len(pairs) * VAL_SPLIT))
-    val_pairs = pairs[:val_size]
-    train_pairs = pairs[val_size:]
-    print(f"Train: {len(train_pairs)}, Val: {len(val_pairs)}")
-
-    train_dataset = PairDataset(train_pairs)
-    val_dataset = PairDataset(val_pairs)
-
-    train_loader = DataLoader(
-        train_dataset, batch_size=batch_size, shuffle=True,
-        collate_fn=collate_fn, drop_last=True,
-    )
-    val_loader = DataLoader(
-        val_dataset, batch_size=batch_size, shuffle=False,
-        collate_fn=collate_fn, drop_last=False,
-    )
-
-    # Device
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Device: {device}")
-    if device.type == "cpu":
-        print("WARNING: Training on CPU will be very slow.")
-
-    # Load model
+def _build_model(device):
     print("Loading base model...")
     tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
-    base_model = AutoModel.from_pretrained(MODEL_NAME)
-
-    # Apply LoRA
     lora_config = LoraConfig(
         r=LORA_R,
         lora_alpha=LORA_ALPHA,
@@ -294,116 +283,147 @@ def train(mode, output_dir=OUTPUT_DIR, epochs=EPOCHS, batch_size=BATCH_SIZE,
         bias="none",
         task_type="FEATURE_EXTRACTION",
     )
-    model = get_peft_model(base_model, lora_config)
+    model = get_peft_model(AutoModel.from_pretrained(MODEL_NAME), lora_config)
     model.to(device)
-
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
     total = sum(p.numel() for p in model.parameters())
     print(f"Trainable params: {trainable:,} / {total:,} ({100*trainable/total:.2f}%)")
+    return model, tokenizer
 
-    optimizer = torch.optim.AdamW(
-        [p for p in model.parameters() if p.requires_grad],
-        lr=lr,
-    )
 
-    # Output dir
-    mode_dir = os.path.join(output_dir, mode)
-    os.makedirs(mode_dir, exist_ok=True)
+def _pick_device():
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Device: {device}")
+    if device.type == "cpu":
+        print("WARNING: Training on CPU will be very slow.")
+    return device
 
-    # Training loop
-    best_val_loss = float("inf")
-    patience_counter = 0
+
+def _batch_loss(model, tokenizer, device, anchors, positives):
+    anchor_embs = encode_texts(model, tokenizer, anchors, device)
+    positive_embs = encode_texts(model, tokenizer, positives, device)
+    return mnrl_loss(anchor_embs, positive_embs)
+
+
+def _train_epoch(model, tokenizer, device, loader, optimizer, epoch):
+    model.train()
+    trainable = [p for p in model.parameters() if p.requires_grad]
+    loss_sum = 0.0
+    for batch_idx, (anchors, positives) in enumerate(loader):
+        optimizer.zero_grad()
+        loss = _batch_loss(model, tokenizer, device, anchors, positives)
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(trainable, 1.0)
+        optimizer.step()
+        loss_sum += loss.item()
+        if (batch_idx + 1) % 10 == 0:
+            print(f"  Epoch {epoch} [{batch_idx+1}/{len(loader)}] loss={loss.item():.4f}")
+    return loss_sum / max(len(loader), 1)
+
+
+def _validate(model, tokenizer, device, loader):
+    model.eval()
+    loss_sum = 0.0
+    with torch.no_grad():
+        for anchors, positives in loader:
+            loss_sum += _batch_loss(model, tokenizer, device, anchors, positives).item()
+    return loss_sum / max(len(loader), 1)
+
+
+class _EarlyStopping:
+    def __init__(self, patience):
+        self.patience = patience
+        self.best = float("inf")
+        self.misses = 0
+
+    def update(self, val_loss):
+        """Record a validation loss; returns True when it is a new best."""
+        if val_loss < self.best:
+            self.best, self.misses = val_loss, 0
+            return True
+        self.misses += 1
+        return False
+
+    @property
+    def exhausted(self):
+        return self.misses >= self.patience
+
+
+def _save_history(mode_dir, config, history, best_val_loss):
+    path = os.path.join(mode_dir, "training_history.json")
+    payload = {
+        **config,
+        "best_val_loss": best_val_loss,
+        "epochs_run": len(history),
+        "history": history,
+    }
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2)
+    return path
+
+
+def _fit(model, tokenizer, device, loaders, optimizer, epochs, patience, mode_dir):
+    train_loader, val_loader = loaders
+    stopper = _EarlyStopping(patience)
     history = []
-
     for epoch in range(1, epochs + 1):
-        # Train
-        model.train()
-        train_loss_sum = 0.0
-        train_batches = 0
-
-        for batch_idx, (anchors, positives) in enumerate(train_loader):
-            optimizer.zero_grad()
-
-            anchor_embs = encode_texts(model, tokenizer, anchors, device)
-            positive_embs = encode_texts(model, tokenizer, positives, device)
-
-            loss = mnrl_loss(anchor_embs, positive_embs)
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(
-                [p for p in model.parameters() if p.requires_grad], 1.0,
-            )
-            optimizer.step()
-
-            train_loss_sum += loss.item()
-            train_batches += 1
-
-            if (batch_idx + 1) % 10 == 0:
-                print(f"  Epoch {epoch} [{batch_idx+1}/{len(train_loader)}] "
-                      f"loss={loss.item():.4f}")
-
-        avg_train_loss = train_loss_sum / max(train_batches, 1)
-
-        # Validate
-        model.eval()
-        val_loss_sum = 0.0
-        val_batches = 0
-
-        with torch.no_grad():
-            for anchors, positives in val_loader:
-                anchor_embs = encode_texts(model, tokenizer, anchors, device)
-                positive_embs = encode_texts(model, tokenizer, positives, device)
-                loss = mnrl_loss(anchor_embs, positive_embs)
-                val_loss_sum += loss.item()
-                val_batches += 1
-
-        avg_val_loss = val_loss_sum / max(val_batches, 1)
-
-        print(f"Epoch {epoch}/{epochs} — "
-              f"train_loss={avg_train_loss:.4f}, val_loss={avg_val_loss:.4f}")
-
-        history.append({
-            "epoch": epoch,
-            "train_loss": avg_train_loss,
-            "val_loss": avg_val_loss,
-        })
-
-        # Early stopping
-        if avg_val_loss < best_val_loss:
-            best_val_loss = avg_val_loss
-            patience_counter = 0
-            print(f"  New best val loss: {best_val_loss:.4f} — saving adapter")
+        train_loss = _train_epoch(model, tokenizer, device, train_loader, optimizer, epoch)
+        val_loss = _validate(model, tokenizer, device, val_loader)
+        print(f"Epoch {epoch}/{epochs} — train_loss={train_loss:.4f}, val_loss={val_loss:.4f}")
+        history.append({"epoch": epoch, "train_loss": train_loss, "val_loss": val_loss})
+        if stopper.update(val_loss):
+            print(f"  New best val loss: {stopper.best:.4f} — saving adapter")
             model.save_pretrained(mode_dir)
             tokenizer.save_pretrained(mode_dir)
-        else:
-            patience_counter += 1
-            print(f"  No improvement ({patience_counter}/{patience})")
-            if patience_counter >= patience:
-                print(f"  Early stopping at epoch {epoch}")
-                break
+            continue
+        print(f"  No improvement ({stopper.misses}/{patience})")
+        if stopper.exhausted:
+            print(f"  Early stopping at epoch {epoch}")
+            break
+    return history, stopper.best
 
-    # Save training history
-    history_path = os.path.join(mode_dir, "training_history.json")
-    with open(history_path, "w", encoding="utf-8") as f:
-        json.dump({
-            "mode": mode,
-            "model": MODEL_NAME,
-            "lora_r": LORA_R,
-            "lora_alpha": LORA_ALPHA,
-            "lora_dropout": LORA_DROPOUT,
-            "batch_size": batch_size,
-            "learning_rate": lr,
-            "temperature": TEMPERATURE,
-            "train_pairs": len(train_pairs),
-            "val_pairs": len(val_pairs),
-            "best_val_loss": best_val_loss,
-            "epochs_run": len(history),
-            "history": history,
-        }, f, indent=2)
 
+def train(
+    mode,
+    output_dir=OUTPUT_DIR,
+    epochs=EPOCHS,
+    batch_size=BATCH_SIZE,
+    lr=LEARNING_RATE,
+    patience=PATIENCE,
+    seed=SEED,
+):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    _print_config(mode, batch_size, lr, epochs, patience, seed)
+
+    train_loader, val_loader, n_train, n_val = _make_loaders(_load_pairs(mode), batch_size)
+    device = _pick_device()
+    model, tokenizer = _build_model(device)
+    optimizer = torch.optim.AdamW([p for p in model.parameters() if p.requires_grad], lr=lr)
+
+    mode_dir = os.path.join(output_dir, mode)
+    os.makedirs(mode_dir, exist_ok=True)
+    history, best_val_loss = _fit(
+        model, tokenizer, device, (train_loader, val_loader), optimizer, epochs, patience, mode_dir
+    )
+
+    config = {
+        "mode": mode,
+        "model": MODEL_NAME,
+        "lora_r": LORA_R,
+        "lora_alpha": LORA_ALPHA,
+        "lora_dropout": LORA_DROPOUT,
+        "batch_size": batch_size,
+        "learning_rate": lr,
+        "temperature": TEMPERATURE,
+        "train_pairs": n_train,
+        "val_pairs": n_val,
+    }
+    history_path = _save_history(mode_dir, config, history, best_val_loss)
     print(f"\nDone. Best val loss: {best_val_loss:.4f}")
     print(f"Adapter saved to: {mode_dir}")
     print(f"History saved to: {history_path}")
-
     return mode_dir
 
 
@@ -412,16 +432,16 @@ def train(mode, output_dir=OUTPUT_DIR, epochs=EPOCHS, batch_size=BATCH_SIZE,
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description="LoRA fine-tuning for multilingual-e5-large"
-    )
+    parser = argparse.ArgumentParser(description="LoRA fine-tuning for multilingual-e5-large")
     parser.add_argument(
-        "--mode", choices=["triplet", "kv_pairs", "combined"],
+        "--mode",
+        choices=["triplet", "kv_pairs", "combined"],
         default="combined",
         help="Training mode (default: combined)",
     )
     parser.add_argument(
-        "--output-dir", default=OUTPUT_DIR,
+        "--output-dir",
+        default=OUTPUT_DIR,
         help="Output directory for adapter weights",
     )
     parser.add_argument("--epochs", type=int, default=EPOCHS)

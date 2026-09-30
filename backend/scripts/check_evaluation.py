@@ -1,5 +1,6 @@
 """Run with: python -m scripts.check_evaluation"""
-from scripts.evaluation import evaluate_system, evaluate_query, evaluate_query_at_k
+
+from scripts import evaluate_query, evaluate_query_at_k, evaluate_system
 
 grades = {1: 0, 2: 1, 3: 2}
 row = evaluate_system(["EN01"], [[1, 2]], [grades]).loc["EN01"]

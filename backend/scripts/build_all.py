@@ -1,7 +1,6 @@
 import argparse
 import json
 import os
-import sqlite3
 import sys
 import time
 from datetime import datetime, timezone
@@ -13,6 +12,10 @@ if BACKEND_DIR not in sys.path:
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
+from sqlalchemy import func, inspect, or_, select
+
+from database import get_sync_engine, get_sync_session
+from models import Hadith
 from scripts import data_creation
 
 DATA_DIR = os.path.join(SCRIPTS_DIR, "..", "data")
@@ -24,10 +27,7 @@ def _has_columns(required_columns):
     if not os.path.isfile(DB_PATH):
         return False
     try:
-        conn = sqlite3.connect(DB_PATH)
-        cur = conn.execute("PRAGMA table_info(hadiths)")
-        cols = {row[1] for row in cur.fetchall()}
-        conn.close()
+        cols = {c["name"] for c in inspect(get_sync_engine()).get_columns("hadiths")}
         return set(required_columns).issubset(cols)
     except Exception:
         return False
@@ -45,14 +45,21 @@ def _has_preprocessed_data():
     if not _has_columns(required_columns):
         return False
     try:
-        conn = sqlite3.connect(DB_PATH)
-        count = conn.execute("""
-            SELECT COUNT(*)
-            FROM hadiths
-            WHERE COALESCE(NULLIF(TRIM(Preprocessed_English_Matn), ''), '') != ''
-               OR COALESCE(NULLIF(TRIM(Preprocessed_Arabic_Matn), ''), '') != ''
-        """).fetchone()[0]
-        conn.close()
+
+        def _non_blank(column):
+            return func.coalesce(func.nullif(func.trim(column), ""), "") != ""
+
+        with get_sync_session() as session:
+            count = session.execute(
+                select(func.count())
+                .select_from(Hadith)
+                .where(
+                    or_(
+                        _non_blank(Hadith.Preprocessed_English_Matn),
+                        _non_blank(Hadith.Preprocessed_Arabic_Matn),
+                    )
+                )
+            ).scalar_one()
         return count > 0
     except Exception:
         return False
@@ -62,10 +69,8 @@ def _row_count():
     if not os.path.isfile(DB_PATH):
         return None
     try:
-        conn = sqlite3.connect(DB_PATH)
-        count = conn.execute("SELECT COUNT(*) FROM hadiths").fetchone()[0]
-        conn.close()
-        return count
+        with get_sync_session() as session:
+            return session.execute(select(func.count()).select_from(Hadith)).scalar_one()
     except Exception:
         return None
 
@@ -81,7 +86,13 @@ def _output_exists(step):
 
 def _prompt_overwrite(name):
     while True:
-        choice = input(f"\n[{name}] Output data already exists. [Y]es to rebuild, [N]o to skip, [Q]uit: ").strip().lower()
+        choice = (
+            input(
+                f"\n[{name}] Output data already exists. [Y]es to rebuild, [N]o to skip, [Q]uit: "
+            )
+            .strip()
+            .lower()
+        )
         if choice == "y":
             return True
         if choice == "n":
@@ -120,22 +131,24 @@ def _make_steps(skip_embeddings):
     ]
 
     if not skip_embeddings:
-        steps.extend([
-            {
-                "name": "Generating dense embeddings",
-                "module": "scripts.build_embeddings",
-                "markers": [
-                    os.path.join(DATA_DIR, "english_embeddings.npy"),
-                    os.path.join(DATA_DIR, "arabic_embeddings.npy"),
-                    os.path.join(DATA_DIR, "hadith_ids.npy"),
-                ],
-            },
-            {
-                "name": "Pooling candidate qrels",
-                "module": "scripts.pooling",
-                "markers": [os.path.join(DATA_DIR, "qrels_ungraded.json")],
-            },
-        ])
+        steps.extend(
+            [
+                {
+                    "name": "Generating dense embeddings",
+                    "module": "scripts.build_embeddings",
+                    "markers": [
+                        os.path.join(DATA_DIR, "english_embeddings.npy"),
+                        os.path.join(DATA_DIR, "arabic_embeddings.npy"),
+                        os.path.join(DATA_DIR, "hadith_ids.npy"),
+                    ],
+                },
+                {
+                    "name": "Pooling candidate qrels",
+                    "module": "scripts.pooling",
+                    "markers": [os.path.join(DATA_DIR, "qrels_ungraded.json")],
+                },
+            ]
+        )
 
     return steps
 
@@ -198,7 +211,9 @@ def write_manifest(step_results, skip_embeddings):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Build the LK-native hadith search data pipeline.")
-    parser.add_argument("--force", action="store_true", help="Rebuild existing outputs without interactive prompts.")
+    parser.add_argument(
+        "--force", action="store_true", help="Rebuild existing outputs without interactive prompts."
+    )
     parser.add_argument(
         "--skip-embeddings",
         action="store_true",

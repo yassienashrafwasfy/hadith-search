@@ -1,54 +1,77 @@
-from nltk.tokenize import word_tokenize
-from nltk.corpus import wordnet
-from nltk import pos_tag
-from nltk.corpus import stopwords
-import pyarabic.araby as araby
 import re
+
+import pyarabic.araby as araby
 from camel_tools.tokenizers.word import simple_word_tokenize
 from camel_tools.utils.dediac import dediac_ar
-from camel_tools.utils.normalize import normalize_alef_ar, normalize_alef_maksura_ar, normalize_teh_marbuta_ar
-from scripts.loading import get_mle,get_english_lemmatizer
+from camel_tools.utils.normalize import (
+    normalize_alef_ar,
+    normalize_alef_maksura_ar,
+    normalize_teh_marbuta_ar,
+)
+from nltk import pos_tag
+from nltk.corpus import stopwords, wordnet
+from nltk.tokenize import word_tokenize
 
-def get_wordnet_pos(tag): #this is needed to convert nltk pos to wordnet pos
-    if tag.startswith('J'):
+from scripts.loading import get_english_lemmatizer, get_mle
+
+
+def get_wordnet_pos(tag):  # this is needed to convert nltk pos to wordnet pos
+    if tag.startswith("J"):
         return wordnet.ADJ
-    elif tag.startswith('V'):
+    elif tag.startswith("V"):
         return wordnet.VERB
-    elif tag.startswith('R'):
+    elif tag.startswith("R"):
         return wordnet.ADV
     else:
         return wordnet.NOUN
 
-def lemmatize_english(tokens,lemmatizer):
-  pos_tags = pos_tag(tokens)
-  lemmatized_tokens = [lemmatizer.lemmatize(word, get_wordnet_pos(tag)) for word,tag in pos_tags]
-  return lemmatized_tokens
+
+def lemmatize_english(tokens, lemmatizer):
+    pos_tags = pos_tag(tokens)
+    lemmatized_tokens = [lemmatizer.lemmatize(word, get_wordnet_pos(tag)) for word, tag in pos_tags]
+    return lemmatized_tokens
+
 
 _stop_words_en = None
+
 
 def get_stop_words_english():
     global _stop_words_en
     if _stop_words_en is None:
         extra = {
-            "say", "narrate", "told", "informed", "reported", "transmitted", "heard",
-            "narration", "authority",
-            "correct", "weak",
-            "bin", "ibn", "abu", "abi", "hadith"
+            "say",
+            "narrate",
+            "told",
+            "informed",
+            "reported",
+            "transmitted",
+            "heard",
+            "narration",
+            "authority",
+            "correct",
+            "weak",
+            "bin",
+            "ibn",
+            "abu",
+            "abi",
+            "hadith",
         }
-        _stop_words_en = set(stopwords.words('english')) | extra
+        _stop_words_en = set(stopwords.words("english")) | extra
     return _stop_words_en
 
-def remove_stopwords_english(tokens:list[str])->list[str]:
+
+def remove_stopwords_english(tokens: list[str]) -> list[str]:
     stop_words = get_stop_words_english()
     return [word for word in tokens if word not in stop_words and len(word) >= 3]
+
 
 def preprocess_english(text):
     lemmatizer = get_english_lemmatizer()
     text = re.sub(r"[^a-zA-Z\s]", "", text.lower())
     tokens = word_tokenize(text)
-    lemmatized_tokens = lemmatize_english(tokens,lemmatizer)
+    lemmatized_tokens = lemmatize_english(tokens, lemmatizer)
     final_tokens = remove_stopwords_english(lemmatized_tokens)
-    return " ".join(final_tokens)       
+    return " ".join(final_tokens)
 
 
 def has_text(value):
@@ -69,19 +92,31 @@ def normalize_arabic_stopwords(stopwords: set) -> set:
         result.add(word)
     return result
 
+
 _stop_words_ar = None
+
 
 def get_stop_words_arabic() -> set:
     global _stop_words_ar
     if _stop_words_ar is None:
         raw = {
-            "قال", "حدث", "روى",
-            "حديث", "ضعيف", "قوى",
-            "صلى", "سلم",
-            "بن", "ابن", "ابي", "ابو", "اخبر"
+            "قال",
+            "حدث",
+            "روى",
+            "حديث",
+            "ضعيف",
+            "قوى",
+            "صلى",
+            "سلم",
+            "بن",
+            "ابن",
+            "ابي",
+            "ابو",
+            "اخبر",
         }
         _stop_words_ar = normalize_arabic_stopwords(raw)
     return _stop_words_ar
+
 
 def normalize_token(token):
     token = dediac_ar(token)
@@ -90,15 +125,11 @@ def normalize_token(token):
     token = araby.normalize_hamza(token, method="tasheel")
     return token
 
-def normalize_passage(passage):
-    tokens = passage.split()
-    tokens = [normalize_token(t) for t in tokens]
-    return " ".join(tokens)
 
 def process_arabic_tokens(disambiguated_tokens, original_tokens):
     extra_stopwords = get_stop_words_arabic()
-    stop_pos = {'prep', 'conj', 'part', 'punc'}
-    #remove prepositions conjunctions particles and punctuations, keep pronouns for now
+    stop_pos = {"prep", "conj", "part", "punc"}
+    # remove prepositions conjunctions particles and punctuations, keep pronouns for now
     final_tokens = []
 
     for i, word in enumerate(disambiguated_tokens):
@@ -109,13 +140,14 @@ def process_arabic_tokens(disambiguated_tokens, original_tokens):
             continue
 
         best_analysis = word.analyses[0]
-        lemma = best_analysis.analysis['lex']
-        pos = best_analysis.analysis['pos']
+        lemma = best_analysis.analysis["lex"]
+        pos = best_analysis.analysis["pos"]
         clean_lemma = normalize_token(lemma)
         if pos not in stop_pos and clean_lemma not in extra_stopwords and len(clean_lemma) >= 2:
             final_tokens.append(clean_lemma)
 
     return final_tokens
+
 
 def normalize_arabic_text(text):
     text = re.sub(r"[^\u0600-\u06FF\s]", " ", text)
@@ -138,160 +170,172 @@ def preprocess_arabic(text):
     processed = process_arabic_tokens(disambiguated, tokens)  # pass original tokens as fallback
     return " ".join(processed)
 
-def run():
-    import json
-    import os
-    import sqlite3
-    import pandas as pd
-    import time
+
+ARABIC_WORKERS = 4
+DELETE_BATCH = 500
+SAMPLE_IDS = 10
+
+# (label, source column, Preprocessed_* column, language)
+_COLUMNS = (
+    ("full English text", "English_Text", "Preprocessed_English", "EN"),
+    ("full Arabic text", "Arabic_Text", "Preprocessed_Arabic", "AR"),
+    ("English isnad text", "English_Isnad", "Preprocessed_English_Isnad", "EN"),
+    ("Arabic isnad text", "Arabic_Isnad", "Preprocessed_Arabic_Isnad", "AR"),
+    ("English matn text", "English_Matn", "Preprocessed_English_Matn", "EN"),
+    ("Arabic matn text", "Arabic_Matn", "Preprocessed_Arabic_Matn", "AR"),
+)
+
+
+def _preprocess_english_texts(texts):
+    return [preprocess_english(t) if t else "" for t in texts]
+
+
+def _preprocess_arabic_texts(texts):
+    """Thread pool first; sequential fallback if the pool fails."""
     from concurrent.futures import ThreadPoolExecutor
-    start = time.perf_counter()
-
-    DB_PATH = os.path.join(os.path.dirname(__file__),'..','data','hadiths.db')
-    print(os.path.abspath(DB_PATH))
-    connection = sqlite3.connect(DB_PATH)
-
-    df = pd.read_sql("SELECT * FROM HADITHS;", connection)
-
-    cursor = connection.cursor()
-
-    preprocessing_columns = [
-        "Preprocessed_English",
-        "Preprocessed_Arabic",
-        "Preprocessed_English_Isnad",
-        "Preprocessed_Arabic_Isnad",
-        "Preprocessed_English_Matn",
-        "Preprocessed_Arabic_Matn",
-    ]
-    for column in preprocessing_columns:
-        try:
-            cursor.execute(f"ALTER TABLE hadiths ADD COLUMN {column} TEXT")
-            connection.commit()
-        except sqlite3.OperationalError:
-            pass
-    connection.commit()
 
     try:
-        def _text(row, column):
-            value = getattr(row, column, "")
-            return value if value else ""
+        with ThreadPoolExecutor(max_workers=ARABIC_WORKERS) as ex:
+            return list(ex.map(lambda t: preprocess_arabic(t) if t else "", texts)), "parallel"
+    except Exception:
+        print("  ThreadPoolExecutor failed, falling back to sequential...")
+        return [preprocess_arabic(t) if t else "" for t in texts], "sequential"
 
-        print("Preprocessing full English text...")
-        english_t0 = time.perf_counter()
-        english_results = [preprocess_english(_text(r, "English_Text")) if _text(r, "English_Text") else "" for r in df.itertuples()]
-        print(f"  Done in {time.perf_counter() - english_t0:.2f}s")
 
-        print("Preprocessing full Arabic text...")
-        arabic_t0 = time.perf_counter()
-        arabic_texts = df["Arabic_Text"].tolist()
-        try:
-            with ThreadPoolExecutor(max_workers=4) as ex:
-                arabic_results = list(ex.map(lambda t: preprocess_arabic(t) if t else "", arabic_texts))
-            print(f"  Done in {time.perf_counter() - arabic_t0:.2f}s (parallel)")
-        except Exception:
-            print("  ThreadPoolExecutor failed, falling back to sequential...")
-            arabic_results = [preprocess_arabic(t) if t else "" for t in arabic_texts]
-            print(f"  Done in {time.perf_counter() - arabic_t0:.2f}s (sequential)")
+def _preprocess_column(df, label, column, language):
+    import time
 
-        print("Preprocessing English isnad text...")
-        isnad_en_t0 = time.perf_counter()
-        isnad_en_results = [preprocess_english(_text(r, "English_Isnad")) if _text(r, "English_Isnad") else "" for r in df.itertuples()]
-        print(f"  Done in {time.perf_counter() - isnad_en_t0:.2f}s")
+    print(f"Preprocessing {label}...")
+    started = time.perf_counter()
+    texts = [t if isinstance(t, str) else "" for t in df[column].tolist()]  # NULL/NaN -> ""
+    if language == "AR":
+        results, mode = _preprocess_arabic_texts(texts)
+        suffix = f" ({mode})"
+    else:
+        results, suffix = _preprocess_english_texts(texts), ""
+    print(f"  Done in {time.perf_counter() - started:.2f}s{suffix}")
+    return results
 
-        print("Preprocessing Arabic isnad text...")
-        isnad_ar_t0 = time.perf_counter()
-        isnad_ar_texts = df["Arabic_Isnad"].tolist()
-        try:
-            with ThreadPoolExecutor(max_workers=4) as ex:
-                isnad_ar_results = list(ex.map(lambda t: preprocess_arabic(t) if t else "", isnad_ar_texts))
-            print(f"  Done in {time.perf_counter() - isnad_ar_t0:.2f}s (parallel)")
-        except Exception:
-            print("  ThreadPoolExecutor failed, falling back to sequential...")
-            isnad_ar_results = [preprocess_arabic(t) if t else "" for t in isnad_ar_texts]
-            print(f"  Done in {time.perf_counter() - isnad_ar_t0:.2f}s (sequential)")
 
-        print("Preprocessing English matn text...")
-        matn_en_t0 = time.perf_counter()
-        matn_en_results = [preprocess_english(_text(r, "English_Matn")) if _text(r, "English_Matn") else "" for r in df.itertuples()]
-        print(f"  Done in {time.perf_counter() - matn_en_t0:.2f}s")
+def _empty_ids(df, values):
+    return {int(hid) for hid, value in zip(df["id"], values) if not has_text(value)}
 
-        print("Preprocessing Arabic matn text...")
-        matn_ar_t0 = time.perf_counter()
-        matn_ar_texts = df["Arabic_Matn"].tolist()
-        try:
-            with ThreadPoolExecutor(max_workers=4) as ex:
-                matn_ar_results = list(ex.map(lambda t: preprocess_arabic(t) if t else "", matn_ar_texts))
-            print(f"  Done in {time.perf_counter() - matn_ar_t0:.2f}s (parallel)")
-        except Exception:
-            print("  ThreadPoolExecutor failed, falling back to sequential...")
-            matn_ar_results = [preprocess_arabic(t) if t else "" for t in matn_ar_texts]
-            print(f"  Done in {time.perf_counter() - matn_ar_t0:.2f}s (sequential)")
 
-        empty_matn_en = {int(r.id) for r, value in zip(df.itertuples(), matn_en_results) if not has_text(value)}
-        empty_matn_ar = {int(r.id) for r, value in zip(df.itertuples(), matn_ar_results) if not has_text(value)}
-        drop_ids = sorted(empty_matn_en | empty_matn_ar)
-        if drop_ids:
-            droppath = os.path.join(os.path.dirname(DB_PATH), "dropped_lk_rows.json")
-            try:
-                with open(droppath, encoding="utf-8") as f:
-                    audit = json.load(f)
-            except FileNotFoundError:
-                audit = {"reason": "Missing bilingual matn after deterministic reconstruction", "count": 0, "rows": [], "second_stage": None}
+def _load_drop_audit(path):
+    import json
 
-            drop_rows = []
-            for row in df.itertuples():
-                if int(row.id) in empty_matn_en or int(row.id) in empty_matn_ar:
-                    drop_rows.append({
-                        "id_before_drop": int(row.id),
-                        "LK_Book": getattr(row, "Book", ""),
-                        "Book": getattr(row, "Book", ""),
-                        "Hadith_Number": getattr(row, "Hadith_Number", ""),
-                        "Chapter_Number": getattr(row, "Chapter_Number", ""),
-                    })
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return {
+            "reason": "Missing bilingual matn after deterministic reconstruction",
+            "count": 0,
+            "rows": [],
+            "second_stage": None,
+        }
 
-            audit["second_stage"] = {
-                "reason": "Empty preprocessed matn in one or both languages (isnad-only alternate chains / cross-references)",
-                "count": len(drop_ids),
-                "count_en": len(empty_matn_en),
-                "count_ar": len(empty_matn_ar),
-                "rows": drop_rows,
-            }
-            with open(droppath, "w", encoding="utf-8") as f:
-                json.dump(audit, f, indent=2, ensure_ascii=False)
 
-            cursor.executemany("DELETE FROM hadiths WHERE id = ?", [(i,) for i in drop_ids])
+def _drop_rows(df, drop_ids):
+    return [
+        {
+            "id_before_drop": int(row.id),
+            "LK_Book": getattr(row, "Book", ""),
+            "Book": getattr(row, "Book", ""),
+            "Hadith_Number": getattr(row, "Hadith_Number", ""),
+            "Chapter_Number": getattr(row, "Chapter_Number", ""),
+        }
+        for row in df.itertuples()
+        if int(row.id) in drop_ids
+    ]
 
-            print(f"\nDropped {len(drop_ids)} hadiths with empty preprocessed matn "
-                  f"(EN={len(empty_matn_en)}, AR={len(empty_matn_ar)})")
-            print(f"  Appended to {droppath}")
-            if empty_matn_en:
-                print(f"  Sample English-empty IDs: {sorted(empty_matn_en)[:10]}")
-            if empty_matn_ar:
-                print(f"  Sample Arabic-empty IDs:  {sorted(empty_matn_ar)[:10]}")
 
-        updates = [(en, ar, ien, iar, men, mar, r.id) for r, en, ar, ien, iar, men, mar in zip(
-            df.itertuples(),
-            english_results,
-            arabic_results,
-            isnad_en_results,
-            isnad_ar_results,
-            matn_en_results,
-            matn_ar_results,
-        )]
-        cursor.executemany("""
-            UPDATE hadiths
-            SET Preprocessed_English = ?, Preprocessed_Arabic = ?,
-                Preprocessed_English_Isnad = ?, Preprocessed_Arabic_Isnad = ?,
-                Preprocessed_English_Matn = ?, Preprocessed_Arabic_Matn = ?
-            WHERE id = ?
-        """, updates)
-        connection.commit()
+def _write_drop_audit(path, df, empty_en, empty_ar):
+    import json
 
-        print(f"\nPreprocessing Successful. Total time: {time.perf_counter() - start:.2f}s")
-    finally:
-        connection.close()
-    end = time.perf_counter()
-    print(f"Total Time Taken: {end-start}s")
+    drop_ids = empty_en | empty_ar
+    audit = _load_drop_audit(path)
+    audit["second_stage"] = {
+        "reason": "Empty preprocessed matn in one or both languages (isnad-only alternate chains / cross-references)",
+        "count": len(drop_ids),
+        "count_en": len(empty_en),
+        "count_ar": len(empty_ar),
+        "rows": _drop_rows(df, drop_ids),
+    }
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(audit, f, indent=2, ensure_ascii=False)
+
+
+def _delete_hadiths(session, ids):
+    from sqlalchemy import delete
+
+    from models import Hadith
+
+    for i in range(0, len(ids), DELETE_BATCH):
+        session.execute(delete(Hadith).where(Hadith.id.in_(ids[i : i + DELETE_BATCH])))
+
+
+def _report_drops(path, empty_en, empty_ar):
+    print(
+        f"\nDropped {len(empty_en | empty_ar)} hadiths with empty preprocessed matn "
+        f"(EN={len(empty_en)}, AR={len(empty_ar)})"
+    )
+    print(f"  Appended to {path}")
+    for name, ids in (("English", empty_en), ("Arabic", empty_ar)):
+        if ids:
+            print(f"  Sample {name}-empty IDs: {sorted(ids)[:SAMPLE_IDS]}")
+
+
+def _drop_empty_matn(session, df, results, db_path):
+    """Delete rows whose preprocessed matn is empty in either language; returns their ids."""
+    import os
+
+    empty_en = _empty_ids(df, results["Preprocessed_English_Matn"])
+    empty_ar = _empty_ids(df, results["Preprocessed_Arabic_Matn"])
+    drop_ids = sorted(empty_en | empty_ar)
+    if not drop_ids:
+        return set()
+    path = os.path.join(os.path.dirname(db_path), "dropped_lk_rows.json")
+    _write_drop_audit(path, df, empty_en, empty_ar)
+    _delete_hadiths(session, drop_ids)
+    _report_drops(path, empty_en, empty_ar)
+    return set(drop_ids)
+
+
+def _build_updates(df, results, dropped):
+    return [
+        {"id": int(hid), **{column: values[i] for column, values in results.items()}}
+        for i, hid in enumerate(df["id"])
+        if int(hid) not in dropped
+    ]
+
+
+def run():
+    import os
+    import time
+
+    from sqlalchemy import update
+
+    import database
+    from database import get_sync_session, init_hadiths_table, read_hadiths_df
+    from models import Hadith
+
+    start = time.perf_counter()
+    print(os.path.abspath(database.DB_PATH))
+    init_hadiths_table()
+    df = read_hadiths_df()
+
+    results = {
+        target: _preprocess_column(df, label, source, language)
+        for label, source, target, language in _COLUMNS
+    }
+    with get_sync_session() as session:
+        dropped = _drop_empty_matn(session, df, results, database.DB_PATH)
+        session.execute(update(Hadith), _build_updates(df, results, dropped))
+        session.commit()
+
+    print(f"\nPreprocessing Successful. Total time: {time.perf_counter() - start:.2f}s")
+
 
 if __name__ == "__main__":
     run()

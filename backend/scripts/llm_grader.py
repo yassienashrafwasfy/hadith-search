@@ -1,11 +1,15 @@
+import json
 import os
 import re
-import json
 import time
-import sqlite3
-import requests
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
+import requests
 from dotenv import load_dotenv
+from sqlalchemy import select
+
+from database import get_sync_session
+from models import Hadith
 
 load_dotenv()
 
@@ -90,7 +94,7 @@ def call_llm(messages):
             return content
         except requests.exceptions.RequestException as e:
             if attempt < LLM_MAX_RETRIES - 1:
-                wait = 2 ** attempt
+                wait = 2**attempt
                 print(f"    Retry {attempt+1}/{LLM_MAX_RETRIES} after {wait}s: {e}")
                 time.sleep(wait)
             else:
@@ -133,17 +137,12 @@ def grade_query_pool(query_id, query_text, language, pooled_ids, hadith_texts, m
 
 
 def load_hadith_texts(language, hadith_ids):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    col = "Arabic_Text" if language == "AR" else "English_Text"
-    placeholders = ",".join("?" * len(hadith_ids))
-    cursor.execute(
-        f"SELECT id, {col} FROM hadiths WHERE id IN ({placeholders})",
-        hadith_ids,
-    )
-    texts = {str(row[0]): row[1] for row in cursor.fetchall() if row[1]}
-    conn.close()
-    return texts
+    col = Hadith.Arabic_Text if language == "AR" else Hadith.English_Text
+    with get_sync_session() as session:
+        rows = session.execute(
+            select(Hadith.id, col).where(Hadith.id.in_([int(h) for h in hadith_ids]))
+        ).all()
+    return {str(row[0]): row[1] for row in rows if row[1]}
 
 
 def save_checkpoint(path, data):
@@ -179,7 +178,7 @@ def grade_all(queries_path, output_path, pool_fn=None, pool_depth=100, resume=Tr
             pooled_ids = []
 
         if not pooled_ids:
-            print(f"    No pooled candidates, skipping")
+            print("    No pooled candidates, skipping")
             continue
 
         hadith_texts = load_hadith_texts(language, pooled_ids)
@@ -199,35 +198,44 @@ def grade_all(queries_path, output_path, pool_fn=None, pool_depth=100, resume=Tr
 
 if __name__ == "__main__":
     import argparse
-    from scripts.search import (
+
+    from camel_tools.utils.dediac import dediac_ar
+
+    from scripts import (
+        bm25,
         bm25_with_expansion,
         cosine_similarity_search,
-        bm25,
-        tf_idf,
-    )
-    from scripts.loading import (
-        get_english_inverted_index,
+        get_arabic_embeddings,
         get_arabic_inverted_index,
         get_document_lengths,
         get_english_embeddings,
-        get_arabic_embeddings,
+        get_english_inverted_index,
         get_hadith_ids,
         get_model,
+        normalize_arabic_text,
+        tf_idf,
     )
-    from scripts.preprocess import normalize_arabic_text
-    from camel_tools.utils.dediac import dediac_ar
 
     parser = argparse.ArgumentParser(description="LLM grading pipeline for training queries")
-    parser.add_argument("--queries", default=os.path.join(DATA_DIR, "training_queries.json"),
-                        help="Path to queries JSON")
-    parser.add_argument("--output", default=os.path.join(DATA_DIR, "training_qrels_graded.json"),
-                        help="Path to output graded qrels JSON")
-    parser.add_argument("--pool-depth", type=int, default=100,
-                        help="Pooling depth per retrieval system")
-    parser.add_argument("--no-resume", action="store_true",
-                        help="Start fresh, ignore existing graded file")
-    parser.add_argument("--validate", action="store_true",
-                        help="Run validation mode on human eval queries instead")
+    parser.add_argument(
+        "--queries",
+        default=os.path.join(DATA_DIR, "training_queries.json"),
+        help="Path to queries JSON",
+    )
+    parser.add_argument(
+        "--output",
+        default=os.path.join(DATA_DIR, "training_qrels_graded.json"),
+        help="Path to output graded qrels JSON",
+    )
+    parser.add_argument(
+        "--pool-depth", type=int, default=100, help="Pooling depth per retrieval system"
+    )
+    parser.add_argument(
+        "--no-resume", action="store_true", help="Start fresh, ignore existing graded file"
+    )
+    parser.add_argument(
+        "--validate", action="store_true", help="Run validation mode on human eval queries instead"
+    )
     args = parser.parse_args()
 
     if args.validate:
@@ -276,7 +284,7 @@ if __name__ == "__main__":
             save_checkpoint(output_path, results)
 
         print(f"\nValidation grading done. {len(results)} queries graded.")
-        print(f"Run llm_validation.py to compute agreement metrics.")
+        print("Run llm_validation.py to compute agreement metrics.")
     else:
         print("=== LLM Grading Pipeline ===")
         print(f"Queries: {args.queries}")
@@ -312,7 +320,9 @@ if __name__ == "__main__":
             else:
                 e5_query = f"query: {query}"
             query_emb = model.encode([e5_query])[0]
-            cosine_scores = cosine_similarity_search(query_emb, embeddings, hadith_ids, top_k=per_algo_size)
+            cosine_scores = cosine_similarity_search(
+                query_emb, embeddings, hadith_ids, top_k=per_algo_size
+            )
             cosine_top = list(cosine_scores.keys())[:per_algo_size]
 
             bm25_rocchio = bm25_with_expansion(query, language, index, doc_lengths, get_hadith)
@@ -321,7 +331,7 @@ if __name__ == "__main__":
             combined = set(bm25_top) | set(tfidf_top) | set(cosine_top) | set(rocchio_top)
             return list(combined)
 
-        from scripts.search import get_hadith
+        from scripts import get_hadith
 
         grade_all(
             queries_path=args.queries,

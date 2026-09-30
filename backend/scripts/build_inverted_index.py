@@ -1,8 +1,10 @@
 import os
-import pandas as pd
-import sqlite3
 import pickle
 import time
+
+import pandas as pd
+
+from database import read_hadiths_df
 
 
 def has_text(value):
@@ -31,33 +33,37 @@ def build_inverted_index(df, data_dir):
     for _, row in df.iterrows():
         matn_en = row.get("Preprocessed_English_Matn")
         if not has_text(matn_en):
-            raise ValueError(f"Hadith id {row['id']} has empty Preprocessed_English_Matn; refusing to build matn-only index")
+            raise ValueError(
+                f"Hadith id {row['id']} has empty Preprocessed_English_Matn; refusing to build matn-only index"
+            )
         english_text = str(matn_en).strip()
 
         matn_ar = row.get("Preprocessed_Arabic_Matn")
         if not has_text(matn_ar):
-            raise ValueError(f"Hadith id {row['id']} has empty Preprocessed_Arabic_Matn; refusing to build matn-only index")
+            raise ValueError(
+                f"Hadith id {row['id']} has empty Preprocessed_Arabic_Matn; refusing to build matn-only index"
+            )
         arabic_text = str(matn_ar).strip()
 
         english_terms = english_text.split()
         arabic_terms = arabic_text.split()
 
-        document_lengths[row['id']] = (len(arabic_terms), len(english_terms))
+        document_lengths[row["id"]] = (len(arabic_terms), len(english_terms))
 
         arabic_term_freq = create_term_frequency_dict(arabic_text)
         english_term_freq = create_term_frequency_dict(english_text)
 
         for term in english_term_freq:
             if term not in english_inverted_index:
-                english_inverted_index[term] = [(row['id'], english_term_freq[term])]
+                english_inverted_index[term] = [(row["id"], english_term_freq[term])]
             else:
-                english_inverted_index[term].append((row['id'], english_term_freq[term]))
+                english_inverted_index[term].append((row["id"], english_term_freq[term]))
 
         for term in arabic_term_freq:
             if term not in arabic_inverted_index:
-                arabic_inverted_index[term] = [(row['id'], arabic_term_freq[term])]
+                arabic_inverted_index[term] = [(row["id"], arabic_term_freq[term])]
             else:
-                arabic_inverted_index[term].append((row['id'], arabic_term_freq[term]))
+                arabic_inverted_index[term].append((row["id"], arabic_term_freq[term]))
 
     for term in english_inverted_index:
         english_inverted_index[term] = sorted(english_inverted_index[term], key=lambda x: x[0])
@@ -80,11 +86,8 @@ def build_inverted_index(df, data_dir):
 def run():
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
     DATA_DIR = os.path.join(BASE_DIR, "..", "data")
-    DB_PATH = os.path.join(DATA_DIR, "hadiths.db")
 
-    connection = sqlite3.connect(DB_PATH)
-    df = pd.read_sql("SELECT * FROM HADITHS", connection)
-    connection.close()
+    df = read_hadiths_df()
 
     print(f"Loaded {len(df)} hadiths")
     print("Indexing Preprocessed_English_Matn / Preprocessed_Arabic_Matn only...")

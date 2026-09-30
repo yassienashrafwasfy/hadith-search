@@ -1,6 +1,10 @@
 import json
 import os
-import sqlite3
+
+from sqlalchemy import select
+
+from database import get_sync_session
+from models import Hadith
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
 DB_PATH = os.path.join(DATA_DIR, "hadiths.db")
@@ -10,24 +14,21 @@ QRELS_UNGRADED_PATH = os.path.join(DATA_DIR, "qrels_ungraded.json")
 
 POOL_DEPTH_PER_SYSTEM = 50
 
-from scripts.search import (
+from scripts import (
     bm25,
     bm25_semantic_rrf,
     bm25_with_expansion,
     final_search_pipeline,
-    get_hadith,
-    semantic_reranker,
-    semantic_search_e5,
-)
-
-from scripts.loading import (
-    get_english_inverted_index,
+    get_arabic_embeddings,
     get_arabic_inverted_index,
     get_document_lengths,
     get_english_embeddings,
-    get_arabic_embeddings,
+    get_english_inverted_index,
+    get_hadith,
     get_hadith_ids,
     get_model,
+    semantic_reranker,
+    semantic_search_e5,
 )
 
 print("Loading indices and embeddings...")
@@ -40,11 +41,8 @@ hadith_ids = get_hadith_ids()
 model = get_model()
 
 print("Loading hadiths into memory...")
-conn = sqlite3.connect(DB_PATH)
-cursor = conn.cursor()
-cursor.execute("SELECT id, English_Text, Arabic_Text FROM hadiths")
-hadith_rows = cursor.fetchall()
-conn.close()
+with get_sync_session() as _session:
+    hadith_rows = _session.execute(select(Hadith.id, Hadith.English_Text, Hadith.Arabic_Text)).all()
 
 hadith_texts_en = {int(row[0]): row[1] for row in hadith_rows if row[1]}
 hadith_texts_ar = {int(row[0]): row[2] for row in hadith_rows if row[2]}
@@ -67,14 +65,18 @@ def _top_ids(scores: dict[int, float | int], limit: int) -> list[int]:
     return [int(hid) for hid in sorted(scores, key=scores.get, reverse=True)[:limit]]
 
 
-def pool_query(query: str, language: str, per_system_size: int = POOL_DEPTH_PER_SYSTEM) -> tuple[list[int], dict]:
+def pool_query(
+    query: str, language: str, per_system_size: int = POOL_DEPTH_PER_SYSTEM
+) -> tuple[list[int], dict]:
     index = _index(language)
     embeddings = _embeddings(language)
     texts = _texts(language)
 
     systems = {
         "BM25": lambda: bm25(query, language, index, doc_lengths),
-        "BM25_ROCCHIO": lambda: bm25_with_expansion(query, language, index, doc_lengths, get_hadith),
+        "BM25_ROCCHIO": lambda: bm25_with_expansion(
+            query, language, index, doc_lengths, get_hadith
+        ),
         "COSINE_SIMILARITY": lambda: semantic_search_e5(
             query=query,
             language=language,
@@ -140,8 +142,7 @@ def pool_query(query: str, language: str, per_system_size: int = POOL_DEPTH_PER_
         "pool_size": len(pooled_ids),
         "system_contributions": {name: len(ids) for name, ids in system_outputs.items()},
         "system_unique_contributions": {
-            name: len(set(ids) - all_other_sets[name])
-            for name, ids in system_outputs.items()
+            name: len(set(ids) - all_other_sets[name]) for name, ids in system_outputs.items()
         },
         "system_errors": system_errors,
     }

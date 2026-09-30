@@ -1,144 +1,109 @@
-import sqlite3
 import os
 from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+
+from features import Features, load_features
+from startup import init_database, preload_resources
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DATA_DIR = os.path.join(BASE_DIR, ".", "data")
-DB_PATH = os.path.join(DATA_DIR, "hadiths.db")
+DATA_DIR = os.path.join(BASE_DIR, "data")
 
-os.makedirs(DATA_DIR, exist_ok=True)
-
-APP_MODE = os.environ.get("APP_MODE", "search")
-
-CORS_ORIGINS_ENV = os.environ.get("CORS_ORIGINS", "http://localhost:5173,http://192.168.1.6:5173,http://192.168.1.5:5173")
-if CORS_ORIGINS_ENV.strip() == "*":
-    CORS_ALLOW_ORIGINS = ["*"]
-    CORS_ALLOW_CREDENTIALS = False
-else:
-    CORS_ALLOW_ORIGINS = [o.strip() for o in CORS_ORIGINS_ENV.split(",") if o.strip()]
-    CORS_ALLOW_CREDENTIALS = True
+DEFAULT_CORS_ORIGINS = "http://localhost:5173,http://192.168.1.6:5173,http://192.168.1.5:5173"
 
 
-def _resolve_static_dir() -> str | None:
-    env = os.environ.get("STATIC_DIR")
-    if env and os.path.isdir(env):
-        return env
+def cors_settings(raw: str) -> dict:
+    """CORS middleware kwargs from a comma-separated origin list ('*' disables credentials)."""
+    if raw.strip() == "*":
+        return {"allow_origins": ["*"], "allow_credentials": False}
+    origins = [origin.strip() for origin in raw.split(",") if origin.strip()]
+    return {"allow_origins": origins, "allow_credentials": True}
+
+
+def resolve_static_dir(env_value: str | None = None) -> str | None:
+    if env_value and os.path.isdir(env_value):
+        return env_value
     candidates = [
         os.path.join(BASE_DIR, "..", "static"),
         os.path.join(BASE_DIR, "..", "frontend", "dist"),
     ]
-    for c in candidates:
-        if os.path.isdir(c):
-            return os.path.abspath(c)
-    return None
+    return next((os.path.abspath(c) for c in candidates if os.path.isdir(c)), None)
 
 
-STATIC_DIR = _resolve_static_dir()
-
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    from database import init_annotation_tables, init_kv_pairs_table
-    init_annotation_tables()
-    init_kv_pairs_table()
-
-    if APP_MODE == "annotation":
-        print("APP_MODE=annotation: skipping model/index preload")
-        yield
-        print("Shutting down...")
-        return
-
-    print("Loading indices and models at startup...")
-    from scripts.loading import (
-        get_english_inverted_index,
-        get_arabic_inverted_index,
-        get_document_lengths,
-        get_hadith_ids,
-        get_hadiths_df,
+def _include_feature_routers(app: FastAPI, features: Features) -> None:
+    from routers import (
+        annotation_router,
+        auth_router,
+        benchmark_router,
+        kv_pairs_router,
+        make_search_router,
     )
-    print("  - English inverted index... ", end="", flush=True)
-    get_english_inverted_index()
-    print("done")
-    print("  - Arabic inverted index... ", end="", flush=True)
-    get_arabic_inverted_index()
-    print("done")
-    print("  - Document lengths... ", end="", flush=True)
-    get_document_lengths()
-    print("done")
-    print("  - Hadith IDs... ", end="", flush=True)
-    get_hadith_ids()
-    print("done")
-    print("  - Hadiths DataFrame... ", end="", flush=True)
-    get_hadiths_df()
-    print("done")
 
-    if APP_MODE == "search":
-        print("APP_MODE=search: lazy-loading E5 model on first request")
-    elif APP_MODE == "research":
-        print("  - Sentence Transformer model (intfloat/multilingual-e5-large)... ", end="", flush=True)
-        from scripts.loading import get_model
-        get_model()
-        print("done")
-    else:
-        print(f"APP_MODE={APP_MODE} (unknown): lazy-loading E5 model on first request")
-
-    if STATIC_DIR:
-        print(f"Serving frontend from: {STATIC_DIR}")
-    else:
-        print("No frontend build found (STATIC_DIR not configured)")
-
-    print("Startup complete. All data loaded.")
-    yield
-    print("Shutting down...")
+    if features.annotation:
+        app.include_router(annotation_router)
+        app.include_router(auth_router)
+    if features.kv_pairs:
+        app.include_router(kv_pairs_router)
+    if features.search:
+        app.include_router(make_search_router(features))
+    if features.benchmark:
+        app.include_router(benchmark_router)
 
 
-app = FastAPI(lifespan=lifespan)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=CORS_ALLOW_ORIGINS,
-    allow_credentials=CORS_ALLOW_CREDENTIALS,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-from routers.annotation import router as annotation_router
-from routers.auth import router as auth_router
-from routers.kv_pairs import router as kv_pairs_router
-
-app.include_router(annotation_router)
-app.include_router(auth_router)
-app.include_router(kv_pairs_router)
-
-if APP_MODE != "annotation":
-    from routers.search import router as search_router
-    from routers.benchmark import router as benchmark_router
-    app.include_router(search_router)
-    app.include_router(benchmark_router)
-
-
-@app.get("/hadith/{hadith_id}")
-def get_hadith(hadith_id: int):
-    import pandas as pd
-    connection = sqlite3.connect(DB_PATH)
-    df = pd.read_sql("SELECT * FROM hadiths WHERE id = ?", connection, params=(hadith_id,))
-    if df.empty:
-        return {"error": "not found"}
-    return df.iloc[0].to_dict()
-
-
-if STATIC_DIR:
-    assets_dir = os.path.join(STATIC_DIR, "assets")
+def _mount_frontend(app: FastAPI, static_dir: str) -> None:
+    assets_dir = os.path.join(static_dir, "assets")
     if os.path.isdir(assets_dir):
         app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
 
     @app.get("/{full_path:path}")
     async def spa_fallback(full_path: str):
-        candidate = os.path.join(STATIC_DIR, full_path)
+        candidate = os.path.join(static_dir, full_path)
         if full_path and os.path.isfile(candidate):
             return FileResponse(candidate)
-        return FileResponse(os.path.join(STATIC_DIR, "index.html"))
+        return FileResponse(os.path.join(static_dir, "index.html"))
+
+
+def create_app(features: Features | None = None, static_dir: str | None = None) -> FastAPI:
+    """Build the app; dependencies (feature flags, static dir) are injected, env is the default."""
+    features = features or load_features()
+    static_dir = static_dir or resolve_static_dir(os.environ.get("STATIC_DIR"))
+    os.makedirs(DATA_DIR, exist_ok=True)
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        await init_database()
+        preload_resources(features)
+        print(
+            f"Serving frontend from: {static_dir}"
+            if static_dir
+            else "No frontend build found (STATIC_DIR not configured)"
+        )
+        yield
+        print("Shutting down...")
+
+    app = FastAPI(lifespan=lifespan)
+    app.state.features = features
+    app.add_middleware(
+        CORSMiddleware,
+        allow_methods=["*"],
+        allow_headers=["*"],
+        **cors_settings(os.environ.get("CORS_ORIGINS", DEFAULT_CORS_ORIGINS)),
+    )
+    _include_feature_routers(app, features)
+
+    @app.get("/hadith/{hadith_id}")
+    def get_hadith(hadith_id: int):
+        from database import get_hadith_row
+
+        row = get_hadith_row(hadith_id)
+        return {"error": "not found"} if row is None else row
+
+    if static_dir:
+        _mount_frontend(app, static_dir)
+    return app
+
+
+app = create_app()

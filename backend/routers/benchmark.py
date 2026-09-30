@@ -1,7 +1,9 @@
-from fastapi import APIRouter, Depends
 import json
 import os
-from scripts.loading import get_hadiths_df
+
+from fastapi import APIRouter, Depends
+
+from scripts import get_hadiths_df
 
 router = APIRouter(prefix="/benchmark", tags=["benchmark"])
 
@@ -39,10 +41,7 @@ def benchmark_qrels(hadiths_df=Depends(get_hadiths_df)):
 
     enhanced = {}
     for qid, query_text in queries_data.items():
-        enhanced[qid] = {
-            "query": query_text,
-            "grades": {}
-        }
+        enhanced[qid] = {"query": query_text, "grades": {}}
 
     return {
         "description": (
@@ -58,7 +57,9 @@ def benchmark_qrels(hadiths_df=Depends(get_hadiths_df)):
 def finetuned_results(mode: str = "combined"):
     path = FINETUNED_RESULTS_TEMPLATE.format(mode=mode)
     if not os.path.exists(path):
-        return {"error": f"No fine-tuned results found for mode '{mode}'. Run finetune_eval.py first."}
+        return {
+            "error": f"No fine-tuned results found for mode '{mode}'. Run finetune_eval.py first."
+        }
     return load_json(path)
 
 
@@ -66,7 +67,9 @@ def finetuned_results(mode: str = "combined"):
 def finetuned_stats(mode: str = "combined"):
     path = FINETUNED_STATS_TEMPLATE.format(mode=mode)
     if not os.path.exists(path):
-        return {"error": f"No fine-tuned stats found for mode '{mode}'. Run finetune_eval.py first."}
+        return {
+            "error": f"No fine-tuned stats found for mode '{mode}'. Run finetune_eval.py first."
+        }
     return load_json(path)
 
 

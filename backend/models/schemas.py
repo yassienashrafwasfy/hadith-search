@@ -1,14 +1,15 @@
-from pydantic import BaseModel, RootModel, Field
-from typing import Optional
 from enum import Enum
+from typing import Optional
+
+from pydantic import BaseModel, Field, RootModel
 
 
 class Grade(str, Enum):
-    sahih     = "Sahih"
-    hasan     = "Hasan"
-    daif      = "Da'if (Weak)"
+    sahih = "Sahih"
+    hasan = "Hasan"
+    daif = "Da'if (Weak)"
     fabricated = "Maudu (Fabricated)"
-    unknown   = "Unknown"
+    unknown = "Unknown"
 
 
 class Lang(str, Enum):
@@ -52,8 +53,6 @@ class QrelEntry(BaseModel):
     grades: dict[int, int]
 
 
-
-
 class Metrics(BaseModel):
     AP: float
     RR: float
@@ -69,6 +68,8 @@ class QueryResult(BaseModel):
     query_text: Optional[str] = Field(None, alias="Query Text")
     metrics: Metrics = Field(alias="Metrics")
     model_config = {"populate_by_name": True}
+
+
 class QrelsResults(RootModel[dict[str, dict[str, QueryResult]]]):
     pass
 

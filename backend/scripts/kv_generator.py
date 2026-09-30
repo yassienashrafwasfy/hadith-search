@@ -1,11 +1,14 @@
+import asyncio
+import json
 import os
 import re
-import json
 import time
-import sqlite3
+
 import requests
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from dotenv import load_dotenv
+from sqlalchemy import select
+
+from models import KvPair
 
 load_dotenv()
 
@@ -95,7 +98,7 @@ def call_llm(messages):
             return content
         except requests.exceptions.RequestException as e:
             if attempt < LLM_MAX_RETRIES - 1:
-                wait = 2 ** attempt
+                wait = 2**attempt
                 print(f"    Retry {attempt+1}/{LLM_MAX_RETRIES} after {wait}s: {e}")
                 time.sleep(wait)
             else:
@@ -128,12 +131,14 @@ def parse_pairs(text):
         entity_en = p.get("entity_en", "").strip()
         entity_ar = p.get("entity_ar", "").strip()
         if concept_en and concept_ar and entity_en and entity_ar:
-            valid.append({
-                "concept_en": concept_en,
-                "concept_ar": concept_ar,
-                "entity_en": entity_en,
-                "entity_ar": entity_ar,
-            })
+            valid.append(
+                {
+                    "concept_en": concept_en,
+                    "concept_ar": concept_ar,
+                    "entity_en": entity_en,
+                    "entity_ar": entity_ar,
+                }
+            )
 
     return valid
 
@@ -152,7 +157,7 @@ def generate_pairs_for_topic(topic, total_needed, batch_size=BATCH_SIZE):
         messages = build_messages(topic, n)
         content = call_llm(messages)
         if content is None:
-            print(f"    Failed to get response")
+            print("    Failed to get response")
             continue
 
         pairs = parse_pairs(content)
@@ -163,19 +168,19 @@ def generate_pairs_for_topic(topic, total_needed, batch_size=BATCH_SIZE):
 
 
 def retrieve_hadith(query_text, language, inverted_index, document_lengths):
-    from scripts.search import bm25
+    from scripts import bm25
 
     scores = bm25(query_text, language, inverted_index, document_lengths)
     if not scores:
         return None, None
     top_id = next(iter(scores))
 
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    col = "Arabic_Text" if language == "AR" else "English_Text"
-    cursor.execute(f"SELECT id, {col} FROM hadiths WHERE id = ?", (top_id,))
-    row = cursor.fetchone()
-    conn.close()
+    from database import get_sync_session
+    from models import Hadith
+
+    col = Hadith.Arabic_Text if language == "AR" else Hadith.English_Text
+    with get_sync_session() as session:
+        row = session.execute(select(Hadith.id, col).where(Hadith.id == top_id)).first()
 
     if row and row[1]:
         return row[0], row[1]
@@ -183,10 +188,15 @@ def retrieve_hadith(query_text, language, inverted_index, document_lengths):
 
 
 def store_pairs(pairs, topic, inverted_index_en, inverted_index_ar, document_lengths):
-    from database import get_db, now_iso
+    return asyncio.run(
+        _store_pairs(pairs, topic, inverted_index_en, inverted_index_ar, document_lengths)
+    )
 
-    conn = get_db()
-    cursor = conn.cursor()
+
+async def _store_pairs(pairs, topic, inverted_index_en, inverted_index_ar, document_lengths):
+    from database import get_session, now_iso
+
+    session = get_session()
     stored = 0
 
     for pair in pairs:
@@ -201,29 +211,25 @@ def store_pairs(pairs, topic, inverted_index_en, inverted_index_ar, document_len
         if hadith_id is None:
             continue
 
-        cursor.execute(
-            """INSERT INTO kv_pairs
-               (topic, language, concept_en, concept_ar, entity_en, entity_ar,
-                hadith_id, hadith_en, hadith_ar, status, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (
-                topic,
-                "BOTH",
-                pair["concept_en"],
-                pair["concept_ar"],
-                pair["entity_en"],
-                pair["entity_ar"],
-                hadith_id,
-                en_hadith_text,
-                ar_hadith_text,
-                "pending",
-                now_iso(),
-            ),
+        session.add(
+            KvPair(
+                topic=topic,
+                language="BOTH",
+                concept_en=pair["concept_en"],
+                concept_ar=pair["concept_ar"],
+                entity_en=pair["entity_en"],
+                entity_ar=pair["entity_ar"],
+                hadith_id=hadith_id,
+                hadith_en=en_hadith_text,
+                hadith_ar=ar_hadith_text,
+                status="pending",
+                created_at=now_iso(),
+            )
         )
         stored += 1
 
-    conn.commit()
-    conn.close()
+    await session.commit()
+    await session.close()
     return stored
 
 
@@ -238,10 +244,14 @@ def generate_all(pairs_per_topic=PAIRS_PER_TOPIC, topics=None):
     print(f"LLM model: {LLM_MODEL}")
     print()
 
-    from scripts.loading import get_english_inverted_index, get_arabic_inverted_index, get_document_lengths
     from database import init_kv_pairs_table
+    from scripts import (
+        get_arabic_inverted_index,
+        get_document_lengths,
+        get_english_inverted_index,
+    )
 
-    init_kv_pairs_table()
+    asyncio.run(init_kv_pairs_table())
 
     print("Loading retrieval resources...")
     en_index = get_english_inverted_index()
@@ -271,37 +281,51 @@ def generate_all(pairs_per_topic=PAIRS_PER_TOPIC, topics=None):
     return total_stored
 
 
-def export_verified(output_path=None):
-    from database import get_db
+async def _fetch_verified():
+    from database import get_session
 
+    async with get_session() as session:
+        result = await session.execute(
+            select(
+                KvPair.id,
+                KvPair.topic,
+                KvPair.language,
+                KvPair.concept_en,
+                KvPair.concept_ar,
+                KvPair.entity_en,
+                KvPair.entity_ar,
+                KvPair.hadith_id,
+                KvPair.hadith_en,
+                KvPair.hadith_ar,
+            )
+            .where(KvPair.status == "verified")
+            .order_by(KvPair.id)
+        )
+        return result.all()
+
+
+def export_verified(output_path=None):
     if output_path is None:
         output_path = os.path.join(DATA_DIR, "kv_pairs_verified.json")
 
-    conn = get_db()
-    cursor = conn.cursor()
-    cursor.execute("""
-        SELECT id, topic, language, concept_en, concept_ar,
-               entity_en, entity_ar, hadith_id, hadith_en, hadith_ar
-        FROM kv_pairs WHERE status = 'verified'
-        ORDER BY id
-    """)
-    rows = cursor.fetchall()
-    conn.close()
+    rows = asyncio.run(_fetch_verified())
 
     pairs = []
     for row in rows:
-        pairs.append({
-            "id": row[0],
-            "topic": row[1],
-            "language": row[2],
-            "concept_en": row[3],
-            "concept_ar": row[4],
-            "entity_en": row[5],
-            "entity_ar": row[6],
-            "hadith_id": row[7],
-            "hadith_en": row[8],
-            "hadith_ar": row[9],
-        })
+        pairs.append(
+            {
+                "id": row[0],
+                "topic": row[1],
+                "language": row[2],
+                "concept_en": row[3],
+                "concept_ar": row[4],
+                "entity_en": row[5],
+                "entity_ar": row[6],
+                "hadith_id": row[7],
+                "hadith_en": row[8],
+                "hadith_ar": row[9],
+            }
+        )
 
     tmp = output_path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
@@ -316,12 +340,16 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="KV pair generation pipeline")
-    parser.add_argument("--pairs-per-topic", type=int, default=PAIRS_PER_TOPIC,
-                        help="Number of concept-entity pairs to generate per topic")
-    parser.add_argument("--export", action="store_true",
-                        help="Export verified pairs instead of generating")
-    parser.add_argument("--output", default=None,
-                        help="Output path for export")
+    parser.add_argument(
+        "--pairs-per-topic",
+        type=int,
+        default=PAIRS_PER_TOPIC,
+        help="Number of concept-entity pairs to generate per topic",
+    )
+    parser.add_argument(
+        "--export", action="store_true", help="Export verified pairs instead of generating"
+    )
+    parser.add_argument("--output", default=None, help="Output path for export")
     args = parser.parse_args()
 
     if args.export:

@@ -1,10 +1,14 @@
 import hashlib
-import secrets
 import json
 import os
-from fastapi import APIRouter, HTTPException, Header, Depends
+import secrets
+
+from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel
-from database import get_db, init_annotation_tables, now_iso
+from sqlalchemy import delete, func, select
+
+from database import get_session, init_annotation_tables, now_iso
+from models import Annotator, Assignment, AuthSession
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -47,10 +51,11 @@ def load_queries() -> dict:
         return json.load(f)
 
 
-def auto_assign_queries(annotator_id: int, conn) -> list[str]:
-    cursor = conn.cursor()
-    cursor.execute("SELECT query_id, COUNT(*) as cnt FROM assignments GROUP BY query_id")
-    counts = {row["query_id"]: row["cnt"] for row in cursor.fetchall()}
+async def auto_assign_queries(annotator_id: int, session) -> list[str]:
+    result = await session.execute(
+        select(Assignment.query_id, func.count()).group_by(Assignment.query_id)
+    )
+    counts = dict(result.all())
 
     all_queries = load_queries()
     all_query_ids = list(all_queries.keys())
@@ -59,10 +64,7 @@ def auto_assign_queries(annotator_id: int, conn) -> list[str]:
     assigned = []
     for qid in sorted_queries:
         if counts.get(qid, 0) < ANNOTATORS_PER_QUERY:
-            cursor.execute(
-                "INSERT INTO assignments (annotator_id, query_id, assigned_at) VALUES (?, ?, ?)",
-                (annotator_id, qid, now_iso()),
-            )
+            session.add(Assignment(annotator_id=annotator_id, query_id=qid, assigned_at=now_iso()))
             assigned.append(qid)
         if len(assigned) >= QUERIES_PER_ANNOTATOR:
             break
@@ -70,145 +72,122 @@ def auto_assign_queries(annotator_id: int, conn) -> list[str]:
     return assigned
 
 
-def get_current_annotator(authorization: str = Header(...)) -> dict:
+async def get_current_annotator(authorization: str = Header(...)) -> dict:
     if not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Invalid authorization header")
     token = authorization[7:]
 
-    conn = get_db()
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT s.annotator_id, a.username FROM sessions s JOIN annotators a ON s.annotator_id = a.id WHERE s.token = ?",
-        (token,),
-    )
-    row = cursor.fetchone()
-    conn.close()
+    async with get_session() as session:
+        result = await session.execute(
+            select(AuthSession.annotator_id, Annotator.username)
+            .join(Annotator, AuthSession.annotator_id == Annotator.id)
+            .where(AuthSession.token == token)
+        )
+        row = result.first()
 
     if not row:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 
-    return {"id": row["annotator_id"], "username": row["username"]}
+    return {"id": row.annotator_id, "username": row.username}
 
 
-def get_annotator_assignments(annotator_id: int, conn) -> list[str]:
-    cursor = conn.cursor()
-    cursor.execute("SELECT query_id FROM assignments WHERE annotator_id = ?", (annotator_id,))
-    return [row["query_id"] for row in cursor.fetchall()]
+async def get_annotator_assignments(annotator_id: int, session) -> list[str]:
+    result = await session.execute(
+        select(Assignment.query_id).where(Assignment.annotator_id == annotator_id)
+    )
+    return list(result.scalars())
+
+
+def _assignment_details(query_ids: list[str]) -> list[dict]:
+    all_queries = load_queries()
+    return [{"query_id": qid, "query": all_queries.get(qid, "")} for qid in query_ids]
 
 
 @router.post("/signup")
-def signup(req: SignupRequest):
+async def signup(req: SignupRequest):
     if len(req.username) < 3:
         raise HTTPException(status_code=400, detail="Username must be at least 3 characters")
     if len(req.password) < 6:
         raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
 
-    init_annotation_tables()
+    await init_annotation_tables()
 
-    conn = get_db()
-    cursor = conn.cursor()
+    async with get_session() as session:
+        existing = await session.execute(
+            select(Annotator.id).where(Annotator.username == req.username)
+        )
+        if existing.first():
+            raise HTTPException(status_code=409, detail="Username already taken")
 
-    cursor.execute("SELECT id FROM annotators WHERE username = ?", (req.username,))
-    if cursor.fetchone():
-        conn.close()
-        raise HTTPException(status_code=409, detail="Username already taken")
+        pw_hash, pw_salt = hash_password(req.password)
+        annotator = Annotator(
+            username=req.username,
+            password_hash=pw_hash,
+            password_salt=pw_salt,
+            created_at=now_iso(),
+        )
+        session.add(annotator)
+        await session.flush()
+        annotator_id = annotator.id
 
-    pw_hash, pw_salt = hash_password(req.password)
-    cursor.execute(
-        "INSERT INTO annotators (username, password_hash, password_salt, created_at) VALUES (?, ?, ?, ?)",
-        (req.username, pw_hash, pw_salt, now_iso()),
-    )
-    annotator_id = cursor.lastrowid
+        assigned = await auto_assign_queries(annotator_id, session)
 
-    assigned = auto_assign_queries(annotator_id, conn)
-
-    token = generate_token()
-    cursor.execute(
-        "INSERT INTO sessions (token, annotator_id, created_at) VALUES (?, ?, ?)",
-        (token, annotator_id, now_iso()),
-    )
-
-    conn.commit()
-
-    all_queries = load_queries()
-    assigned_details = [
-        {"query_id": qid, "query": all_queries.get(qid, "")}
-        for qid in assigned
-    ]
-
-    conn.close()
+        token = generate_token()
+        session.add(AuthSession(token=token, annotator_id=annotator_id, created_at=now_iso()))
+        await session.commit()
 
     return {
         "token": token,
         "annotator": {"id": annotator_id, "username": req.username},
-        "assignments": assigned_details,
+        "assignments": _assignment_details(assigned),
     }
 
 
 @router.post("/signin")
-def signin(req: SigninRequest):
-    init_annotation_tables()
+async def signin(req: SigninRequest):
+    await init_annotation_tables()
 
-    conn = get_db()
-    cursor = conn.cursor()
+    async with get_session() as session:
+        result = await session.execute(select(Annotator).where(Annotator.username == req.username))
+        annotator = result.scalar_one_or_none()
 
-    cursor.execute("SELECT id, username, password_hash, password_salt FROM annotators WHERE username = ?", (req.username,))
-    row = cursor.fetchone()
+        if not annotator or not verify_password(
+            req.password, annotator.password_hash, annotator.password_salt
+        ):
+            raise HTTPException(status_code=401, detail="Invalid username or password")
 
-    if not row or not verify_password(req.password, row["password_hash"], row["password_salt"]):
-        conn.close()
-        raise HTTPException(status_code=401, detail="Invalid username or password")
+        token = generate_token()
+        session.add(AuthSession(token=token, annotator_id=annotator.id, created_at=now_iso()))
+        await session.commit()
 
-    token = generate_token()
-    cursor.execute(
-        "INSERT INTO sessions (token, annotator_id, created_at) VALUES (?, ?, ?)",
-        (token, row["id"], now_iso()),
-    )
-    conn.commit()
-
-    assigned_ids = get_annotator_assignments(row["id"], conn)
-    all_queries = load_queries()
-    assigned_details = [
-        {"query_id": qid, "query": all_queries.get(qid, "")}
-        for qid in assigned_ids
-    ]
-
-    conn.close()
+        assigned_ids = await get_annotator_assignments(annotator.id, session)
 
     return {
         "token": token,
-        "annotator": {"id": row["id"], "username": row["username"]},
-        "assignments": assigned_details,
+        "annotator": {"id": annotator.id, "username": annotator.username},
+        "assignments": _assignment_details(assigned_ids),
     }
 
 
 @router.post("/signout")
-def signout(authorization: str = Header(...)):
+async def signout(authorization: str = Header(...)):
     if not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Invalid authorization header")
     token = authorization[7:]
 
-    conn = get_db()
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM sessions WHERE token = ?", (token,))
-    conn.commit()
-    conn.close()
+    async with get_session() as session:
+        await session.execute(delete(AuthSession).where(AuthSession.token == token))
+        await session.commit()
 
     return {"success": True}
 
 
 @router.get("/me")
-def me(annotator: dict = Depends(get_current_annotator)):
-    conn = get_db()
-    assigned_ids = get_annotator_assignments(annotator["id"], conn)
-    all_queries = load_queries()
-    assigned_details = [
-        {"query_id": qid, "query": all_queries.get(qid, "")}
-        for qid in assigned_ids
-    ]
-    conn.close()
+async def me(annotator: dict = Depends(get_current_annotator)):
+    async with get_session() as session:
+        assigned_ids = await get_annotator_assignments(annotator["id"], session)
 
     return {
         "annotator": annotator,
-        "assignments": assigned_details,
+        "assignments": _assignment_details(assigned_ids),
     }

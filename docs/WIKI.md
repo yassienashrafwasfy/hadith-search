@@ -223,7 +223,7 @@ Both pipelines are run over three text fields (full text, isnad, matn) independe
 - Model: `intfloat/multilingual-e5-large`
 - Query prefix: `query: {text}`
 - Passage prefix: `passage: {Matn}`; Arabic passages use query-side light normalization and diacritic removal. Building, training, and fine-tuned re-encoding share this representation. Existing embedding files require regeneration before claiming matn-only provenance.
-- Reranker: Jina AI `jina-reranker-v3` via API (`JINA_API_KEY2` env var)
+- Reranker: Jina AI `jina-reranker-v3` via API (`JINA_API_KEY` env var)
 - Rate limit: 30-second wait enforced between Jina API calls
 
 **Sparse retrieval details**:
@@ -363,7 +363,7 @@ The annotation platform is a web UI where human annotators rate hadith relevance
 
 | Variable | Purpose |
 |----------|---------|
-| `JINA_API_KEY2` | Jina reranker API key |
+| `JINA_API_KEY` | Jina reranker API key |
 | `LK_HADITH_CORPUS_PATH` | Override path to LK clone |
 | `APP_MODE` | Control which app features load |
 | `FINETUNED_ADAPTER_PATH` | Path to a LoRA adapter to load for search |

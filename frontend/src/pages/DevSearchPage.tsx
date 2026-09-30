@@ -22,10 +22,10 @@ const DevSearchPage = () => {
   const { search, loading, errors, clearError } = useApi();
   const [searchParams, setSearchParams] = useSearchParams();
   const resultsRef = useRef<HTMLDivElement>(null);
-  const { options, fallback, ready } = useSearchMethods();
 
   const [query, setQuery] = useState(searchParams.get('q') || '');
   const [lang, setLang] = useState<Lang>((searchParams.get('lang') as Lang) || 'en');
+  const { options, resolve, ready } = useSearchMethods(lang);
   const [selectedAlgorithm, setSelectedAlgorithm] = useState(searchParams.get('algorithm') || 'bm25-prf');
   const [selectedGrade, setSelectedGrade] = useState<string | null>(searchParams.get('grade') || null);
   const [selectedBook, setSelectedBook] = useState<string | null>(searchParams.get('book') || null);
@@ -34,10 +34,8 @@ const DevSearchPage = () => {
   const [selectedResult, setSelectedResult] = useState<SearchResult | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [sortMode, setSortMode] = useState<'grade-relevance' | 'relevance'>('grade-relevance');
-  // A method from the URL that this server does not offer falls back to one it does.
-  const algorithm = options.some((o) => o.value === selectedAlgorithm)
-    ? selectedAlgorithm
-    : (fallback ?? selectedAlgorithm);
+  // A method this server does not offer for the language falls back to one it does.
+  const algorithm = resolve(selectedAlgorithm);
 
   const doSearch = (
     overrideQuery?: string,
@@ -50,7 +48,7 @@ const DevSearchPage = () => {
     const effectiveLang = overrideLang ?? lang;
     const effectiveGrade = overrideGrade ?? selectedGrade;
     const effectiveBook = overrideBook ?? selectedBook;
-    const effectiveAlgorithm = overrideAlgorithm ?? algorithm;
+    const effectiveAlgorithm = resolve(overrideAlgorithm ?? selectedAlgorithm, effectiveLang);
     if (!effectiveQuery.trim()) return;
     const params = new URLSearchParams();
     params.set('q', effectiveQuery);

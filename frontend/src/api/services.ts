@@ -1,6 +1,6 @@
 import { API_BASE_URL } from './config';
 import { validateSearchResponse, validateBenchmarkResults } from './validators';
-import type { SearchResponse, BenchmarkResults, SearchRequest } from '../types';
+import type { SearchResponse, BenchmarkResults, SearchRequest, Lang } from '../types';
 
 export class ApiError extends Error {
   status: number;
@@ -119,8 +119,14 @@ export const navigateAnnotation = async (queryId: string, index: number, headers
   return response.json();
 };
 
-// Slugs of the search methods this server has switched on (GET /api/v1/search-methods).
-export const getSearchMethods = async (signal?: AbortSignal): Promise<string[]> => {
+export interface SearchMethodInfo {
+  slug: string;
+  languages: Lang[];
+}
+
+// The search methods this server has switched on, with the languages each supports
+// (GET /api/v1/search-methods).
+export const getSearchMethods = async (signal?: AbortSignal): Promise<SearchMethodInfo[]> => {
   const response = await fetch(`${API_V1}/search-methods`, { signal });
 
   if (!response.ok) {
@@ -128,5 +134,5 @@ export const getSearchMethods = async (signal?: AbortSignal): Promise<string[]> 
   }
 
   const data = await response.json();
-  return (data.methods as { slug: string }[]).map((method) => method.slug);
+  return data.methods as SearchMethodInfo[];
 };

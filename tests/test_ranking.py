@@ -188,10 +188,11 @@ def _vectors(_session):
         HadithEmbedding.__table__.select().order_by(HadithEmbedding.hadith_id)
     ).all()
     ids = np.array([r.hadith_id for r in rows])
-    matrix = np.array([r.english for r in rows], dtype=np.float32)
+    matrix = np.array([r.arabic for r in rows], dtype=np.float32)
     return ids, matrix / np.linalg.norm(matrix, axis=1, keepdims=True)
 
 
+@pytest.mark.usefixtures("_mock_preprocess")
 @pytest.mark.usefixtures("_mock_preprocess")
 class TestDenseParity:
     QUERY = np.linspace(-1, 1, DIM)
@@ -199,25 +200,25 @@ class TestDenseParity:
     def test_cosine_matches_numpy(self, _session, _vectors):
         ids, matrix = _vectors
         expected = legacy.cosine_similarity_search(self.QUERY, matrix, ids, top_k=10)
-        actual = ranking.dense_search(_session, self.QUERY, "EN", top_k=10)
+        actual = ranking.dense_search(_session, self.QUERY, "AR", top_k=10)
         assert list(actual) == list(expected)
         for hadith_id, score in expected.items():
             assert actual[hadith_id] == pytest.approx(score, abs=1e-5)
 
-    def test_arabic_uses_the_arabic_vectors(self, _session):
-        # the Arabic vectors are the negated English ones, so the mirrored query ranks the same
-        english = ranking.dense_search(_session, self.QUERY, "EN", top_k=5)
-        arabic = ranking.dense_search(_session, -self.QUERY, "AR", top_k=5)
-        assert list(english) == list(arabic)
+    def test_english_is_rejected(self, _session):
+        with pytest.raises(ValueError, match="Arabic only"):
+            ranking.dense_search(_session, self.QUERY, "EN", top_k=5)
+        with pytest.raises(ValueError, match="Arabic only"):
+            ranking.encode_query(_Model(self.QUERY), "prayer", "EN")
 
     def test_rerank_only_scores_candidates(self, _session, _vectors):
         ids, matrix = _vectors
         candidates = [5, 9, 12, 20]
         expected = legacy.semantic_reranker(
-            "q", "EN", candidates, _Model(self.QUERY), matrix, ids, top_k=3
+            "q", "AR", candidates, _Model(self.QUERY), matrix, ids, top_k=3
         )
         actual = ranking.semantic_rerank(
-            _session, "q", "EN", candidates, _Model(self.QUERY), top_k=3
+            _session, "q", "AR", candidates, _Model(self.QUERY), top_k=3
         )
         assert list(actual) == list(expected)
 
@@ -226,10 +227,10 @@ class TestDenseParity:
         ids, matrix = _vectors
         model = _Model(self.QUERY)
         expected = legacy.bm25_semantic_rrf(
-            "prayer fast", "EN", index["EN"], lengths, matrix, ids, model, candidate_k=20, top_k=15
+            "صلاه صيام", "AR", index["AR"], lengths, matrix, ids, model, candidate_k=20, top_k=15
         )
         actual = ranking.bm25_dense_rrf(
-            _session, "prayer fast", "EN", model, candidate_k=20, top_k=15
+            _session, "صلاه صيام", "AR", model, candidate_k=20, top_k=15
         )
         assert list(actual) == list(expected)
         for hadith_id, score in expected.items():
@@ -238,7 +239,7 @@ class TestDenseParity:
     def test_restrict_limits_both_rankings(self, _session):
         pool = {2, 4, 6, 8, 10}
         fused = ranking.bm25_dense_rrf(
-            _session, "prayer", "EN", _Model(self.QUERY), restrict=pool, top_k=50
+            _session, "صلاه", "AR", _Model(self.QUERY), restrict=pool, top_k=50
         )
         assert set(fused) <= pool
 

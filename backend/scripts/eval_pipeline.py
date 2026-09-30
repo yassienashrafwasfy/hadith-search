@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from database import get_sync_session
+from scripts.pooling import ARABIC_ONLY_SYSTEMS
 from services import ranking
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data")
@@ -52,7 +53,7 @@ def eval_pool_ids(relevant_list):
 
 
 class EvalResources:
-    """A database session, the E5 model and the eval pool shared by every system."""
+    """A database session, the Arabic encoder and the eval pool shared by every system."""
 
     def __init__(self, eval_ids, session):
         from scripts import get_model
@@ -157,14 +158,20 @@ def evaluate_systems(systems, eval_inputs, eval_ids, k):
     all_results = {}
     for system_name, search_fn in systems.items():
         print(f"\nEvaluating [{system_name}]...")
-        ranked = [
-            _filter_and_rank(search_fn(query, lang), eval_ids)
-            for query, lang in zip(queries, languages)
+        keep = [
+            i
+            for i, lang in enumerate(languages)
+            if lang == "AR" or system_name not in ARABIC_ONLY_SYSTEMS
         ]
+        ranked = [_filter_and_rank(search_fn(queries[i], languages[i]), eval_ids) for i in keep]
         retrieved = [[doc_id for doc_id, _ in per_query] for per_query in ranked]
-        df = evaluate_system(query_ids, retrieved, relevant_list, k)
+        df = evaluate_system(
+            [query_ids[i] for i in keep], retrieved, [relevant_list[i] for i in keep], k
+        )
         print(df.to_string())
-        all_results[system_name] = _system_block(df, query_ids, queries, k)
+        all_results[system_name] = _system_block(
+            df, [query_ids[i] for i in keep], [queries[i] for i in keep], k
+        )
     return all_results
 
 

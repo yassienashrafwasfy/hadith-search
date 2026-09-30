@@ -10,12 +10,12 @@ from collections import Counter
 from collections.abc import Collection
 from math import log
 
-from camel_tools.utils.dediac import dediac_ar
 from sqlalchemy import Float, Numeric, String, and_, cast, column, func, select, values
 from sqlalchemy.orm import Session
 
 from models import Hadith, HadithEmbedding, HadithLength, Posting, Term
-from scripts.preprocess import normalize_arabic_text, preprocess_arabic, preprocess_english
+from scripts.arabic_encoder import encoding_text
+from scripts.preprocess import preprocess_arabic, preprocess_english
 from scripts.search import rrf_fusion
 
 K1 = 1.2
@@ -31,11 +31,6 @@ Scores = dict[int, float]
 
 def preprocess_query(query: str, lang: str) -> str:
     return preprocess_arabic(query) if lang == "AR" else preprocess_english(query)
-
-
-def e5_query_text(query: str, lang: str) -> str:
-    """E5 wants a `query: ` prefix; Arabic is normalised the way the passages were."""
-    return f"query: {normalize_arabic_text(dediac_ar(query)) if lang == 'AR' else query}"
 
 
 def _length_column(lang: str):
@@ -206,7 +201,9 @@ def bm25_tfidf_hybrid(session: Session, query: str, lang: str) -> Scores:
 
 
 def _embedding_column(lang: str):
-    return HadithEmbedding.arabic if lang == "AR" else HadithEmbedding.english
+    if lang != "AR":
+        raise ValueError("Dense search supports Arabic only (the sentence encoder is Arabic)")
+    return HadithEmbedding.arabic
 
 
 def dense_search(
@@ -227,7 +224,10 @@ def dense_search(
 
 
 def encode_query(model, query: str, lang: str):
-    return model.encode([e5_query_text(query, lang)])[0]
+    """Unit vector for an Arabic query; the same cleanup the hadiths got when they were encoded."""
+    if lang != "AR":
+        raise ValueError("Dense search supports Arabic only (the sentence encoder is Arabic)")
+    return model.encode([encoding_text(query)])[0]
 
 
 def _ranks(scores: Scores) -> dict[int, int]:

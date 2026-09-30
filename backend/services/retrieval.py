@@ -25,7 +25,7 @@ Scores = dict[int, float]
 
 @dataclass(frozen=True)
 class SearchContext:
-    """A database session plus a lazy accessor for the E5 model."""
+    """A database session plus a lazy accessor for the Arabic sentence encoder."""
 
     session: Session
     model: Callable[[], Any]
@@ -36,6 +36,7 @@ class RetrievalSystem:
     slug: str
     run: Callable[[SearchContext, str, str], Scores]
     requires: tuple[str, ...] = ()  # Features flags that must all be on
+    languages: tuple[str, ...] = ("EN", "AR")  # query languages the system can answer
 
     def enabled(self, features: Features) -> bool:
         return features.search and all(features.is_enabled(flag) for flag in self.requires)
@@ -44,12 +45,16 @@ class RetrievalSystem:
 SYSTEMS: dict[str, RetrievalSystem] = {}
 
 
-def _system(slug: str, *requires: str):
+def _system(slug: str, *requires: str, languages: tuple[str, ...] = ("EN", "AR")):
     def register(run):
-        SYSTEMS[slug] = RetrievalSystem(slug, run, requires)
+        SYSTEMS[slug] = RetrievalSystem(slug, run, requires, languages)
         return run
 
     return register
+
+
+# The dense model only knows Arabic, so the dense systems answer Arabic queries only.
+_DENSE = {"languages": ("AR",)}
 
 
 @_system("term-overlap")
@@ -77,7 +82,7 @@ def _bm25_prf(ctx, query, lang):
     return ranking.bm25_prf(ctx.session, query, lang)
 
 
-@_system("semantic-rerank", "dense_retrieval")
+@_system("semantic-rerank", "dense_retrieval", **_DENSE)
 def _semantic_rerank(ctx, query, lang):
     candidates = list(ranking.bm25(ctx.session, query, lang, limit=RERANK_CANDIDATES))
     return ranking.semantic_rerank(
@@ -85,12 +90,12 @@ def _semantic_rerank(ctx, query, lang):
     )
 
 
-@_system("cosine-similarity", "dense_retrieval")
+@_system("cosine-similarity", "dense_retrieval", **_DENSE)
 def _cosine(ctx, query, lang):
     return ranking.cosine_search(ctx.session, query, lang, ctx.model(), top_k=COSINE_TOP_K)
 
 
-@_system("semantic-rrf", "dense_retrieval")
+@_system("semantic-rrf", "dense_retrieval", **_DENSE)
 def _semantic_rrf(ctx, query, lang):
     return ranking.bm25_dense_rrf(ctx.session, query, lang, ctx.model())
 

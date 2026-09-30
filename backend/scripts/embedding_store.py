@@ -1,4 +1,4 @@
-"""Write E5 embeddings into the `hadith_embeddings` table (one vector column per language)."""
+"""Write the Arabic sentence embeddings into the `hadith_embeddings` table."""
 
 import numpy as np
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -6,13 +6,12 @@ from sqlalchemy.orm import Session
 
 from models import HadithEmbedding
 
-COLUMNS = {"EN": "english", "AR": "arabic"}
 BATCH = 1000
 
 
-def store_embeddings(session: Session, hadith_ids, embeddings, language: str) -> int:
-    """Upsert one vector per hadith as float32; the other language's vector is left alone."""
-    column = COLUMNS[language]
+def store_embeddings(session: Session, hadith_ids, embeddings) -> int:
+    """Upsert one float32 vector per hadith into the `arabic` column."""
+    column = "arabic"
     matrix = np.asarray(embeddings, dtype=np.float32)
     if len(matrix) != len(hadith_ids):
         raise ValueError(f"{len(matrix)} embeddings for {len(hadith_ids)} hadiths")

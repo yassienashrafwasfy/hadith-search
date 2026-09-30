@@ -4,6 +4,9 @@ import os
 from database import get_sync_session
 from services import ranking
 
+# The Arabic encoder cannot embed English, so these systems only run on Arabic queries.
+ARABIC_ONLY_SYSTEMS = frozenset({"COSINE_SIMILARITY", "BM25_SEMANTIC_RERANK", "BM25_RRF"})
+
 DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
 POOLING_MANIFEST_PATH = os.path.join(DATA_DIR, "pooling_manifest.json")
 QUERIES_PATH = os.path.join(DATA_DIR, "queries.json")
@@ -47,6 +50,8 @@ def pool_query(
     system_errors: dict[str, str] = {}
 
     for name, search_fn in systems.items():
+        if language != "AR" and name in ARABIC_ONLY_SYSTEMS:
+            continue  # the Arabic encoder cannot embed English, so these do not pool it
         try:
             ids = _top_ids(search_fn(), per_system_size)
             system_outputs[name] = ids

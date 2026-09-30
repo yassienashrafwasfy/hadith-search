@@ -29,7 +29,5 @@ def test_invalid_flag_value_raises():
         load_features({"FEATURE_SEARCH": "maybe"})
 
 
-def test_adapter_path_and_is_enabled():
-    f = load_features({"FINETUNED_ADAPTER_PATH": "/x"})
-    assert f.finetuned_adapter_path == "/x"
+def test_is_enabled():
     assert Features(search=False).is_enabled("search") is False

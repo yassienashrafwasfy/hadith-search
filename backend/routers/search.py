@@ -31,11 +31,12 @@ def make_search_router(features: Features) -> APIRouter:
         methods = [
             {
                 "slug": slug,
+                "languages": [language.lower() for language in system.languages],
                 "_links": {
                     "search": link(f"{href('searches')}?method={slug}&q={{q}}", templated=True)
                 },
             }
-            for slug in systems
+            for slug, system in systems.items()
         ]
         body = {"methods": methods, "_links": {"self": link(href("search-methods"))}}
         return json_response(request, body, max_age=CACHE_SECONDS)
@@ -55,6 +56,14 @@ def make_search_router(features: Features) -> APIRouter:
             raise HTTPException(
                 status_code=422,
                 detail=f"Unknown method '{method}'. Available: {', '.join(systems)}",
+            )
+        if lang.value.upper() not in system.languages:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"Method '{method}' supports only: "
+                    f"{', '.join(language.lower() for language in system.languages)}"
+                ),
             )
         started = time.perf_counter()
         response = run_search(

@@ -138,7 +138,6 @@ def test_features_error_message_lists_valid_values():
 
 def test_features_defaults():
     f = load_features({})
-    assert f.finetuned_adapter_path == ""
     assert (f.annotation, f.kv_pairs, f.benchmark, f.search, f.dense_retrieval) == (True,) * 5
     assert f.eager_model is False
     assert load_features({"APP_MODE": "bogus"}).search is True

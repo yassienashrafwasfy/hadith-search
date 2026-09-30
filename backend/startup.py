@@ -32,11 +32,11 @@ def _model_steps(features: Features) -> list[tuple[str, Callable[[], object]]]:
         return []
     from scripts import get_model
 
-    return [("Sentence Transformer model (intfloat/multilingual-e5-large)", get_model)]
+    return [("Arabic sentence encoder (ONNX)", get_model)]
 
 
 def preload_resources(features: Features) -> None:
-    """Load what the enabled features need; the E5 model stays lazy unless `eager_model`."""
+    """Load what the enabled features need; the encoder stays lazy unless `eager_model`."""
     if not features.search:
         print("Search disabled: skipping model/index preload")
         return
@@ -44,7 +44,7 @@ def preload_resources(features: Features) -> None:
     for label, load in _index_steps() + _model_steps(features):
         _run_step(label, load)
     if features.dense_retrieval and not features.eager_model:
-        print("Dense retrieval enabled: lazy-loading E5 model on first request")
+        print("Dense retrieval enabled: lazy-loading the Arabic encoder on first request")
 
 
 async def init_database() -> None:

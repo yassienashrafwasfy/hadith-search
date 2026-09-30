@@ -71,19 +71,6 @@ def reencode_embeddings(adapter_path, batch_size=32):
             embeddings = torch.nn.functional.normalize(embeddings, p=2, dim=1)
         return embeddings.cpu().numpy()
 
-    print("Encoding English embeddings...")
-    en_texts = df["English_Matn"].tolist()
-    en_embeddings = []
-    for i in range(0, len(en_texts), batch_size):
-        batch = en_texts[i : i + batch_size]
-        en_embeddings.append(encode_batch(batch))
-        if (i // batch_size + 1) % 50 == 0:
-            print(f"  {i + len(batch)}/{len(en_texts)}")
-    en_embeddings = np.vstack(en_embeddings)
-    with get_sync_session() as session:
-        store_embeddings(session, ids, en_embeddings, "EN")
-    print(f"Stored {en_embeddings.shape} English embeddings in PostgreSQL")
-
     print("Encoding Arabic embeddings...")
     from camel_tools.utils.dediac import dediac_ar
 
@@ -98,7 +85,7 @@ def reencode_embeddings(adapter_path, batch_size=32):
             print(f"  {i + len(batch)}/{len(ar_texts)}")
     ar_embeddings = np.vstack(ar_embeddings)
     with get_sync_session() as session:
-        store_embeddings(session, ids, ar_embeddings, "AR")
+        store_embeddings(session, ids, ar_embeddings)
     print(f"Stored {ar_embeddings.shape} Arabic embeddings in PostgreSQL")
 
     print("Done re-encoding.\n")
@@ -138,6 +125,12 @@ if __name__ == "__main__":
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--k", type=int, default=20)
     args = parser.parse_args()
+
+    sys.exit(
+        "finetune_eval.py re-encodes hadiths with a fine-tuned E5 model, but semantic search now "
+        "uses the Arabic ONNX encoder (scripts/export_onnx.py). Running it would overwrite the "
+        "Arabic vectors with E5 vectors of a different size."
+    )
 
     adapter_path = args.adapter_path
     if adapter_path is None:

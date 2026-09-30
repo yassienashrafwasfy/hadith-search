@@ -14,7 +14,7 @@ def test_model_steps_need_dense_and_eager():
     assert startup._model_steps(Features(dense_retrieval=False, eager_model=True)) == []
     assert startup._model_steps(Features(dense_retrieval=True, eager_model=False)) == []
     ((label, load),) = startup._model_steps(Features(dense_retrieval=True, eager_model=True))
-    assert "e5" in label and callable(load)
+    assert "Arabic" in label and callable(load)
 
 
 def test_index_step_warns_when_the_index_is_empty(_patched_paths, capsys):
@@ -39,7 +39,7 @@ def test_preload_runs_every_step(monkeypatch, capsys):
     monkeypatch.setattr(startup, "_model_steps", lambda f: [("m", lambda: ran.append("m"))])
     startup.preload_resources(Features(dense_retrieval=True, eager_model=False))
     assert ran == ["a", "m"]
-    assert "lazy-loading E5 model" in capsys.readouterr().out
+    assert "lazy-loading the Arabic encoder" in capsys.readouterr().out
     startup.preload_resources(Features(dense_retrieval=False))
     assert "lazy-loading" not in capsys.readouterr().out
 

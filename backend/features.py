@@ -32,9 +32,8 @@ class Features:
     kv_pairs: bool = True
     benchmark: bool = True
     search: bool = True
-    dense_retrieval: bool = True  # E5 embeddings + model (semantic endpoints)
-    eager_model: bool = False  # load the E5 model at startup instead of on first request
-    finetuned_adapter_path: str = ""  # LoRA adapter merged into the E5 model when set
+    dense_retrieval: bool = True  # Arabic embeddings + ONNX encoder (semantic endpoints)
+    eager_model: bool = False  # load the encoder at startup instead of on first request
 
     def is_enabled(self, name: str) -> bool:
         return bool(getattr(self, name))
@@ -62,5 +61,4 @@ def load_features(env: Mapping[str, str] | None = None) -> Features:
             raw = env.get(f"FEATURE_{field.name.upper()}")
             if raw is not None:
                 values[field.name] = _parse_bool(f"FEATURE_{field.name.upper()}", raw)
-    values["finetuned_adapter_path"] = env.get("FINETUNED_ADAPTER_PATH", "")
     return Features(**values)

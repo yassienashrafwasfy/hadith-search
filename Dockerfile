@@ -89,9 +89,22 @@ ENV PYTHONPATH=/app/backend
 ENV PYTHONUNBUFFERED=1
 ENV APP_MODE=annotation
 
-USER app
+# Metadata goes last: REVISION/CREATED change every build and would bust the cache of later layers
+ARG REVISION=unknown
+ARG CREATED=unknown
+LABEL org.opencontainers.image.title="hadith-search" \
+      org.opencontainers.image.description="Bilingual hadith search engine and annotation platform" \
+      org.opencontainers.image.source="https://github.com/yassienashrafwasfy/hadith-search" \
+      org.opencontainers.image.revision="${REVISION}" \
+      org.opencontainers.image.created="${CREATED}"
+
+USER 10001:10001
 
 EXPOSE 8000
+
+# start-period is generous because search modes preload indices (and optionally the E5 model)
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
+    CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/openapi.json', timeout=4)"]
 
 ENTRYPOINT ["/app/docker-entrypoint.sh"]
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

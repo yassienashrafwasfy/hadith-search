@@ -1,0 +1,8 @@
+# Hadolint rules suppressed on purpose (run: docker run --rm -v "$PWD:/w" -w /w hadolint/hadolint:v2.14.0 hadolint Dockerfile)
+ignored:
+  # Debian drops old package versions from the mirrors, so pinned apt versions break rebuilds;
+  # security fixes come from `apt-get upgrade` in the runtime stage and the trivy scan instead.
+  - DL3008
+  # CPU torch is installed unpinned from the PyTorch CPU index before requirements.txt is copied
+  # (all other Python deps are pinned there).
+  - DL3013

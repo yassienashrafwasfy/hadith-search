@@ -104,7 +104,7 @@ def check_parity(onnx_path: str, tokenizer_path: str, reference: np.ndarray) -> 
     """Smallest cosine between the ONNX vector and the PyTorch one over PARITY_TEXTS."""
     from scripts.arabic_encoder import OnnxEncoder
 
-    encoder = OnnxEncoder(onnx_path, tokenizer_path)
+    encoder = OnnxEncoder(onnx_path, tokenizer_path, threads=0)
     # Encoded one at a time and as one padded batch: both must agree with PyTorch.
     singles = np.vstack([encoder.encode([t]) for t in PARITY_TEXTS])
     batched = encoder.encode(PARITY_TEXTS)

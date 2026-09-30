@@ -1,6 +1,6 @@
 """Turn raw {hadith_id: score} rankings into API results."""
 
-from sqlalchemy import select
+from sqlalchemy import ARRAY, Integer, any_, bindparam, select
 from sqlalchemy.orm import Session
 
 from models import Hadith, HadithSchema, SearchResult
@@ -20,8 +20,14 @@ _COLUMNS = (
 )
 
 
+def _in(ids: list[int]):
+    """`id = ANY(array)`: one parameter however many ids, instead of one placeholder per id."""
+    return Hadith.id == any_(bindparam("ids", ids, type_=ARRAY(Integer)))
+
+
 def _to_hadith(row) -> HadithSchema:
-    return HadithSchema(
+    # model_construct skips validation: the values come from the database, not from a client.
+    return HadithSchema.model_construct(
         hadith_id=row.id,
         book=row.Book or "",
         hadith_en_text=row.English_Text or "",
@@ -50,7 +56,7 @@ def build_results(
     """
     ids = list(raw)
     if grade_filter or book_filter:
-        stmt = select(Hadith.id).where(Hadith.id.in_(ids))
+        stmt = select(Hadith.id).where(_in(ids))
         if grade_filter:
             stmt = stmt.where(Hadith.Normalized_Grade == grade_filter)
         if book_filter:
@@ -58,9 +64,11 @@ def build_results(
         allowed = set(session.scalars(stmt))
         ids = [hadith_id for hadith_id in ids if hadith_id in allowed]
     ids = ids[:top_k]
-    rows = {row.id: row for row in session.execute(select(*_COLUMNS).where(Hadith.id.in_(ids)))}
+    rows = {row.id: row for row in session.execute(select(*_COLUMNS).where(_in(ids)))}
     return [
-        SearchResult(hadith=_to_hadith(rows[hadith_id]), score=float(raw[hadith_id]))
+        SearchResult.model_construct(
+            hadith=_to_hadith(rows[hadith_id]), score=float(raw[hadith_id])
+        )
         for hadith_id in ids
         if hadith_id in rows
     ]

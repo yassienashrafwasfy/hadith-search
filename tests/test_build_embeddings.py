@@ -72,7 +72,7 @@ def test_run_end_to_end_with_fake_model(_patched_paths, monkeypatch):
     import database
     from models import HadithEmbedding
 
-    monkeypatch.setattr(be, "load_encoder", lambda: _Model(3))
+    monkeypatch.setattr(be, "load_encoder", lambda threads: _Model(3))
     be.run()
     with database.get_sync_session() as session:
         rows = session.query(HadithEmbedding).order_by(HadithEmbedding.hadith_id).all()

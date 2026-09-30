@@ -14,6 +14,8 @@ import numpy as np
 EMBEDDING_DIM = 256
 MAX_LENGTH = 512  # the model accepts 8192, but it was trained on texts of up to ~250 tokens
 MODEL_DIR_ENV = "ARABIC_MODEL_DIR"
+THREADS_ENV = "ARABIC_ENCODER_THREADS"
+DEFAULT_THREADS = 1  # a query is one short text; see handoff item 24 for why not more
 DEFAULT_MODEL_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "onnx", "arabic"
 )
@@ -36,10 +38,19 @@ def model_dir() -> str:
     return os.environ.get(MODEL_DIR_ENV, DEFAULT_MODEL_DIR)
 
 
-class OnnxEncoder:
-    """`encode(texts)` returns an (n, EMBEDDING_DIM) float32 array of unit vectors."""
+def serving_threads() -> int:
+    """Threads for one encoder when serving. ONNX Runtime sizes its pool from the host's cores,
+    not the container's CPU limit, and its idle threads spin, which used up a 2-CPU quota."""
+    return int(os.environ.get(THREADS_ENV, DEFAULT_THREADS))
 
-    def __init__(self, model_path: str, tokenizer_path: str):
+
+class OnnxEncoder:
+    """`encode(texts)` returns an (n, EMBEDDING_DIM) float32 array of unit vectors.
+
+    `threads` is the ONNX Runtime thread count; 0 lets it use every core (for building embeddings).
+    """
+
+    def __init__(self, model_path: str, tokenizer_path: str, threads: int = DEFAULT_THREADS):
         import onnxruntime
         from tokenizers import Tokenizer
 
@@ -47,7 +58,14 @@ class OnnxEncoder:
         self._tokenizer.enable_truncation(max_length=MAX_LENGTH)
         self._tokenizer.no_padding()  # batches are padded here, per length-sorted batch
         self._pad_id = self._tokenizer.token_to_id("[PAD]")
-        self._session = onnxruntime.InferenceSession(model_path, providers=["CPUExecutionProvider"])
+        options = onnxruntime.SessionOptions()
+        options.intra_op_num_threads = threads
+        options.inter_op_num_threads = 1
+        if threads:
+            options.add_session_config_entry("session.intra_op.allow_spinning", "0")
+        self._session = onnxruntime.InferenceSession(
+            model_path, options, providers=["CPUExecutionProvider"]
+        )
 
     def encode(self, texts: list[str], batch_size: int = BATCH_SIZE, **_ignored) -> np.ndarray:
         if not texts:
@@ -70,7 +88,7 @@ class OnnxEncoder:
         return vectors
 
 
-def load_encoder(directory: str | None = None) -> OnnxEncoder:
+def load_encoder(directory: str | None = None, threads: int | None = None) -> OnnxEncoder:
     directory = directory or model_dir()
     model_path = os.path.join(directory, "model.onnx")
     tokenizer_path = os.path.join(directory, "tokenizer.json")
@@ -79,4 +97,6 @@ def load_encoder(directory: str | None = None) -> OnnxEncoder:
             f"Arabic ONNX model not found in {directory}. "
             "Create it with: python -m scripts.export_onnx (from backend/)"
         )
-    return OnnxEncoder(model_path, tokenizer_path)
+    return OnnxEncoder(
+        model_path, tokenizer_path, serving_threads() if threads is None else threads
+    )

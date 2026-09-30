@@ -65,7 +65,7 @@ def run():
     init_schema_sync()
     df = _load_corpus()
     ids = df["id"].astype(int).tolist()
-    model = load_encoder()
+    model = load_encoder(threads=0)  # a batch job: use every core
     print("Generating Arabic embeddings (ONNX, matn only)...")
     _encode_and_save(model, _passages(df), ids)
     print("Done")

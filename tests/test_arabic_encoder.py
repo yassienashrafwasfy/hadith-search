@@ -42,3 +42,43 @@ def test_real_model_vectors_are_unit_length_and_padding_independent():
     assert np.allclose(alone[0], batched[0], atol=1e-4)
     info = json.load(open(os.path.join(_REAL, "export.json")))
     assert info["min_parity_cosine"] >= 0.9999
+
+
+def test_serving_threads_default_and_override(monkeypatch):
+    monkeypatch.delenv(ae.THREADS_ENV, raising=False)
+    assert ae.serving_threads() == 1
+    monkeypatch.setenv(ae.THREADS_ENV, "3")
+    assert ae.serving_threads() == 3
+
+
+def test_encoder_passes_the_thread_count_to_onnx_runtime(monkeypatch, tmp_path):
+    import sys
+    import types
+
+    seen = {}
+
+    class _Options:
+        def add_session_config_entry(self, key, value):
+            seen[key] = value
+
+    def _session(_path, options, **_ignored):
+        seen["threads"] = (options.intra_op_num_threads, options.inter_op_num_threads)
+        return object()
+
+    fake = types.SimpleNamespace(SessionOptions=_Options, InferenceSession=_session)
+    tokenizers = types.SimpleNamespace(
+        Tokenizer=types.SimpleNamespace(
+            from_file=lambda path: types.SimpleNamespace(
+                enable_truncation=lambda **_kw: None,
+                no_padding=lambda: None,
+                token_to_id=lambda name: 5,
+            )
+        )
+    )
+    monkeypatch.setitem(sys.modules, "onnxruntime", fake)
+    monkeypatch.setitem(sys.modules, "tokenizers", tokenizers)
+    ae.OnnxEncoder("m.onnx", "t.json", threads=1)
+    assert seen["threads"] == (1, 1) and seen["session.intra_op.allow_spinning"] == "0"
+    seen.clear()
+    ae.OnnxEncoder("m.onnx", "t.json", threads=0)
+    assert seen["threads"] == (0, 1) and "session.intra_op.allow_spinning" not in seen

@@ -87,6 +87,10 @@ def _etag_matches(header: str | None, etag: str) -> bool:
     return "*" in candidates or etag in candidates
 
 
+class EncodedJson(str):
+    """A body that is already JSON text, so `json_response` does not encode it a second time."""
+
+
 def json_response(
     request: Request,
     body,
@@ -96,7 +100,10 @@ def json_response(
     headers: dict | None = None,
 ) -> Response:
     """200 with validators, or an empty 304 when the client's ETag is still current."""
-    payload = json.dumps(jsonable_encoder(body), ensure_ascii=False, separators=(",", ":"))
+    if isinstance(body, EncodedJson):
+        payload = str(body)
+    else:
+        payload = json.dumps(jsonable_encoder(body), ensure_ascii=False, separators=(",", ":"))
     etag = f'"{hashlib.sha256(payload.encode()).hexdigest()[:32]}"'
     response_headers = {
         "ETag": etag,

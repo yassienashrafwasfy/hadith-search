@@ -1,3 +1,4 @@
+import json
 import time
 from collections.abc import Iterator
 from urllib.parse import urlencode
@@ -7,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from database import get_sync_session
 from features import Features
 from models import Lang, SearchRequest
-from rest import API_PREFIX, href, json_response, link, server_timing
+from rest import API_PREFIX, EncodedJson, href, json_response, link, server_timing
 from services.retrieval import SearchContext, enabled_systems, run_search
 
 CACHE_SECONDS = 300  # results only change when the indices are rebuilt
@@ -76,13 +77,15 @@ def make_search_router(features: Features) -> APIRouter:
         params.update(
             {k: v for k, v in (("grade_filter", grade_filter), ("book_filter", book_filter)) if v}
         )
-        body = {
-            **response.model_dump(),
-            "_links": {
-                "self": link(f"{href('searches')}?{urlencode(params)}"),
-                "methods": link(href("search-methods")),
-            },
+        links = {
+            "self": link(f"{href('searches')}?{urlencode(params)}"),
+            "methods": link(href("search-methods")),
         }
+        # The model is serialised once by pydantic; the links are appended to its JSON object.
+        body = EncodedJson(
+            f'{response.model_dump_json()[:-1]},"_links":'
+            f"{json.dumps(links, ensure_ascii=False, separators=(',', ':'))}}}"
+        )
         return json_response(
             request,
             body,

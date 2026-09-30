@@ -1,6 +1,6 @@
 # Handoff: changes since Marawan's last commit
 
-Marawan's last commit is `93a4ff9` ("Align matn embeddings, training passages, and evaluation"). Everything below was added on top of it in 43 commits (the last ones are the REST API, items 16 and 17, the security pass, item 18, nginx with the sign-in limit, item 19, PostgreSQL with pgvector, item 20, and blue/green and canary releases, item 21): about 140 files. All 425 tests pass (2 skipped: one needs NLTK data, one needs the exported Arabic model). The tests need a PostgreSQL with pgvector, see item 20. The work sits on the branch `feat/blue-green-canary`, which builds on `feat/postgres-pgvector`, `feat/rest-api-v1`, `chore/dockerfile-hardening` and `chore/precommit-hooks`, and has not been pushed.
+Marawan's last commit is `93a4ff9` ("Align matn embeddings, training passages, and evaluation"). Everything below was added on top of it in 45 commits (the last ones are the REST API, items 16 and 17, the security pass, item 18, nginx with the sign-in limit, item 19, PostgreSQL with pgvector, item 20, and blue/green and canary releases, item 21): about 140 files. All 431 tests pass (2 skipped: one needs NLTK data, one needs the exported Arabic model). The tests need a PostgreSQL with pgvector, see item 20. The work sits on the branch `feat/blue-green-canary`, which builds on `feat/postgres-pgvector`, `feat/rest-api-v1`, `chore/dockerfile-hardening` and `chore/precommit-hooks`, and has not been pushed.
 
 Each change has the same three lines: which files, why this is the normal way to do it, and what you get out of it.
 
@@ -363,6 +363,28 @@ tools/deploy.sh stop-idle           # when you are sure, stop the old colour
 - **The script was simplified after the full run** (intervals and hit rates removed). I did not rerun all 1000 known-item queries. A 20-query run of the new script reproduced the chapter numbers above exactly, and `docs/recall_proxy.json` was reduced by hand to the recall values of the full run.
 
 **Not checked:** whether this model finds better hadiths than E5 on the 20 evaluation queries (`queries.json` is missing on this machine). The 256-dimension cut was not compared with the full 768 dimensions.
+
+### 24. Load testing and performance (2026-10-01)
+
+All numbers: one app container capped at 2 vCPU and 4 GB (`APP_CPUS`, `APP_MEMORY` in compose), Locust on the same WSL2 host, 20 simulated users, 90 s, a mix of 9 endpoints (keyword, semantic, English and Arabic, weights in `tools/loadtest/locustfile.py`). Postgres is not capped. Load comes from the same machine, so real numbers will differ.
+
+Reproduce: `tools/loadtest/run.sh LABEL USERS SECONDS [CONTAINER]` (prints p50/p95/p99, rps, container CPU and memory, OOM flag). Profile: `python -m scripts.serve_for_profiling` under Scalene (it shows mostly the idle main thread, since uvicorn work runs in threads; py-spy `--gil` and per-thread CPU were more useful).
+
+Changes, in the order made (each re-measured):
+
+| Change | rps | p95 | Notes |
+|---|---|---|---|
+| Baseline | 3.0 | 12 s | max memory 3.1 GB |
+| Stop loading only the needed columns wasted: `build_results` cuts to `top_k` before loading, fetches only the columns it returns | 4.2 | 7.1 s | memory 1.5 GB |
+| Search response serialised once (`EncodedJson`), byte-identical output | 3.7 | 7.7 s | no measurable gain, kept because it is simpler per request |
+| ONNX Runtime given 1 thread, no spinning (`ARABIC_ENCODER_THREADS`, default 1) | 14.4 | 0.36 s | ORT sized its pool from the 16 host cores and spun inside a 2 CPU quota; one query encode went from 300-1000 ms to 27 ms |
+
+- Before those: a cold start with 10 users killed the container (OOM at 4 GB) because every request thread loaded the CAMeL model and the encoder at once. `scripts/loading.py` now loads each once (`_load_once`, tested in `tests/test_loading.py`).
+- At 60 users the same container gives 25 rps, p95 1.8 s, p99 2.3 s, no failures, memory 2.0 GB. It is CPU bound (Postgres is idle). No pool-exhaustion errors.
+- Batch jobs are unaffected: `build_embeddings` and `export_onnx` pass `threads=0` (all cores).
+- `synthetic`: users pick from 32 fixed queries; the 20-user run is one sample, not repeated.
+
+**Not done:** two uvicorn workers (about 1.5 GB each), a bigger DB pool, startup warm-up of the models, limiting the 500-result response or gzip (this changes the API, your call), and the stale warnings printed by the entrypoint.
 
 ## Still open
 

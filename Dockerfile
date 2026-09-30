@@ -41,7 +41,9 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 # Pre-download NLTK data (needed for English preprocessing at search time)
 RUN python -c "import nltk; \
     [nltk.download(p, download_dir='/opt/nltk_data') for p in ['punkt','punkt_tab','averaged_perceptron_tagger', \
-    'averaged_perceptron_tagger_eng','wordnet','stopwords']]"
+    'averaged_perceptron_tagger_eng','wordnet','stopwords']]" \
+    # wordnet stays zipped and NLTK extracts it on first use, which the read-only runtime user cannot do
+    && python -c "import zipfile; zipfile.ZipFile('/opt/nltk_data/corpora/wordnet.zip').extractall('/opt/nltk_data/corpora')"
 
 # Pre-download camel_tools MLE data (needed for Arabic preprocessing at search time).
 # Installed at build time because the non-root runtime user cannot write to CAMELTOOLS_DATA.
@@ -49,6 +51,10 @@ RUN camel_data -i disambig-mle-calima-msa-r13
 
 # ===== Stage 3: Runtime (no compilers, no git, non-root) =====
 FROM python:3.12-slim AS runtime
+
+# Pick up Debian security fixes newer than the base image (e.g. openssl); lists are removed after
+RUN apt-get update && apt-get upgrade -y --no-install-recommends \
+    && rm -rf /var/lib/apt/lists/*
 
 RUN useradd --system --create-home --uid 10001 app
 

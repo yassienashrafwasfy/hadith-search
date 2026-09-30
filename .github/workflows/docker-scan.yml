@@ -1,0 +1,29 @@
+name: docker-scan
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # New CVEs appear without code changes, so rescan weekly
+    - cron: "0 6 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          pull: true
+          tags: hadith-search:hardened
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: trivy + dockle
+        run: tools/scan-image.sh hadith-search:hardened

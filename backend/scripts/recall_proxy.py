@@ -104,17 +104,12 @@ def run(ks: list[int], n: int, seed: int, out: str) -> dict:
 
 def print_report(report: dict) -> None:
     for test, metric in (("known_item", "recall"), ("chapter", "capped_recall")):
-        print(
-            f"\n{test} ({report[test + '_queries' if test == 'chapter' else 'known_item_queries']} queries)"
-        )
+        count = report["chapter_queries" if test == "chapter" else "known_item_queries"]
+        print(f"\n{test} ({count} queries)")
         for slug, result in report["methods"].items():
             cells = []
             for k in report["ks"]:
-                block = result[test][f"k={k}"]
-                m = block[metric]
-                cells.append(
-                    f"{metric}@{k} {m['mean']:.3f} [{m['ci95'][0]:.3f}-{m['ci95'][1]:.3f}]"
-                )
+                cells.append(f"{metric}@{k} {result[test][f'k={k}'][metric]:.3f}")
             print(f"  {slug:18s} " + "  ".join(cells))
 
 

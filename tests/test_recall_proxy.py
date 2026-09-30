@@ -17,3 +17,20 @@ def test_known_item_query_is_first_half_and_counts_copies():
 def test_chapter_queries_group_books_and_skip_blank_titles():
     rows = [(1, "كتاب الصيام"), (2, "كتاب الصيام"), (3, "  "), (4, None), (5, "كتاب الحج")]
     assert rp.chapter_queries(rows) == [("كتاب الحج", {5}), ("كتاب الصيام", {1, 2})]
+
+
+def test_print_report_shows_recall_only(capsys):
+    report = {
+        "ks": [3],
+        "known_item_queries": 2,
+        "chapter_queries": 1,
+        "methods": {
+            "m": {
+                "known_item": {"k=3": {"recall": 0.5}},
+                "chapter": {"k=3": {"capped_recall": 0.25}},
+            }
+        },
+    }
+    rp.print_report(report)
+    out = capsys.readouterr().out
+    assert "recall@3 0.500" in out and "capped_recall@3 0.250" in out

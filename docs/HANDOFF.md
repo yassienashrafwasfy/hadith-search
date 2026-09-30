@@ -360,7 +360,7 @@ tools/deploy.sh stop-idle           # when you are sure, stop the old colour
 - **Some known-item queries are missed even at k=8**: 1 - 0.793 = 21% of the recall is missing for RRF and 25% for cosine. I did not investigate why. A likely cause is that half a hadith is a poor query for a 256-dimension vector of the whole text, but that is a guess.
 - **Test 2 is low, and is not a fair verdict on the model.** A chapter is a whole book (for example Fasting) and the title names a subject, while most hadiths in it never use the title's words.
 - **Not measured:** the five keyword methods (you asked for the new model only), English (the model has no English), real user questions, and recall against human-graded qrels. Treat these numbers as a smoke test of the pipeline, not a comparison with E5. Replace them with real qrels when `queries.json` is available.
-- **The script was simplified after the run** (intervals and hit rates removed). I did not rerun it, so `docs/recall_proxy.json` was reduced by hand to the same recall values from that run.
+- **The script was simplified after the full run** (intervals and hit rates removed). I did not rerun all 1000 known-item queries. A 20-query run of the new script reproduced the chapter numbers above exactly, and `docs/recall_proxy.json` was reduced by hand to the recall values of the full run.
 
 **Not checked:** whether this model finds better hadiths than E5 on the 20 evaluation queries (`queries.json` is missing on this machine). The 256-dimension cut was not compared with the full 768 dimensions.
 

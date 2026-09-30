@@ -226,3 +226,12 @@ class TestRetrievalService:
         res = run_search(system, ctx, SearchRequest(query="q", lang="en"))
         assert res.number_of_results == 2
         assert [r.score for r in res.results] == [2.0, 1.0]
+
+
+def test_build_results_filters_before_the_cut(_db_session):
+    # Hadith 1 and 3 are Bukhari, 2 is Muslim. With top_k=1 the Muslim one must still be found
+    # when it is the only one left after the book filter, even though it ranks last.
+    raw = {1: 0.9, 3: 0.8, 2: 0.1}
+    out = results.build_results(_db_session, raw, book_filter="Muslim", top_k=1)
+    assert [r.hadith.hadith_id for r in out] == [2]
+    assert [r.hadith.hadith_id for r in results.build_results(_db_session, raw, top_k=2)] == [1, 3]

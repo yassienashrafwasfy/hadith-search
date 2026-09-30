@@ -2,6 +2,10 @@
 # tools/deploy.sh (see docs/HANDOFF.md item 21); the profiles keep each colour off until asked.
 x-app: &app
   restart: unless-stopped
+  # Caps for one app container. The defaults match the load tests in docs/HANDOFF.md (item 24).
+  cpus: ${APP_CPUS:-2}
+  mem_limit: ${APP_MEMORY:-4g}
+  memswap_limit: ${APP_MEMORY:-4g}
   expose:
     - "8000"
   environment:

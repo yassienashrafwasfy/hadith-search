@@ -1,8 +1,10 @@
+# syntax=docker/dockerfile:1
 # ===== Stage 1: Build frontend =====
 FROM node:22-slim AS frontend-builder
 WORKDIR /build
 COPY frontend/package*.json ./
-RUN npm ci
+# Cache mount keeps the npm download cache between builds without baking it into a layer
+RUN --mount=type=cache,target=/root/.npm npm ci
 COPY frontend/ .
 # Skip tsc (pre-existing type errors), Vite/esbuild handles transpilation
 RUN npx vite build
@@ -10,10 +12,13 @@ RUN npx vite build
 # ===== Stage 2: Python build (compilers live only here) =====
 FROM python:3.12-slim AS python-builder
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Debian images delete downloaded .debs after install; disable that so the cache mount is useful
+RUN rm -f /etc/apt/apt.conf.d/docker-clean
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
-    git \
-    && rm -rf /var/lib/apt/lists/*
+    git
 
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
@@ -23,12 +28,15 @@ ENV CAMELTOOLS_DATA=/opt/camel_tools_data
 RUN mkdir -p "$NLTK_DATA" "$CAMELTOOLS_DATA"
 
 WORKDIR /build
+# Install CPU-only torch first (before requirements.txt is copied, so editing that file
+# does not re-download it) to avoid pulling CUDA wheels
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install torch --index-url https://download.pytorch.org/whl/cpu
 COPY requirements.txt .
-# Install CPU-only torch first to avoid pulling CUDA wheels
-RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
 # Install remaining dependencies (torch line removed, already installed)
-RUN grep -v '^torch==' requirements.txt > /tmp/req.txt && \
-    pip install --no-cache-dir -r /tmp/req.txt
+RUN --mount=type=cache,target=/root/.cache/pip \
+    grep -v '^torch==' requirements.txt > /tmp/req.txt && \
+    pip install -r /tmp/req.txt
 
 # Pre-download NLTK data (needed for English preprocessing at search time)
 RUN python -c "import nltk; \

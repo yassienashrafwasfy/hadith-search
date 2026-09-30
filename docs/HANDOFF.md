@@ -1,6 +1,6 @@
 # Handoff: changes since Marawan's last commit
 
-Marawan's last commit is `93a4ff9` ("Align matn embeddings, training passages, and evaluation"). Everything below was added on top of it in 8 commits, plus this note: about 107 files, 10,000 lines added and 3,000 removed. All 312 tests pass. The work sits on the branch `chore/dockerfile-hardening` (which builds on `chore/precommit-hooks`) and has not been pushed.
+Marawan's last commit is `93a4ff9` ("Align matn embeddings, training passages, and evaluation"). Everything below was added on top of it in 8 commits, then the REST API commits described from item 16: about 130 files. All 354 tests pass. The work sits on the branch `chore/dockerfile-hardening` (which builds on `chore/precommit-hooks`) and has not been pushed.
 
 Each change has the same three lines: which files, why this is the normal way to do it, and what you get out of it.
 
@@ -10,7 +10,8 @@ Each change has the same three lines: which files, why this is the normal way to
 2. **The database no longer enforces foreign keys.** The old code turned on `PRAGMA foreign_keys`. We dropped it on purpose. The links between tables are still declared in the models, but SQLite will not block a bad link or cascade deletes. Tables are created with `create_all`: it adds missing tables and never changes existing ones, and there are no migrations.
 3. **The diff looks bigger than the real change.** Every Python file was reformatted to one style, so many lines only moved or wrapped differently. Read the commit messages first, then the files.
 4. **Libraries were upgraded** to fix known security holes: numpy 1.26 to 2.5, transformers 4.43 to 5.17, starlette 0.52 to 1.3, nltk 3.9 to 3.10. The tests pass, but I could not test saved index files (`.pkl`) built with the old numpy, because this copy has no real data. If loading fails, rebuild them. A full fine-tuning run and the real E5 model were also not re-run.
-5. **The Docker container no longer runs as root.** It runs as user 10001. If you mount a folder for `backend/data` instead of using a Docker volume, run `chown 10001 <folder>` on it once.
+5. **Every API URL changed, and there are no old aliases.** Everything now lives under `/api/v1`, the frontend is updated, and anything else that calls the API (scripts, bookmarks) must move. The map is in item 16 below. Sign-in also works differently: set `AUTH_SECRET` (32+ characters) in `.env`, and use the same value on every server.
+6. **The Docker container no longer runs as root.** It runs as user 10001. If you mount a folder for `backend/data` instead of using a Docker volume, run `chown 10001 <folder>` on it once.
 
 `uvicorn main:app` still starts the server the same way, and the scripts still run from the command line.
 
@@ -141,6 +142,46 @@ Each change has the same three lines: which files, why this is the normal way to
 **Why it's best practice:** Setup steps and rules written down in the repo stay with the code.
 
 **Benefit:** A new developer, or an AI assistant, can start work without asking what the commands are.
+
+## REST API
+
+### 16. Resource URLs under /api/v1
+
+**Files:** `backend/rest.py` (new), `backend/tokens.py` (new), `backend/routers/` (`auth.py`, `annotation.py`, `kv_pairs.py`, `benchmark.py`, `search.py` rewritten; `hadiths.py` and `root.py` new), `backend/main.py`, `frontend/src/api/`, `frontend/src/pages/`, `tests/`
+
+**Why it's best practice:** A REST API names things (annotators, assignments, searches), not actions, and uses the HTTP verb for the action. Reads use GET so browsers and proxies can cache them. Answers use the standard status codes: 201 for created (with a `Location` header), 401 without a valid token, 403 for someone else's data, 404 for missing, 409 for a duplicate username, 422 for bad input. Error bodies use the standard `application/problem+json` shape. Each response carries `_links` to related URLs, and `GET /api/v1` lists the entry points, so a client can follow links instead of hard-coding paths.
+
+**Benefit:** Repeat searches and benchmark reads come from the browser cache or get a 304 (the `ETag` is a hash of the body). Timing moved from the body into the `Server-Timing` header, because a changing number in the body would break that. Nothing is kept in server memory between requests, so more servers can be added behind a load balancer.
+
+| Old | New |
+| --- | --- |
+| `POST /search/{method}` (JSON body) | `GET /api/v1/searches?q=&method=&lang=&grade_filter=&book_filter=` |
+| `GET /hadith/{id}` | `GET /api/v1/hadiths/{id}` |
+| `POST /auth/signup`, `/auth/signin` | `POST /api/v1/annotators`, `POST /api/v1/tokens` |
+| `GET /auth/me`, `POST /auth/signout` | `GET /api/v1/annotators/me` (no sign-out call: the client drops the token) |
+| `GET /annotation/queries`, `/annotation/{id}/current` | `GET /api/v1/assignments`, `/api/v1/assignments/{id}` |
+| `POST /annotation/{id}/label` | `PUT /api/v1/assignments/{id}/labels/{hadith_id}` with `{"label": 0-2}` |
+| `POST /annotation/{id}/navigate?index=` | `PUT /api/v1/assignments/{id}/progress` with `{"index": n}` |
+| `/kv-pairs/stats`, `POST /kv-pairs/{id}/verify`, `/kv-pairs/export` | `/api/v1/kv-pairs/statistics`, `PATCH /api/v1/kv-pairs/{id}`, `?status=verified` |
+| `/benchmark/*` | `/api/v1/benchmark/*` |
+
+Behavior that differs from before:
+
+- Saving a label no longer moves the cursor. The frontend calls the progress endpoint after it.
+- A query that is not assigned to you is now 404, not 403.
+- A missing benchmark file is now 404, not a 200 with `{"error": ...}`.
+- The `mode` parameter of `/benchmark/finetuned` accepts only letters, digits and underscores. It used to build a file path from raw input.
+- The `response_time_ms` field is gone from search results; read the `Server-Timing` header.
+
+### 17. Signed tokens instead of a sessions table
+
+**Files:** `backend/tokens.py`, `backend/routers/auth.py`, `backend/models/orm.py`, `backend/database.py`, `.env.example`
+
+**Why it's best practice:** The old code stored each login in a database table and looked it up on every request. A signed token (JWT) carries the annotator id and an expiry, and any server that knows `AUTH_SECRET` can check it. That is what makes it possible to run more than one server.
+
+**Benefit:** No database read per request for auth. The cost: a token cannot be cancelled before it expires (12 hours by default, `AUTH_TOKEN_TTL_MINUTES`), and if `AUTH_SECRET` is unset the server makes a random one, so logins break on restart. The old `auth_sessions` table is no longer created; existing rows are ignored.
+
+**Still open:** the `/kv-pairs` routes have no login check, as before. Running several servers also needs a database they all share; the SQLite file is per machine.
 
 ## Quick start after pulling
 

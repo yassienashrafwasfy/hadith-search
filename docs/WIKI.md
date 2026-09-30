@@ -78,11 +78,11 @@ hadith-search/
 │   ├── models/
 │   │   └── schemas.py            # Pydantic request/response schemas
 │   ├── routers/
-│   │   ├── search.py             # /search endpoints
-│   │   ├── annotation.py         # /annotation endpoints (auth-gated)
-│   │   ├── benchmark.py          # /benchmark endpoints
-│   │   ├── auth.py               # /auth endpoints
-│   │   └── kv_pairs.py           # /kv-pairs endpoints
+│   │   ├── search.py             # /api/v1/searches, /search-methods
+│   │   ├── annotation.py         # /api/v1/assignments, /agreement (token required)
+│   │   ├── benchmark.py          # /api/v1/benchmark
+│   │   ├── auth.py               # /api/v1/annotators, /tokens
+│   │   └── kv_pairs.py           # /api/v1/kv-pairs
 │   ├── scripts/
 │   │   ├── build_all.py          # Canonical build orchestrator — run this
 │   │   ├── data_creation.py      # LK loader, reconstruction, DB creation
@@ -371,11 +371,16 @@ The annotation platform is a web UI where human annotators rate hadith relevance
 | `VITE_API_BASE_URL` | Frontend API base URL (build-time) |
 
 **Routers**:
-- `GET/POST /search` — all 11 retrieval systems
-- `GET /annotation/*` — annotation platform
-- `GET /benchmark/*` — evaluation results, stats, fine-tuned comparison
-- `POST /auth/*` — signup, login, token refresh
-- `GET/POST /kv-pairs/*` — KV pair verification
+All routes live under `/api/v1`. `GET /api/v1` lists them as links. Errors use `application/problem+json`.
+
+- `GET /searches?q=&method=&lang=&grade_filter=&book_filter=` — one of the 11 retrieval systems; `GET /search-methods` lists the enabled ones. Cached for 5 minutes, with an ETag.
+- `GET /hadiths/{id}` — one hadith, cached for an hour.
+- `GET /assignments`, `GET /assignments/{query_id}` — the signed-in annotator's queries. `PUT /assignments/{query_id}/labels/{hadith_id}` saves a label (201 the first time, 200 after) and `PUT /assignments/{query_id}/progress` saves the cursor. `GET /agreement` gives inter-annotator agreement.
+- `POST /annotators` signs up, `POST /tokens` signs in, `GET /annotators/me` reads the profile. Tokens are signed JWTs sent as `Authorization: Bearer <token>`.
+- `GET /benchmark/{results,stats,qrels,finetuned,finetuned-stats,comparison}` — evaluation output; 404 if the file has not been built.
+- `GET /kv-pairs` (paged, `?status=`), `GET /kv-pairs/statistics`, `PATCH /kv-pairs/{id}` and `PATCH /kv-pairs` (batch) with `{"status": "verified" | "rejected"}`.
+
+Running several servers behind a load balancer: give every one the same `AUTH_SECRET` (32+ characters) and the same database. Nothing else is kept in server memory between requests.
 
 ---
 

@@ -182,7 +182,7 @@ A comparison is considered statistically significant at p < 0.05.
 
 With only 20 queries, statistical power is limited. The paper should report all three test results and acknowledge this limitation.
 
-**Benchmark endpoint**: `/benchmark/stats` returns significance test results as JSON for the web UI.
+**Benchmark endpoint**: `/api/v1/benchmark/stats` returns significance test results as JSON for the web UI.
 
 ---
 

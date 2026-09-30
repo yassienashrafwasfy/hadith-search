@@ -1,4 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../api/AuthContext';
 import { API_BASE_URL } from '../api/config';
 import LoadingSpinner from '../components/LoadingSpinner';
 
@@ -37,6 +39,8 @@ type StatusFilter = (typeof STATUS_FILTERS)[number] | 'all';
 const PAGE_SIZE = 10;
 
 const KvVerificationPage = () => {
+  const { token, loading: authLoading, authFetch } = useAuth();
+  const navigate = useNavigate();
   const [pairs, setPairs] = useState<KvPair[]>([]);
   const [stats, setStats] = useState<Stats | null>(null);
   const [loading, setLoading] = useState(true);
@@ -46,16 +50,20 @@ const KvVerificationPage = () => {
   const [total, setTotal] = useState(0);
   const [verifyingId, setVerifyingId] = useState<number | null>(null);
 
+  useEffect(() => {
+    if (!authLoading && !token) navigate('/dev/annotation/signin');
+  }, [authLoading, token, navigate]);
+
   const fetchStats = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE_URL}/api/v1/kv-pairs/statistics`);
+      const res = await authFetch(`${API_BASE_URL}/api/v1/kv-pairs/statistics`);
       if (!res.ok) throw new Error('Failed to fetch stats');
       const data = await res.json();
       setStats(data);
     } catch {
       // silent
     }
-  }, []);
+  }, [authFetch]);
 
   const fetchPairs = useCallback(async () => {
     setLoading(true);
@@ -66,7 +74,7 @@ const KvVerificationPage = () => {
         offset: String(offset),
       });
       if (statusFilter !== 'all') params.set('status', statusFilter);
-      const res = await fetch(`${API_BASE_URL}/api/v1/kv-pairs?${params}`);
+      const res = await authFetch(`${API_BASE_URL}/api/v1/kv-pairs?${params}`);
       if (!res.ok) throw new Error('Failed to fetch KV pairs');
       const data: KvResponse = await res.json();
       setPairs(data.pairs);
@@ -76,7 +84,7 @@ const KvVerificationPage = () => {
     } finally {
       setLoading(false);
     }
-  }, [statusFilter, offset]);
+  }, [statusFilter, offset, authFetch]);
 
   useEffect(() => {
     fetchStats();
@@ -89,7 +97,7 @@ const KvVerificationPage = () => {
   const handleVerify = async (pairId: number, status: 'verified' | 'rejected') => {
     setVerifyingId(pairId);
     try {
-      const res = await fetch(`${API_BASE_URL}/api/v1/kv-pairs/${pairId}`, {
+      const res = await authFetch(`${API_BASE_URL}/api/v1/kv-pairs/${pairId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status }),

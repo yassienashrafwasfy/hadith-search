@@ -40,7 +40,7 @@ def test_cors_settings():
     assert cors_settings("*") == {"allow_origins": ["*"], "allow_credentials": False}
     assert cors_settings("http://a, http://b ,") == {
         "allow_origins": ["http://a", "http://b"],
-        "allow_credentials": True,
+        "allow_credentials": False,
     }
 
 
@@ -86,3 +86,40 @@ async def test_lifespan_reports_static_dir(_patched_paths, tmp_path, monkeypatch
     async with app.router.lifespan_context(app):
         pass
     assert f"Serving frontend from: {tmp_path}" in capsys.readouterr().out
+
+
+async def test_static_files_cannot_escape_the_static_dir(tmp_path):
+    import httpx
+
+    static = tmp_path / "static"
+    static.mkdir()
+    (static / "index.html").write_text("<html>spa</html>")
+    (static / "app.js").write_text("ok")
+    (tmp_path / "secret.txt").write_text("SECRET")
+    app = create_app(
+        Features(annotation=False, kv_pairs=False, benchmark=False, search=False),
+        static_dir=str(static),
+    )
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as c:
+        assert (await c.get("/app.js")).text == "ok"
+        for path in ("/%2e%2e/secret.txt", "/..%2fsecret.txt", "/assets/../../secret.txt"):
+            res = await c.get(path)
+            assert "SECRET" not in res.text
+            assert res.text == "<html>spa</html>"
+
+
+async def test_security_headers_are_set_and_docs_keep_working(tmp_path):
+    import httpx
+
+    app = create_app(
+        Features(annotation=False, kv_pairs=False, benchmark=False, search=False), static_dir=None
+    )
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as c:
+        api = await c.get("/api/v1")
+        docs = await c.get("/docs")
+    assert api.headers["x-content-type-options"] == "nosniff"
+    assert api.headers["x-frame-options"] == "DENY"
+    assert "frame-ancestors 'none'" in api.headers["content-security-policy"]
+    assert (
+        "content-security-policy" not in docs.headers and docs.headers["x-frame-options"] == "DENY"
+    )

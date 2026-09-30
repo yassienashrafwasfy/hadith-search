@@ -22,26 +22,47 @@ QUERIES_PER_ANNOTATOR = 2
 ANNOTATORS_PER_QUERY = 3
 
 
+# Upper bounds keep a huge body from turning every sign-in into an expensive hash.
 class Credentials(BaseModel):
-    username: str
-    password: str
+    username: str = Field(max_length=64)
+    password: str = Field(max_length=128)
 
 
 class NewAnnotator(Credentials):
-    username: str = Field(min_length=3)
-    password: str = Field(min_length=6)
+    username: str = Field(min_length=3, max_length=64)
+    password: str = Field(min_length=8, max_length=128)
 
 
-def hash_password(password: str, salt: str = None) -> tuple[str, str]:
+# OWASP's floor for PBKDF2-HMAC-SHA256. Older rows used 100_000 and stored the bare salt;
+# new rows store "<iterations>$<salt>" so the count can be raised later without a migration.
+PBKDF2_ITERATIONS = 600_000
+LEGACY_ITERATIONS = 100_000
+
+
+def _split_salt(salt: str) -> tuple[int, str]:
+    count, sep, raw = salt.partition("$")
+    return (int(count), raw) if sep else (LEGACY_ITERATIONS, salt)
+
+
+def hash_password(password: str, salt: str | None = None) -> tuple[str, str]:
+    """Returns (hash hex, stored salt). Pass a stored salt back in to verify with its count."""
     if salt is None:
-        salt = secrets.token_hex(16)
-    key = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), 100000)
+        salt = f"{PBKDF2_ITERATIONS}${secrets.token_hex(16)}"
+    iterations, raw_salt = _split_salt(salt)
+    key = hashlib.pbkdf2_hmac(
+        "sha256", password.encode("utf-8"), raw_salt.encode("utf-8"), iterations
+    )
     return key.hex(), salt
 
 
 def verify_password(password: str, stored_hash: str, salt: str) -> bool:
     key, _ = hash_password(password, salt)
     return secrets.compare_digest(key, stored_hash)
+
+
+# Hashed against when the username is unknown, so a miss takes as long as a wrong password
+# and response time doesn't reveal which usernames exist.
+_DUMMY_HASH, _DUMMY_SALT = hash_password("not-a-real-password")
 
 
 def load_queries() -> dict:
@@ -166,9 +187,9 @@ async def create_token(credentials: Credentials, settings: AuthSettings = Depend
         )
         annotator = result.scalar_one_or_none()
 
-        if not annotator or not verify_password(
-            credentials.password, annotator.password_hash, annotator.password_salt
-        ):
+        stored_hash = annotator.password_hash if annotator else _DUMMY_HASH
+        stored_salt = annotator.password_salt if annotator else _DUMMY_SALT
+        if not verify_password(credentials.password, stored_hash, stored_salt) or not annotator:
             raise HTTPException(status_code=401, detail="Invalid username or password")
 
         identity = {"id": annotator.id, "username": annotator.username}

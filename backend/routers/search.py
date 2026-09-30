@@ -43,7 +43,7 @@ def make_search_router(features: Features) -> APIRouter:
     @router.get("/searches")
     def search(
         request: Request,
-        q: str = Query(min_length=1),
+        q: str = Query(min_length=1, max_length=500),
         method: str = Query(),
         lang: Lang = Lang.en,
         grade_filter: str | None = None,

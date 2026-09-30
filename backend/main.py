@@ -17,11 +17,42 @@ DEFAULT_CORS_ORIGINS = "http://localhost:5173,http://192.168.1.6:5173,http://192
 
 
 def cors_settings(raw: str) -> dict:
-    """CORS middleware kwargs from a comma-separated origin list ('*' disables credentials)."""
+    """CORS middleware kwargs from a comma-separated origin list.
+
+    Auth is a bearer header, not a cookie, so browsers never need to send credentials.
+    """
     if raw.strip() == "*":
         return {"allow_origins": ["*"], "allow_credentials": False}
     origins = [origin.strip() for origin in raw.split(",") if origin.strip()]
-    return {"allow_origins": origins, "allow_credentials": True}
+    return {"allow_origins": origins, "allow_credentials": False}
+
+
+# The SPA loads its own scripts and the Google Fonts stylesheet/fonts, nothing else.
+CONTENT_SECURITY_POLICY = (
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' "
+    "https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; "
+    "img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; "
+    "frame-ancestors 'none'; form-action 'self'"
+)
+SECURITY_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "no-referrer",
+    "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+}
+# Swagger UI loads scripts from a CDN, so the strict policy would blank it.
+DOCS_PATHS = ("/docs", "/redoc")
+
+
+def add_security_headers(app: FastAPI) -> None:
+    @app.middleware("http")
+    async def security_headers(request, call_next):
+        response = await call_next(request)
+        for name, value in SECURITY_HEADERS.items():
+            response.headers.setdefault(name, value)
+        if not request.url.path.startswith(DOCS_PATHS):
+            response.headers.setdefault("Content-Security-Policy", CONTENT_SECURITY_POLICY)
+        return response
 
 
 def resolve_static_dir(env_value: str | None = None) -> str | None:
@@ -67,8 +98,10 @@ def _mount_frontend(app: FastAPI, static_dir: str) -> None:
     async def spa_fallback(full_path: str):
         if f"/{full_path}".startswith(API_PREFIX):
             raise HTTPException(status_code=404, detail="No such API resource")
-        candidate = os.path.join(static_dir, full_path)
-        if full_path and os.path.isfile(candidate):
+        # Resolve symlinks and ".." first: a decoded "../" must not leave the static folder.
+        root = os.path.realpath(static_dir)
+        candidate = os.path.realpath(os.path.join(root, full_path))
+        if full_path and candidate.startswith(root + os.sep) and os.path.isfile(candidate):
             return FileResponse(candidate)
         return FileResponse(os.path.join(static_dir, "index.html"))
 
@@ -95,11 +128,12 @@ def create_app(features: Features | None = None, static_dir: str | None = None) 
     app.state.features = features
     app.add_middleware(
         CORSMiddleware,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
+        allow_headers=["Authorization", "Content-Type", "If-None-Match"],
         expose_headers=EXPOSED_HEADERS,
         **cors_settings(os.environ.get("CORS_ORIGINS", DEFAULT_CORS_ORIGINS)),
     )
+    add_security_headers(app)
     install_error_handlers(app)
     _include_feature_routers(app, features)
 

@@ -168,36 +168,48 @@ async def test_agreement_shape(_client, _auth_headers):
 # ---------- kv pairs ----------
 
 
-async def test_kv_list_filters_and_paginates(_client, _kv_rows):
-    assert (await _client.get(f"{API}/kv-pairs")).json()["total"] == 3
-    assert (await _client.get(f"{API}/kv-pairs?status=verified")).json()["total"] == 1
-    assert (await _client.get(f"{API}/kv-pairs?topic=prayer")).json()["total"] == 2
-    page = (await _client.get(f"{API}/kv-pairs?limit=1&offset=1")).json()
+async def test_kv_list_filters_and_paginates(_client, _kv_rows, _auth_headers):
+    assert (await _client.get(f"{API}/kv-pairs", headers=_auth_headers)).json()["total"] == 3
+    assert (await _client.get(f"{API}/kv-pairs?status=verified", headers=_auth_headers)).json()[
+        "total"
+    ] == 1
+    assert (await _client.get(f"{API}/kv-pairs?topic=prayer", headers=_auth_headers)).json()[
+        "total"
+    ] == 2
+    page = (await _client.get(f"{API}/kv-pairs?limit=1&offset=1", headers=_auth_headers)).json()
     assert [p["id"] for p in page["pairs"]] == [2]
     assert set(page["_links"]) == {"self", "first", "last", "prev", "next"}
     assert page["pairs"][0]["_links"]["self"]["href"] == f"{API}/kv-pairs/2"
 
 
-async def test_kv_list_rejects_bad_paging(_client, _kv_rows):
+async def test_kv_list_rejects_bad_paging(_client, _kv_rows, _auth_headers):
     for query in ("limit=0", "limit=1000", "offset=-1"):
-        assert (await _client.get(f"{API}/kv-pairs?{query}")).status_code == 422
+        assert (
+            await _client.get(f"{API}/kv-pairs?{query}", headers=_auth_headers)
+        ).status_code == 422
 
 
-async def test_kv_statistics(_client, _kv_rows):
-    body = (await _client.get(f"{API}/kv-pairs/statistics")).json()
+async def test_kv_statistics(_client, _kv_rows, _auth_headers):
+    body = (await _client.get(f"{API}/kv-pairs/statistics", headers=_auth_headers)).json()
     assert body["by_status"] == {"pending": 2, "verified": 1}
     assert body["by_topic"] == {"prayer": 2, "fasting": 1}
 
 
-async def test_kv_patch_single(_client, _kv_rows):
-    ok = await _client.patch(f"{API}/kv-pairs/1", json={"status": "verified"})
+async def test_kv_patch_single(_client, _kv_rows, _auth_headers):
+    ok = await _client.patch(
+        f"{API}/kv-pairs/1", json={"status": "verified"}, headers=_auth_headers
+    )
     assert ok.status_code == 200 and ok.json()["status"] == "verified"
-    assert (await _client.patch(f"{API}/kv-pairs/1", json={"status": "maybe"})).status_code == 422
-    missing = await _client.patch(f"{API}/kv-pairs/99", json={"status": "verified"})
+    assert (
+        await _client.patch(f"{API}/kv-pairs/1", json={"status": "maybe"}, headers=_auth_headers)
+    ).status_code == 422
+    missing = await _client.patch(
+        f"{API}/kv-pairs/99", json={"status": "verified"}, headers=_auth_headers
+    )
     assert missing.status_code == 404
 
 
-async def test_kv_patch_batch_then_filter_verified(_client, _kv_rows):
+async def test_kv_patch_batch_then_filter_verified(_client, _kv_rows, _auth_headers):
     res = await _client.patch(
         f"{API}/kv-pairs",
         json=[
@@ -205,13 +217,57 @@ async def test_kv_patch_batch_then_filter_verified(_client, _kv_rows):
             {"id": 2, "status": "verified"},
             {"id": 99, "status": "verified"},
         ],
+        headers=_auth_headers,
     )
     assert res.json() == {"updated": 2}
-    verified = (await _client.get(f"{API}/kv-pairs?status=verified")).json()
+    verified = (await _client.get(f"{API}/kv-pairs?status=verified", headers=_auth_headers)).json()
     assert [p["id"] for p in verified["pairs"]] == [2, 3]
     assert (
-        await _client.patch(f"{API}/kv-pairs", json=[{"id": 1, "status": "bogus"}])
+        await _client.patch(
+            f"{API}/kv-pairs", json=[{"id": 1, "status": "bogus"}], headers=_auth_headers
+        )
     ).status_code == 422
+
+
+@pytest.mark.parametrize(
+    "method,path", [("get", ""), ("get", "/statistics"), ("patch", "/1"), ("patch", "")]
+)
+async def test_kv_pairs_need_a_token(_client, _kv_rows, method, path):
+    res = await getattr(_client, method)(f"{API}/kv-pairs{path}")
+    assert res.status_code == 401
+
+
+async def test_password_length_limits(_client):
+    long = "x" * 129
+    for body in (
+        {"username": "alice", "password": long},
+        {"username": "a" * 65, "password": "secret123"},
+        {"username": "alice", "password": "short"},
+    ):
+        assert (await _client.post(f"{API}/annotators", json=body)).status_code == 422
+
+
+async def test_unknown_user_and_wrong_password_look_the_same(_client, _auth_headers):
+    unknown = await _client.post(
+        f"{API}/tokens", json={"username": "nobody", "password": "secret123"}
+    )
+    wrong = await _client.post(
+        f"{API}/tokens", json={"username": "alice", "password": "wrong-pass"}
+    )
+    assert (unknown.status_code, unknown.json()) == (wrong.status_code, wrong.json())
+
+
+async def test_password_hashes_use_the_current_cost_and_verify_legacy_rows():
+    import hashlib
+
+    from routers.auth import PBKDF2_ITERATIONS, hash_password, verify_password
+
+    digest, salt = hash_password("pw-secret")
+    assert salt.startswith(f"{PBKDF2_ITERATIONS}$")
+    assert verify_password("pw-secret", digest, salt)
+    legacy = hashlib.pbkdf2_hmac("sha256", b"old-pass", b"abcd", 100_000).hex()
+    assert verify_password("old-pass", legacy, "abcd")
+    assert not verify_password("other", legacy, "abcd")
 
 
 # ---------- benchmark and hadiths ----------

@@ -1,14 +1,20 @@
 from typing import Literal, Optional
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 from sqlalchemy import func, select, update
 
 from database import get_session, now_iso
 from models import KvPair
 from rest import API_PREFIX, href, json_response, link, page_links
+from routers.auth import get_current_annotator
 
-router = APIRouter(prefix=f"{API_PREFIX}/kv-pairs", tags=["kv-pairs"])
+# Every kv-pairs route reads or edits verification data, so all of them need a token.
+router = APIRouter(
+    prefix=f"{API_PREFIX}/kv-pairs",
+    tags=["kv-pairs"],
+    dependencies=[Depends(get_current_annotator)],
+)
 
 MAX_PAGE_SIZE = 200
 

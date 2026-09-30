@@ -18,7 +18,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 API_PREFIX = "/api/v1"
 PROBLEM_JSON = "application/problem+json"
-EXPOSED_HEADERS = ["ETag", "Location", "Server-Timing", "WWW-Authenticate"]
+EXPOSED_HEADERS = ["ETag", "Location", "Server-Timing", "WWW-Authenticate", "Retry-After"]
 
 
 def href(*parts: str) -> str:

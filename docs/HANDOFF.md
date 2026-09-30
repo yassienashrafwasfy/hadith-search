@@ -1,6 +1,6 @@
 # Handoff: changes since Marawan's last commit
 
-Marawan's last commit is `93a4ff9` ("Align matn embeddings, training passages, and evaluation"). Everything below was added on top of it in 8 commits, then the REST API commits described from item 16: about 130 files. All 354 tests pass. The work sits on the branch `chore/dockerfile-hardening` (which builds on `chore/precommit-hooks`) and has not been pushed.
+Marawan's last commit is `93a4ff9` ("Align matn embeddings, training passages, and evaluation"). Everything below was added on top of it in 14 commits (the last 4 are the REST API, items 16 and 17): about 130 files. All 354 tests pass. The work sits on the branch `feat/rest-api-v1`, which builds on `chore/dockerfile-hardening` and `chore/precommit-hooks`, and has not been pushed.
 
 Each change has the same three lines: which files, why this is the normal way to do it, and what you get out of it.
 
@@ -193,4 +193,4 @@ uv pip install --python .venv/bin/python -r requirements-dev.txt
 cp .env.example .env    # then fill in JINA_API_KEY and anything else you need
 ```
 
-The commit list, oldest first: `360399f` pre-commit hooks, `4d800cf` backend rewrite, `55d9704` tests and tooling, `92759cf` Docker stages and non-root user, `4b963eb` build caching, `8535ee5` library upgrades, `ea50b33` image scans, `56d8081` Hadolint, health check and labels. This note is the last commit.
+The commit list, oldest first: `360399f` pre-commit hooks, `4d800cf` backend rewrite, `55d9704` tests and tooling, `92759cf` Docker stages and non-root user, `4b963eb` build caching, `8535ee5` library upgrades, `ea50b33` image scans, `56d8081` Hadolint, health check and labels, `5964375` and `1306ddc` this note, `1981518` REST routes and tokens, `65f4c77` tests for them, `111fb0d` frontend on the new URLs, `b88692b` docs for the REST changes. The last edit to this note is the commit after those.

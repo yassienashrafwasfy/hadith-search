@@ -125,7 +125,7 @@ def bm25_with_expansion(
 ) -> dict[int, float]:
     initial_results = bm25(query, language, inverted_index, document_lengths)
     top_ids = get_ranked_ids(initial_results)[:k]
-    col = "Preprocessed_English" if language == "EN" else "Preprocessed_Arabic"
+    col = "Preprocessed_English_Matn" if language == "EN" else "Preprocessed_Arabic_Matn"
     top_hadiths = [get_hadith_fn(hadith_id)[col] for hadith_id in top_ids]
     custom_weights = query_expansion(
         query=query,
@@ -152,7 +152,7 @@ def bm25_tfidf_hybrid(query: str, language: str, inverted_index, document_length
 def hybrid_with_expansion(query: str, language: str, inverted_index, document_lengths, get_hadith_fn, k: int = 5, top_n: int = 3) -> dict[int, float]:
     initial_results = bm25_tfidf_hybrid(query, language, inverted_index, document_lengths)
     top_ids = get_ranked_ids(initial_results)[:k]
-    col = "Preprocessed_English" if language == "EN" else "Preprocessed_Arabic"
+    col = "Preprocessed_English_Matn" if language == "EN" else "Preprocessed_Arabic_Matn"
     top_hadiths = [get_hadith_fn(hadith_id)[col] for hadith_id in top_ids]
     custom_weights = query_expansion(
         query=query,

@@ -42,7 +42,7 @@ def reencode_embeddings(adapter_path, batch_size=32):
     print(f"Device: {device}")
 
     conn = sqlite3.connect(DB_PATH)
-    df = pd.read_sql("SELECT id, English_Text, Arabic_Text FROM hadiths", conn)
+    df = pd.read_sql("SELECT id, English_Matn, Arabic_Matn FROM hadiths ORDER BY id", conn)
     conn.close()
 
     print(f"Loaded {len(df)} hadiths")
@@ -74,7 +74,7 @@ def reencode_embeddings(adapter_path, batch_size=32):
         return embeddings.cpu().numpy()
 
     print("Encoding English embeddings...")
-    en_texts = df["English_Text"].tolist()
+    en_texts = df["English_Matn"].tolist()
     en_embeddings = []
     for i in range(0, len(en_texts), batch_size):
         batch = en_texts[i:i + batch_size]
@@ -87,7 +87,9 @@ def reencode_embeddings(adapter_path, batch_size=32):
     print(f"Saved {en_embeddings.shape} -> {en_path}")
 
     print("Encoding Arabic embeddings...")
-    ar_texts = df["Arabic_Text"].tolist()
+    from scripts.preprocess import normalize_arabic_text
+    from camel_tools.utils.dediac import dediac_ar
+    ar_texts = [normalize_arabic_text(dediac_ar(text)) for text in df["Arabic_Matn"]]
     ar_embeddings = []
     for i in range(0, len(ar_texts), batch_size):
         batch = ar_texts[i:i + batch_size]
@@ -141,8 +143,12 @@ def run_evaluation(mode, k=20):
     ]
     languages = ["AR" if qid.startswith("AR") else "EN" for qid in query_ids]
 
+    eval_ids = {hid for grades in relevant_list for hid in grades}
+    pool_path = os.path.join(DATA_DIR, "qrels_ungraded.json")
+    if os.path.exists(pool_path):
+        with open(pool_path, encoding="utf-8") as f:
+            eval_ids.update(int(hid) for ids in json.load(f).values() for hid in ids)
     with sqlite3.connect(DB_PATH) as conn:
-        eval_ids = set(pd.read_sql("SELECT id FROM evaluation_hadiths", conn)["id"])
         hadiths_df = pd.read_sql(
             "SELECT id, English_Text, Arabic_Text FROM hadiths", conn
         ).set_index("id")
@@ -244,10 +250,6 @@ def run_evaluation(mode, k=20):
     all_results = {}
     for system_name, search_fn in SYSTEMS.items():
         print(f"\nEvaluating [{system_name}]...")
-        if system_name == "BM25_CROSS_ENCODER":
-            import time
-            time.sleep(60)
-
         ranked_per_query = [
             _filter_and_rank(search_fn(query, lang), eval_ids)
             for query, lang in zip(queries, languages)

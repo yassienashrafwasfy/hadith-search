@@ -51,18 +51,37 @@ OUTPUT_DIR = os.path.join(DATA_DIR, "finetuned")
 # Data loading
 # ---------------------------------------------------------------------------
 
-def _load_hadith_texts(language, hadith_ids):
+def _clean_text(value):
+    return str(value).strip() if value else ""
+
+
+def _format_passage(language, matn):
+    matn = _clean_text(matn)
+    if not matn:
+        return ""
+    if language == "AR":
+        from scripts.preprocess import normalize_arabic_text
+        from camel_tools.utils.dediac import dediac_ar
+        matn = normalize_arabic_text(dediac_ar(matn))
+    return f"passage: {matn}"
+
+
+def _load_hadith_passages(language, hadith_ids):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    col = "Arabic_Text" if language == "AR" else "English_Text"
+    matn_col = "Arabic_Matn" if language == "AR" else "English_Matn"
     placeholders = ",".join("?" * len(hadith_ids))
     cursor.execute(
-        f"SELECT id, {col} FROM hadiths WHERE id IN ({placeholders})",
+        f"SELECT id, {matn_col} FROM hadiths WHERE id IN ({placeholders})",
         hadith_ids,
     )
-    texts = {row[0]: row[1] for row in cursor.fetchall() if row[1]}
+    passages = {}
+    for row in cursor.fetchall():
+        passage = _format_passage(language, row[1])
+        if passage:
+            passages[row[0]] = passage
     conn.close()
-    return texts
+    return passages
 
 
 def load_triplet_data():
@@ -88,22 +107,20 @@ def load_triplet_data():
         language = "AR" if qid.startswith("AR") else "EN"
 
         hadith_ids = [int(hid) for hid in grades.keys()]
-        texts = _load_hadith_texts(language, hadith_ids)
+        passages = _load_hadith_passages(language, hadith_ids)
 
         for hid_str, grade in grades.items():
             hid = int(hid_str)
-            if hid not in texts:
+            if hid not in passages:
                 continue
             if grade >= 1:
-                prefix = "query: "
                 if language == "AR":
                     from scripts.preprocess import normalize_arabic_text
                     from camel_tools.utils.dediac import dediac_ar
                     anchor = f"query: {normalize_arabic_text(dediac_ar(query_text))}"
                 else:
                     anchor = f"query: {query_text}"
-                positive = f"passage: {texts[hid]}"
-                pairs.append((anchor, positive, qid))
+                pairs.append((anchor, passages[hid], qid))
 
     return pairs
 
@@ -119,25 +136,28 @@ def load_kv_data():
         kv_pairs = json.load(f)
 
     pairs = []
+    hadith_ids = [int(kv["hadith_id"]) for kv in kv_pairs if kv.get("hadith_id")]
+    en_passages = _load_hadith_passages("EN", hadith_ids) if hadith_ids else {}
+    ar_passages = _load_hadith_passages("AR", hadith_ids) if hadith_ids else {}
+
     for kv in kv_pairs:
         concept_en = kv.get("concept_en", "").strip()
         concept_ar = kv.get("concept_ar", "").strip()
-        hadith_en = kv.get("hadith_en", "").strip()
-        hadith_ar = kv.get("hadith_ar", "").strip()
+        hadith_id = int(kv.get("hadith_id")) if kv.get("hadith_id") else None
 
-        if concept_en and hadith_en:
+        if concept_en and hadith_id in en_passages:
             pairs.append((
                 f"query: {concept_en}",
-                f"passage: {hadith_en}",
+                en_passages[hadith_id],
                 f"kv_{kv.get('id', 0)}_en",
             ))
-        if concept_ar and hadith_ar:
+        if concept_ar and hadith_id in ar_passages:
             from scripts.preprocess import normalize_arabic_text
             from camel_tools.utils.dediac import dediac_ar
             normalized_ar = normalize_arabic_text(dediac_ar(concept_ar))
             pairs.append((
                 f"query: {normalized_ar}",
-                f"passage: {hadith_ar}",
+                ar_passages[hadith_id],
                 f"kv_{kv.get('id', 0)}_ar",
             ))
 

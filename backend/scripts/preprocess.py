@@ -139,6 +139,7 @@ def preprocess_arabic(text):
     return " ".join(processed)
 
 def run():
+    import json
     import os
     import sqlite3
     import pandas as pd
@@ -226,15 +227,47 @@ def run():
             matn_ar_results = [preprocess_arabic(t) if t else "" for t in matn_ar_texts]
             print(f"  Done in {time.perf_counter() - matn_ar_t0:.2f}s (sequential)")
 
-        empty_matn_en = [int(r.id) for r, value in zip(df.itertuples(), matn_en_results) if not has_text(value)]
-        empty_matn_ar = [int(r.id) for r, value in zip(df.itertuples(), matn_ar_results) if not has_text(value)]
-        if empty_matn_en or empty_matn_ar:
-            details = []
+        empty_matn_en = {int(r.id) for r, value in zip(df.itertuples(), matn_en_results) if not has_text(value)}
+        empty_matn_ar = {int(r.id) for r, value in zip(df.itertuples(), matn_ar_results) if not has_text(value)}
+        drop_ids = sorted(empty_matn_en | empty_matn_ar)
+        if drop_ids:
+            droppath = os.path.join(os.path.dirname(DB_PATH), "dropped_lk_rows.json")
+            try:
+                with open(droppath, encoding="utf-8") as f:
+                    audit = json.load(f)
+            except FileNotFoundError:
+                audit = {"reason": "Missing bilingual matn after deterministic reconstruction", "count": 0, "rows": [], "second_stage": None}
+
+            drop_rows = []
+            for row in df.itertuples():
+                if int(row.id) in empty_matn_en or int(row.id) in empty_matn_ar:
+                    drop_rows.append({
+                        "id_before_drop": int(row.id),
+                        "LK_Book": getattr(row, "Book", ""),
+                        "Book": getattr(row, "Book", ""),
+                        "Hadith_Number": getattr(row, "Hadith_Number", ""),
+                        "Chapter_Number": getattr(row, "Chapter_Number", ""),
+                    })
+
+            audit["second_stage"] = {
+                "reason": "Empty preprocessed matn in one or both languages (isnad-only alternate chains / cross-references)",
+                "count": len(drop_ids),
+                "count_en": len(empty_matn_en),
+                "count_ar": len(empty_matn_ar),
+                "rows": drop_rows,
+            }
+            with open(droppath, "w", encoding="utf-8") as f:
+                json.dump(audit, f, indent=2, ensure_ascii=False)
+
+            cursor.executemany("DELETE FROM hadiths WHERE id = ?", [(i,) for i in drop_ids])
+
+            print(f"\nDropped {len(drop_ids)} hadiths with empty preprocessed matn "
+                  f"(EN={len(empty_matn_en)}, AR={len(empty_matn_ar)})")
+            print(f"  Appended to {droppath}")
             if empty_matn_en:
-                details.append(f"English matn preprocessing produced empty strings for {len(empty_matn_en)} ids: {empty_matn_en[:20]}")
+                print(f"  Sample English-empty IDs: {sorted(empty_matn_en)[:10]}")
             if empty_matn_ar:
-                details.append(f"Arabic matn preprocessing produced empty strings for {len(empty_matn_ar)} ids: {empty_matn_ar[:20]}")
-            raise ValueError("; ".join(details))
+                print(f"  Sample Arabic-empty IDs:  {sorted(empty_matn_ar)[:10]}")
 
         updates = [(en, ar, ien, iar, men, mar, r.id) for r, en, ar, ien, iar, men, mar in zip(
             df.itertuples(),

@@ -1,5 +1,4 @@
 from math import log2
-import time
 import pandas as pd
 
 graded_relevant_list = dict[int : int]
@@ -118,7 +117,7 @@ def mean_reciprocal_rank(retrieved : list[list[int]],
 def evaluate_query(retrieved : list[int], 
                    relevant : graded_relevant_list) -> pd.DataFrame:
     retrieved_set = set(retrieved)
-    relevant_set = set(relevant.keys())
+    relevant_set = {hid for hid, grade in relevant.items() if grade > 0}
     return pd.DataFrame([
         {
             "Precision": precision(retrieved_set,relevant_set),
@@ -133,7 +132,7 @@ def evaluate_query(retrieved : list[int],
 def evaluate_query_at_k(retrieved : list[int], 
                         relevant : graded_relevant_list,
                         k) -> pd.DataFrame:
-    relevant_set = set(relevant.keys())
+    relevant_set = {hid for hid, grade in relevant.items() if grade > 0}
     return pd.DataFrame([
         {
             f"Precision@{k}": precision_at_k(retrieved,relevant_set,k),
@@ -149,12 +148,12 @@ def evaluate_system(
     query_ids: list[str],
     retrieved_per_query: list[list[int]],
     relevant_per_query: list[graded_relevant_list],
-    k: int = 10,
+    k: int = 20,
 ) -> pd.DataFrame:
     """Compute per-query IR metrics and return a DataFrame with a MEAN row."""
     rows = []
     for qid, retrieved, relevant in zip(query_ids, retrieved_per_query, relevant_per_query):
-        relevant_set = set(relevant.keys())
+        relevant_set = {hid for hid, grade in relevant.items() if grade > 0}
         rows.append({
             "query":     qid,
             "AP":        average_precision(retrieved, relevant_set),
@@ -210,6 +209,7 @@ if __name__ == "__main__":
     DB_PATH    = os.path.join(DATA_DIR, "hadiths.db")
     QUERIES_PATH = os.path.join(DATA_DIR, "queries.json")
     QRELS_GRADED_PATH = os.path.join(DATA_DIR, "qrels_graded.json")
+    QRELS_UNGRADED_PATH = os.path.join(DATA_DIR, "qrels_ungraded.json")
     RESULTS_PATH = os.path.join(DATA_DIR, "qrels_results.json")
 
     with open(QUERIES_PATH, encoding="utf-8") as f:
@@ -226,9 +226,17 @@ if __name__ == "__main__":
     ]
     languages = ["AR" if qid.startswith("AR") else "EN" for qid in query_ids]
 
+    eval_ids = set()
+    for qid in query_ids:
+        grades = qrels_graded.get(qid, {}).get("grades", {})
+        eval_ids.update(int(hid) for hid in grades.keys())
+    if os.path.exists(QRELS_UNGRADED_PATH):
+        with open(QRELS_UNGRADED_PATH, encoding="utf-8") as f:
+            qrels_ungraded = json.load(f)
+        for pooled_ids in qrels_ungraded.values():
+            eval_ids.update(int(hid) for hid in pooled_ids)
 
     with sqlite3.connect(DB_PATH) as conn:
-        eval_ids    = set(pd.read_sql("SELECT id FROM evaluation_hadiths", conn)["id"])
         hadiths_df  = pd.read_sql("SELECT id, English_Text, Arabic_Text FROM hadiths", conn).set_index("id")
 
     en_texts_dict = hadiths_df["English_Text"].to_dict()
@@ -383,8 +391,6 @@ if __name__ == "__main__":
 
     for system_name, search_fn in SYSTEMS.items():
         print(f"\nEvaluating [{system_name}]...")
-        if system_name == "BM25_CROSS_ENCODER":
-            time.sleep(60) #avoid jina api free tier rate limits during testing
         ranked_per_query: list[list[tuple[int, float]]] = [
             _filter_and_rank(search_fn(query, lang), eval_ids)
             for query, lang in zip(queries, languages)

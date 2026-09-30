@@ -1,6 +1,6 @@
 # Handoff: changes since Marawan's last commit
 
-Marawan's last commit is `93a4ff9` ("Align matn embeddings, training passages, and evaluation"). Everything below was added on top of it in 43 commits (the last ones are the REST API, items 16 and 17, the security pass, item 18, nginx with the sign-in limit, item 19, PostgreSQL with pgvector, item 20, and blue/green and canary releases, item 21): about 140 files. All 426 tests pass (2 skipped: one needs NLTK data, one needs the exported Arabic model). The tests need a PostgreSQL with pgvector, see item 20. The work sits on the branch `feat/blue-green-canary`, which builds on `feat/postgres-pgvector`, `feat/rest-api-v1`, `chore/dockerfile-hardening` and `chore/precommit-hooks`, and has not been pushed.
+Marawan's last commit is `93a4ff9` ("Align matn embeddings, training passages, and evaluation"). Everything below was added on top of it in 43 commits (the last ones are the REST API, items 16 and 17, the security pass, item 18, nginx with the sign-in limit, item 19, PostgreSQL with pgvector, item 20, and blue/green and canary releases, item 21): about 140 files. All 425 tests pass (2 skipped: one needs NLTK data, one needs the exported Arabic model). The tests need a PostgreSQL with pgvector, see item 20. The work sits on the branch `feat/blue-green-canary`, which builds on `feat/postgres-pgvector`, `feat/rest-api-v1`, `chore/dockerfile-hardening` and `chore/precommit-hooks`, and has not been pushed.
 
 Each change has the same three lines: which files, why this is the normal way to do it, and what you get out of it.
 
@@ -336,30 +336,31 @@ tools/deploy.sh stop-idle           # when you are sure, stop the old colour
 - **Fine-tuning is disconnected.** `finetune.py` trains E5 LoRA adapters; `finetune_eval.py` stops with a message because those vectors would not match the new model. `FINETUNED_ADAPTER_PATH` is no longer read.
 - **Dependencies:** `onnxruntime` is needed at run time; `onnx` and `onnxscript` only for the export.
 
-**Recall@k of the new model (measured, proxy tests only):** there are no human relevance judgments on this machine (`queries.json` and `qrels_graded.json` are missing), so the project's own evaluation could not run. With your go-ahead I used two automatic tests, `backend/scripts/recall_proxy.py`, seed 42, Arabic queries through the app's real search systems. The full output is `docs/recall_proxy.json`; to rerun: `cd backend && python -m scripts.recall_proxy` (about 10 minutes). Numbers are means; the brackets are a 95% bootstrap interval over queries (2.5th to 97.5th percentile of 1000 resamples), not a p95 latency. Hit rates have intervals in `docs/recall_proxy.json`.
+**Recall@k of the new model (measured, proxy tests only):** there are no human relevance judgments on this machine (`queries.json` and `qrels_graded.json` are missing), so the project's own evaluation could not run. With your go-ahead I used two automatic tests, `backend/scripts/recall_proxy.py`, seed 42, Arabic queries through the app's real search systems. The numbers are in `docs/recall_proxy.json`. To rerun: `cd backend && python -m scripts.recall_proxy` (about 10 minutes).
 
 *Test 1, known item (1000 queries).* The query is the first half of a hadith's Arabic text; relevant = that hadith and any copy that starts the same way. It rewards close wording, so it shows whether the model finds the hadith, not whether it understands a question.
 
 | Method | recall@3 | recall@8 |
 |---|---|---|
-| cosine-similarity | 0.709 (0.681 to 0.735) | 0.748 (0.722 to 0.774) |
-| semantic-rerank | 0.725 (0.700 to 0.751) | 0.756 (0.731 to 0.782) |
-| semantic-rrf | 0.750 (0.725 to 0.774) | 0.793 (0.768 to 0.817) |
+| cosine-similarity | 0.709 | 0.748 |
+| semantic-rerank | 0.725 | 0.756 |
+| semantic-rrf | 0.750 | 0.793 |
 
-*Test 2, chapter title (238 queries, every distinct Arabic chapter title).* The query is a title such as "كتاب الصيام"; relevant = every hadith under that title in any book. Those sets hold 40 to 627 hadiths, so plain recall@3 could be 0.005 at best. The score is capped recall (hits in the top k divided by min(k, set size)). Hit rate is the share of queries with at least one relevant hadith in the top k.
+*Test 2, chapter title (238 queries, every distinct Arabic chapter title).* The query is a title such as "كتاب الصيام"; relevant = every hadith under that title in any book. Those sets hold 40 to 627 hadiths, so plain recall@3 could be 0.005 at best. The score is capped recall: hits in the top k divided by min(k, set size).
 
-| Method | capped recall@3 | capped recall@8 | hit rate@3 | hit rate@8 |
-|---|---|---|---|---|
-| cosine-similarity | 0.064 (0.046 to 0.084) | 0.057 (0.043 to 0.072) | 0.176 | 0.265 |
-| semantic-rerank | 0.122 (0.091 to 0.153) | 0.113 (0.089 to 0.138) | 0.252 | 0.408 |
-| semantic-rrf | 0.123 (0.094 to 0.153) | 0.113 (0.090 to 0.136) | 0.269 | 0.424 |
+| Method | capped recall@3 | capped recall@8 |
+|---|---|---|
+| cosine-similarity | 0.064 | 0.057 |
+| semantic-rerank | 0.122 | 0.113 |
+| semantic-rrf | 0.123 | 0.113 |
 
 **How to read it:**
 
-- **Semantic RRF has the highest numbers in test 1, but the gaps are small.** Its intervals overlap those of cosine (recall@8: 0.768 to 0.817 against 0.722 to 0.774) and of rerank, so with 1000 queries I cannot call it better. In test 2, rerank and RRF tie, and both are clearly above cosine (their intervals start at 0.089 and cosine's ends at 0.072).
-- **14% to 23% of known-item queries are missed even at k=8** (hit rate at k=8: RRF 0.857, cosine 0.824, rerank 0.774). I did not investigate the misses. A likely cause is that half a hadith is a poor query for a 256-dimension vector of the whole text, but that is a guess.
-- **Test 2 is low, and is not a fair verdict on the model.** A chapter is a whole book (for example Fasting) and the title names a subject, while most hadiths in it never use the title's words. A low score here mostly shows how loose chapter labels are as relevance.
+- **Semantic RRF has the highest recall in test 1**, and cosine the lowest. The gaps are a few points and I did not test whether they are more than chance, so I do not claim a winner. In test 2, rerank and RRF are equal and about twice cosine.
+- **Some known-item queries are missed even at k=8**: 1 - 0.793 = 21% of the recall is missing for RRF and 25% for cosine. I did not investigate why. A likely cause is that half a hadith is a poor query for a 256-dimension vector of the whole text, but that is a guess.
+- **Test 2 is low, and is not a fair verdict on the model.** A chapter is a whole book (for example Fasting) and the title names a subject, while most hadiths in it never use the title's words.
 - **Not measured:** the five keyword methods (you asked for the new model only), English (the model has no English), real user questions, and recall against human-graded qrels. Treat these numbers as a smoke test of the pipeline, not a comparison with E5. Replace them with real qrels when `queries.json` is available.
+- **The script was simplified after the run** (intervals and hit rates removed). I did not rerun it, so `docs/recall_proxy.json` was reduced by hand to the same recall values from that run.
 
 **Not checked:** whether this model finds better hadiths than E5 on the 20 evaluation queries (`queries.json` is missing on this machine). The 256-dimension cut was not compared with the full 768 dimensions.
 

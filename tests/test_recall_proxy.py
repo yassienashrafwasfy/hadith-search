@@ -5,12 +5,6 @@ def test_ranked_ids_sorts_by_score():
     assert rp.ranked_ids({1: 0.2, 2: 0.9, 3: 0.5}) == [2, 3, 1]
 
 
-def test_mean_with_interval():
-    out = rp.mean_with_interval([1.0, 0.0, 1.0, 1.0])
-    assert out["mean"] == 0.75 and out["queries"] == 4
-    assert out["ci95"][0] <= 0.75 <= out["ci95"][1]
-
-
 def test_known_item_query_is_first_half_and_counts_copies():
     text = " ".join(f"w{i}" for i in range(14))
     queries = rp.known_item_queries({1: text, 2: text + " extra", 3: "short one"}, n=5, seed=1)

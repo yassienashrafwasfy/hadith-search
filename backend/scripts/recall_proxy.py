@@ -10,8 +10,7 @@ Both use the real search systems of the app (`services.retrieval.SYSTEMS`, Arabi
    Recall@k is then 1 when a relevant hadith is in the top k, else 0. This rewards close wording.
 2. Chapter: the query is an Arabic chapter title and the relevant set is every hadith under that
    title. These sets have 40 to 600 hadiths, so plain recall@k would be at most k / size. The
-   score is the capped recall: hits in the top k divided by min(k, size). Hit rate (at least one
-   relevant hadith in the top k) is reported next to it.
+   score is the capped recall: hits in the top k divided by min(k, size).
 
 Neither test is a substitute for human relevance labels.
 """
@@ -22,7 +21,6 @@ import os
 import random
 import time
 
-import numpy as np
 from sqlalchemy import select
 
 from database import get_sync_session
@@ -40,15 +38,6 @@ DEFAULT_OUT = os.path.join(
 
 def ranked_ids(scores: dict[int, float]) -> list[int]:
     return [hid for hid, _ in sorted(scores.items(), key=lambda item: -item[1])]
-
-
-def mean_with_interval(values: list[float], seed: int = 0) -> dict:
-    """Mean and a 95% bootstrap interval over queries."""
-    data = np.asarray(values, dtype=float)
-    rng = np.random.default_rng(seed)
-    means = rng.choice(data, size=(1000, len(data))).mean(axis=1)
-    low, high = np.percentile(means, [2.5, 97.5])
-    return {"mean": float(data.mean()), "ci95": [float(low), float(high)], "queries": len(data)}
 
 
 def known_item_queries(texts: dict[int, str], n: int, seed: int):
@@ -72,21 +61,15 @@ def chapter_queries(rows) -> list[tuple[str, set[int]]]:
 
 
 def evaluate(system, ctx, queries, ks, capped: bool) -> dict:
-    per_k = {k: {"recall": [], "hit": []} for k in ks}
+    per_k: dict[int, list[float]] = {k: [] for k in ks}
     for query, relevant in queries:
         ids = ranked_ids(system.run(ctx, query, "AR"))
         for k in ks:
             found = len(set(ids[:k]) & relevant)
             denominator = min(k, len(relevant)) if capped else len(relevant)
-            per_k[k]["recall"].append(found / denominator)
-            per_k[k]["hit"].append(1.0 if found else 0.0)
-    return {
-        f"k={k}": {
-            ("capped_recall" if capped else "recall"): mean_with_interval(v["recall"]),
-            "hit_rate": mean_with_interval(v["hit"]),
-        }
-        for k, v in per_k.items()
-    }
+            per_k[k].append(found / denominator)
+    name = "capped_recall" if capped else "recall"
+    return {f"k={k}": {name: sum(v) / len(v)} for k, v in per_k.items()}
 
 
 def run(ks: list[int], n: int, seed: int, out: str) -> dict:

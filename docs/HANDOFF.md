@@ -1,6 +1,6 @@
 # Handoff: changes since Marawan's last commit
 
-Marawan's last commit is `93a4ff9` ("Align matn embeddings, training passages, and evaluation"). Everything below was added on top of it in 14 commits (the last 4 are the REST API, items 16 and 17): about 130 files. All 354 tests pass. The work sits on the branch `feat/rest-api-v1`, which builds on `chore/dockerfile-hardening` and `chore/precommit-hooks`, and has not been pushed.
+Marawan's last commit is `93a4ff9` ("Align matn embeddings, training passages, and evaluation"). Everything below was added on top of it in 16 commits (the last 5 are the REST API, items 16 and 17, and the security pass, item 18): about 130 files. All 363 tests pass. The work sits on the branch `feat/rest-api-v1`, which builds on `chore/dockerfile-hardening` and `chore/precommit-hooks`, and has not been pushed.
 
 Each change has the same three lines: which files, why this is the normal way to do it, and what you get out of it.
 
@@ -11,7 +11,8 @@ Each change has the same three lines: which files, why this is the normal way to
 3. **The diff looks bigger than the real change.** Every Python file was reformatted to one style, so many lines only moved or wrapped differently. Read the commit messages first, then the files.
 4. **Libraries were upgraded** to fix known security holes: numpy 1.26 to 2.5, transformers 4.43 to 5.17, starlette 0.52 to 1.3, nltk 3.9 to 3.10. The tests pass, but I could not test saved index files (`.pkl`) built with the old numpy, because this copy has no real data. If loading fails, rebuild them. A full fine-tuning run and the real E5 model were also not re-run.
 5. **Every API URL changed, and there are no old aliases.** Everything now lives under `/api/v1`, the frontend is updated, and anything else that calls the API (scripts, bookmarks) must move. The map is in item 16 below. Sign-in also works differently: set `AUTH_SECRET` (32+ characters) in `.env`, and use the same value on every server.
-6. **The Docker container no longer runs as root.** It runs as user 10001. If you mount a folder for `backend/data` instead of using a Docker volume, run `chown 10001 <folder>` on it once.
+6. **Passwords must now be 8 to 128 characters, and `/kv-pairs` needs a login.** Anything that called `/kv-pairs` without a token now gets 401.
+7. **The Docker container no longer runs as root.** It runs as user 10001. If you mount a folder for `backend/data` instead of using a Docker volume, run `chown 10001 <folder>` on it once.
 
 `uvicorn main:app` still starts the server the same way, and the scripts still run from the command line.
 
@@ -183,6 +184,37 @@ Behavior that differs from before:
 
 **Still open:** the `/kv-pairs` routes have no login check, as before. Running several servers also needs a database they all share; the SQLite file is per machine.
 
+## Security review
+
+### 18. Fixes from a security pass over the app
+
+**Files:** `backend/main.py`, `backend/routers/auth.py`, `backend/routers/kv_pairs.py`, `backend/routers/search.py`, `frontend/src/pages/KvVerificationPage.tsx`, `.github/workflows/docker-scan.yml`, `requirements.txt`, `tests/test_app_factory.py`, `tests/test_routers.py`
+
+**Why it's best practice:** Code written fast (by a person or an assistant) tends to skip the checks nobody sees in a demo. I went through the usual list (who can call what, how passwords and tokens are made, what user input reaches, what leaves the server, what CI trusts) and fixed what was really there:
+
+- **Anyone could read files off the server.** The route that serves the frontend joined the URL onto the folder path, so a URL with an encoded `../` returned files outside it. I reproduced it before fixing. It now resolves the real path and refuses anything outside the frontend folder.
+- **The `/kv-pairs` routes needed no login**, including the ones that change data. All of them now need a token, and the frontend page sends it.
+- **Password hashing was too cheap.** It used 100,000 rounds; the current guidance for this method is 600,000. New passwords use 600,000 and store the count with the salt. Old rows still verify with 100,000, so nobody is locked out.
+- **Sign-in gave away which usernames exist**, because an unknown name skipped the hash and answered faster. It now does the same work either way.
+- **Input had no size limits.** Passwords are capped at 128 characters (minimum raised from 6 to 8), usernames at 64, search text at 500. Otherwise one huge request could tie up the hash or the search.
+- **CORS was wide open.** It allowed every method and header, with credentials. Tokens travel in a header, not a cookie, so credentials are now off and only the needed methods and headers are allowed.
+- **No browser protection headers.** Every response now carries `Content-Security-Policy` (own scripts, Google Fonts, nothing else), `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, a referrer policy and a permissions policy. The `/docs` page is left without the CSP because it loads scripts from a CDN.
+- **CI actions were pinned to moving tags.** They are now pinned to commit hashes, so a hijacked tag cannot change what CI runs.
+- **Dependencies:** `requests`, `urllib3`, `idna`, `pygments` and `soupsieve` were bumped to the versions that fix reported holes.
+
+**Benefit:** Nine tests cover these (traversal, headers, login required, limits, same answer for unknown user and wrong password, old hashes still verify). All 363 tests pass.
+
+**Checked and fine:** no SQL built from strings (SQLAlchemy only), no `eval`/`exec`/shell calls with user input, no `dangerouslySetInnerHTML`, no committed secrets (gitleaks runs on every commit), the only outgoing HTTP calls go to fixed URLs (Jina and the LLM API), tokens pin HS256 and require an expiry, and there are no webhooks.
+
+**Still open, on purpose:**
+
+- **No limit on sign-in attempts.** A per-server counter would not work once there are several servers, so this belongs at the load balancer or a shared store. Do it before exposing the app publicly.
+- **The token lives in `localStorage`**, so an XSS bug would expose it. The CSP and the absence of raw HTML rendering reduce that risk; an httpOnly cookie would remove it but needs CSRF handling.
+- **Tokens cannot be revoked** before they expire (12 hours by default).
+- **Some dependency reports are not fixed:** `torch` (2.11 to 2.13), `datasets` (4 to 5), `setuptools`, `accelerate`, `nltk`, and React Router (needs version 7). The Python ones are build and training tools, or need a wider retest. React Router's open redirect needs a `<Link>` or `navigate()` fed a user-controlled URL, which this app does not do. Bump them when you can retest.
+- **`.pkl` index files are loaded with `pickle`**, which runs code from the file. They are built by us and never uploaded, so keep `backend/data` writable only by the app and never load a pickle from someone else.
+- **The LLM scripts** (`llm_grader.py`, `kv_generator.py`) send hadith text to a model. It is offline tooling and its output is a label, so prompt injection has little to hit, but treat its output as untrusted.
+
 ## Quick start after pulling
 
 ```bash
@@ -193,4 +225,4 @@ uv pip install --python .venv/bin/python -r requirements-dev.txt
 cp .env.example .env    # then fill in JINA_API_KEY and anything else you need
 ```
 
-The commit list, oldest first: `360399f` pre-commit hooks, `4d800cf` backend rewrite, `55d9704` tests and tooling, `92759cf` Docker stages and non-root user, `4b963eb` build caching, `8535ee5` library upgrades, `ea50b33` image scans, `56d8081` Hadolint, health check and labels, `5964375` and `1306ddc` this note, `1981518` REST routes and tokens, `65f4c77` tests for them, `111fb0d` frontend on the new URLs, `b88692b` docs for the REST changes. The last edit to this note is the commit after those.
+The commit list, oldest first: `360399f` pre-commit hooks, `4d800cf` backend rewrite, `55d9704` tests and tooling, `92759cf` Docker stages and non-root user, `4b963eb` build caching, `8535ee5` library upgrades, `ea50b33` image scans, `56d8081` Hadolint, health check and labels, `5964375` and `1306ddc` this note, `1981518` REST routes and tokens, `65f4c77` tests for them, `111fb0d` frontend on the new URLs, `b88692b` docs for the REST changes, `a5aac74` security fixes, `bfda508` CI pins and dependency bumps. The last edit to this note is the commit after those.

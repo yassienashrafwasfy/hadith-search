@@ -8,12 +8,13 @@ import HadithModal from '../components/HadithModal';
 import ErrorBanner from '../components/ErrorBanner';
 import LoadingSpinner from '../components/LoadingSpinner';
 import Pagination from '../components/Pagination';
+import AlgorithmSelect from '../components/AlgorithmSelect';
 import { useApi } from '../api/useApi';
+import { useSearchMethods } from '../api/useSearchMethods';
 import { useLanguage } from '../i18n/useLanguage';
 import { sortByGradeAndRelevance, sortByRelevance } from '../utils/sort';
 import type { Lang, SearchResult, SearchRequest } from '../types';
 
-const DEFAULT_ALGORITHM = 'bm25-prf';
 const PAGE_SIZE = 20;
 
 const UserSearchPage = () => {
@@ -21,9 +22,11 @@ const UserSearchPage = () => {
   const { search, loading, errors, clearError } = useApi();
   const [searchParams, setSearchParams] = useSearchParams();
   const resultsRef = useRef<HTMLDivElement>(null);
+  const { options, fallback, ready } = useSearchMethods();
 
   const [query, setQuery] = useState(searchParams.get('q') || '');
   const [lang, setLang] = useState<Lang>((searchParams.get('lang') as Lang) || 'en');
+  const [selectedAlgorithm, setSelectedAlgorithm] = useState(searchParams.get('algorithm') || 'bm25-prf');
   const [selectedGrade, setSelectedGrade] = useState<string | null>(searchParams.get('grade') || null);
   const [selectedBook, setSelectedBook] = useState<string | null>(searchParams.get('book') || null);
   const [rawResults, setRawResults] = useState<SearchResult[]>([]);
@@ -31,23 +34,30 @@ const UserSearchPage = () => {
   const [selectedResult, setSelectedResult] = useState<SearchResult | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [sortMode, setSortMode] = useState<'grade-relevance' | 'relevance'>('grade-relevance');
+  // A method from the URL that this server does not offer falls back to one it does.
+  const algorithm = options.some((o) => o.value === selectedAlgorithm)
+    ? selectedAlgorithm
+    : (fallback ?? selectedAlgorithm);
 
   const doSearch = (
     overrideQuery?: string,
     overrideLang?: Lang,
     overrideGrade?: string | null,
     overrideBook?: string | null,
+    overrideAlgorithm?: string,
   ) => {
     const effectiveQuery = overrideQuery ?? query;
     const effectiveLang = overrideLang ?? lang;
     const effectiveGrade = overrideGrade ?? selectedGrade;
     const effectiveBook = overrideBook ?? selectedBook;
+    const effectiveAlgorithm = overrideAlgorithm ?? algorithm;
     if (!effectiveQuery.trim()) return;
     const params = new URLSearchParams();
     params.set('q', effectiveQuery);
     params.set('lang', effectiveLang);
     if (effectiveGrade) params.set('grade', effectiveGrade);
     if (effectiveBook) params.set('book', effectiveBook);
+    params.set('algorithm', effectiveAlgorithm);
     setSearchParams(params, { replace: true });
 
     const request: SearchRequest = {
@@ -56,7 +66,7 @@ const UserSearchPage = () => {
       grade_filter: effectiveGrade,
       book_filter: effectiveBook,
     };
-    search(DEFAULT_ALGORITHM, request).then((response) => {
+    search(effectiveAlgorithm, request).then((response) => {
       setRawResults(response.results);
       setResponseTime(response.response_time_ms ?? null);
       setCurrentPage(1);
@@ -77,17 +87,25 @@ const UserSearchPage = () => {
     }
   };
 
+  const handleAlgorithmChange = (algo: string) => {
+    setSelectedAlgorithm(algo);
+    if (query.trim()) {
+      doSearch(undefined, undefined, undefined, undefined, algo);
+    }
+  };
+
   const handleSortChange = (mode: 'grade-relevance' | 'relevance') => {
     setSortMode(mode);
     setCurrentPage(1);
   };
 
+  // Search from the URL once the server has said which methods it offers.
   useEffect(() => {
-    if (searchParams.get('q')) {
+    if (ready && searchParams.get('q')) {
       doSearch();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [ready]);
 
   const sortedResults = useMemo(() => {
     return sortMode === 'grade-relevance'
@@ -124,6 +142,7 @@ const UserSearchPage = () => {
       <div className="flex flex-col sm:flex-row gap-4 flex-wrap items-start sm:items-end">
         <GradeFilter value={selectedGrade} onChange={(g) => handleFilterChange(g, selectedBook)} />
         <BookFilter value={selectedBook} onChange={(b) => handleFilterChange(selectedGrade, b)} />
+        <AlgorithmSelect value={algorithm} options={options} onChange={handleAlgorithmChange} />
       </div>
 
       {errors.search && (

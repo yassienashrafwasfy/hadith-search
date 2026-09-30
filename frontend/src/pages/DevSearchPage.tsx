@@ -8,10 +8,11 @@ import HadithModal from '../components/HadithModal';
 import ErrorBanner from '../components/ErrorBanner';
 import LoadingSpinner from '../components/LoadingSpinner';
 import Pagination from '../components/Pagination';
+import AlgorithmSelect from '../components/AlgorithmSelect';
 import { useApi } from '../api/useApi';
+import { useSearchMethods } from '../api/useSearchMethods';
 import { useLanguage } from '../i18n/useLanguage';
 import { sortByGradeAndRelevance, sortByRelevance } from '../utils/sort';
-import { ALGORITHMS } from '../types';
 import type { Lang, SearchResult, SearchRequest } from '../types';
 
 const PAGE_SIZE = 20;
@@ -21,6 +22,7 @@ const DevSearchPage = () => {
   const { search, loading, errors, clearError } = useApi();
   const [searchParams, setSearchParams] = useSearchParams();
   const resultsRef = useRef<HTMLDivElement>(null);
+  const { options, fallback, ready } = useSearchMethods();
 
   const [query, setQuery] = useState(searchParams.get('q') || '');
   const [lang, setLang] = useState<Lang>((searchParams.get('lang') as Lang) || 'en');
@@ -32,22 +34,28 @@ const DevSearchPage = () => {
   const [selectedResult, setSelectedResult] = useState<SearchResult | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [sortMode, setSortMode] = useState<'grade-relevance' | 'relevance'>('grade-relevance');
+  // A method from the URL that this server does not offer falls back to one it does.
+  const algorithm = options.some((o) => o.value === selectedAlgorithm)
+    ? selectedAlgorithm
+    : (fallback ?? selectedAlgorithm);
 
   const doSearch = (
     overrideQuery?: string,
     overrideLang?: Lang,
     overrideGrade?: string | null,
     overrideBook?: string | null,
+    overrideAlgorithm?: string,
   ) => {
     const effectiveQuery = overrideQuery ?? query;
     const effectiveLang = overrideLang ?? lang;
     const effectiveGrade = overrideGrade ?? selectedGrade;
     const effectiveBook = overrideBook ?? selectedBook;
+    const effectiveAlgorithm = overrideAlgorithm ?? algorithm;
     if (!effectiveQuery.trim()) return;
     const params = new URLSearchParams();
     params.set('q', effectiveQuery);
     params.set('lang', effectiveLang);
-    params.set('algorithm', selectedAlgorithm);
+    params.set('algorithm', effectiveAlgorithm);
     if (effectiveGrade) params.set('grade', effectiveGrade);
     if (effectiveBook) params.set('book', effectiveBook);
     setSearchParams(params, { replace: true });
@@ -58,7 +66,7 @@ const DevSearchPage = () => {
       grade_filter: effectiveGrade,
       book_filter: effectiveBook,
     };
-    search(selectedAlgorithm, request).then((response) => {
+    search(effectiveAlgorithm, request).then((response) => {
       setRawResults(response.results);
       setResponseTime(response.response_time_ms ?? null);
       setCurrentPage(1);
@@ -73,6 +81,9 @@ const DevSearchPage = () => {
 
   const handleAlgorithmChange = (algo: string) => {
     setSelectedAlgorithm(algo);
+    if (query.trim()) {
+      doSearch(undefined, undefined, undefined, undefined, algo);
+    }
   };
 
   const handleFilterChange = (grade: string | null, book: string | null) => {
@@ -88,12 +99,13 @@ const DevSearchPage = () => {
     setCurrentPage(1);
   };
 
+  // Search from the URL once the server has said which methods it offers.
   useEffect(() => {
-    if (searchParams.get('q')) {
+    if (ready && searchParams.get('q')) {
       doSearch();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [ready]);
 
   const sortedResults = useMemo(() => {
     return sortMode === 'grade-relevance'
@@ -124,22 +136,7 @@ const DevSearchPage = () => {
       <div className="flex flex-col sm:flex-row gap-4 flex-wrap items-start sm:items-end">
         <GradeFilter value={selectedGrade} onChange={(g) => handleFilterChange(g, selectedBook)} />
         <BookFilter value={selectedBook} onChange={(b) => handleFilterChange(selectedGrade, b)} />
-        <div className="flex flex-col gap-1">
-          <label className="font-ui-label text-ui-label text-on-surface-variant dark:text-dark-on-surface-variant">
-            {t('algorithm.label')}
-          </label>
-          <select
-            value={selectedAlgorithm}
-            onChange={(e) => handleAlgorithmChange(e.target.value)}
-            className="w-full sm:w-auto px-4 py-2.5 bg-surface dark:bg-dark-surface border border-outline dark:border-dark-outline rounded-lg text-on-surface dark:text-dark-on-surface font-ui-label text-ui-label focus:ring-2 focus:ring-primary dark:focus:ring-dark-primary cursor-pointer"
-          >
-            {ALGORITHMS.map((algo) => (
-              <option key={algo.value} value={algo.value}>
-                {algo.label}
-              </option>
-            ))}
-          </select>
-        </div>
+        <AlgorithmSelect value={algorithm} options={options} onChange={handleAlgorithmChange} />
       </div>
 
       {errors.search && (

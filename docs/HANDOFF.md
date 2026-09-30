@@ -316,7 +316,7 @@ tools/deploy.sh stop-idle           # when you are sure, stop the old colour
 - **Snapshot tests:** the synthetic systems in `tests/test_snapshots.py` changed (its fifth system is now `BM25_ROCCHIO`) and the golden files were regenerated.
 - **Docs:** `README.md`, `docs/WIKI.md`, `docs/ARCHITECTURE.md`, `docs/EVALUATION.md` and `docs/FINE_TUNING.md` no longer list the two methods. Older items in this note that mention Jina describe how things were then.
 
-**Not checked here:** I did not open the frontend in a browser after removing the toggle. `tsc` shows the same 6 errors as before the change, none in the files I touched.
+**Follow-up fix (search method picker):** the user search page had no method picker, and the dev page's picker listed methods the server had switched off, so choosing one showed a red error panel (HTTP 422). Both pages now use a shared `AlgorithmSelect` filled from `GET /api/v1/search-methods` (`frontend/src/api/useSearchMethods.ts`), so only methods the server offers are listed. The picker is there before the first search, changing it re-runs the search, and a method in the URL that the server does not offer falls back to `bm25-prf`. I checked both pages in headless Chromium against the running app: five options listed, no error panel, switching to BM25 changed the URL and results, and `?algorithm=final-pipeline` fell back to `bm25-prf`. `tsc` shows the same 6 errors as before, none in the files I touched.
 
 ## Still open
 

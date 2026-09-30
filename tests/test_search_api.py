@@ -100,3 +100,11 @@ async def test_post_to_searches_is_405(_search_client):
     res = await _search_client.post(SEARCH, json={"query": "x"})
     assert res.status_code == 405
     assert res.headers["content-type"] == "application/problem+json"
+
+
+async def test_hybrid_results_come_back_ranked(_search_client):
+    body = (
+        await _search_client.get(SEARCH, params={"q": "prayer fasting", "method": "bm25-tf-idf"})
+    ).json()
+    scores = [r["score"] for r in body["results"]]
+    assert scores == sorted(scores, reverse=True)

@@ -1,47 +1,44 @@
 """Turn raw {hadith_id: score} rankings into API results."""
 
-from models import HadithSchema, SearchResult
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from models import Hadith, HadithSchema, SearchResult
 
 DEFAULT_TOP_K = 500
 
 
-def _passes_filters(row, grade_filter: str | None, book_filter: str | None) -> bool:
-    if grade_filter and row.get("Normalized_Grade") != grade_filter:
-        return False
-    if book_filter and row.get("Book") != book_filter:
-        return False
-    return True
-
-
-def _to_hadith(hadith_id: int, row) -> HadithSchema:
+def _to_hadith(row: Hadith) -> HadithSchema:
     return HadithSchema(
-        hadith_id=hadith_id,
-        book=row.get("Book", ""),
-        hadith_en_text=row.get("English_Text", ""),
-        hadith_ar_text=row.get("Arabic_Text", ""),
-        chapter_title_en=row.get("Chapter_Title_English", ""),
-        chapter_title_ar=row.get("Chapter_Title_Arabic", ""),
-        grade=row.get("Normalized_Grade", "Unknown"),
-        raw_grade=row.get("Grade", "Unknown"),
-        reference=row.get("Reference", ""),
-        in_book_reference=row.get("In-book reference", ""),
+        hadith_id=row.id,
+        book=row.Book or "",
+        hadith_en_text=row.English_Text or "",
+        hadith_ar_text=row.Arabic_Text or "",
+        chapter_title_en=row.Chapter_Title_English or "",
+        chapter_title_ar=row.Chapter_Title_Arabic or "",
+        grade=row.Normalized_Grade or "Unknown",
+        raw_grade=row.Grade or "Unknown",
+        reference="",  # the corpus has no reference columns
+        in_book_reference="",
     )
 
 
 def build_results(
+    session: Session,
     raw: dict[int, float],
-    hadiths_df,
     grade_filter: str | None = None,
     book_filter: str | None = None,
     top_k: int = DEFAULT_TOP_K,
 ) -> list[SearchResult]:
-    output: list[SearchResult] = []
-    for hadith_id, score in raw.items():
-        try:
-            row = hadiths_df.loc[int(hadith_id)]
-        except KeyError:
-            continue
-        if not _passes_filters(row, grade_filter, book_filter):
-            continue
-        output.append(SearchResult(hadith=_to_hadith(int(hadith_id), row), score=float(score)))
-    return output[:top_k]
+    """Rows for the ranked ids (best first), filtered by grade/book, cut to `top_k`."""
+    stmt = select(Hadith).where(Hadith.id.in_(list(raw)))
+    if grade_filter:
+        stmt = stmt.where(Hadith.Normalized_Grade == grade_filter)
+    if book_filter:
+        stmt = stmt.where(Hadith.Book == book_filter)
+    rows = {row.id: row for row in session.scalars(stmt)}
+    return [
+        SearchResult(hadith=_to_hadith(rows[hadith_id]), score=float(score))
+        for hadith_id, score in raw.items()
+        if hadith_id in rows
+    ][:top_k]

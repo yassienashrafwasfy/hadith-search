@@ -34,7 +34,7 @@ def test_models_hadith_is_orm_and_schema_is_pydantic():
 def test_exports_are_the_same_objects_as_submodules():
     from scripts import search
 
-    assert scripts.bm25 is search.bm25
+    assert scripts.rrf_fusion is search.rrf_fusion
     assert database.Hadith is models.Hadith
 
 

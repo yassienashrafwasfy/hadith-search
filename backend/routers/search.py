@@ -1,24 +1,24 @@
 import time
+from collections.abc import Iterator
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
+from database import get_sync_session
 from features import Features
 from models import Lang, SearchRequest
 from rest import API_PREFIX, href, json_response, link, server_timing
-from services.retrieval import (
-    SearchContext,
-    default_search_context,
-    enabled_systems,
-    run_search,
-)
+from services.retrieval import SearchContext, enabled_systems, run_search
 
 CACHE_SECONDS = 300  # results only change when the indices are rebuilt
 
 
-def get_search_context() -> SearchContext:
-    """FastAPI dependency; override in tests to inject fake indices/models."""
-    return default_search_context()
+def get_search_context() -> Iterator[SearchContext]:
+    """FastAPI dependency: one database session per request. Override in tests to fake the model."""
+    from scripts import get_model
+
+    with get_sync_session() as session:
+        yield SearchContext(session=session, model=get_model)
 
 
 def make_search_router(features: Features) -> APIRouter:

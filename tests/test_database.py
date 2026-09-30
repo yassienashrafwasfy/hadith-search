@@ -29,17 +29,6 @@ def test_read_hadiths_df_all_and_subset(_patched_paths):
     assert subset["id"].tolist() == [3, 2, 1]
 
 
-def test_hadiths_loader_indexes_by_id(_patched_paths):
-    from scripts import loading
-
-    loading.get_hadiths_df.cache_clear()
-    try:
-        df = loading.get_hadiths_df()
-    finally:
-        loading.get_hadiths_df.cache_clear()
-    assert df.loc[1, "Book"] == "Bukhari"
-
-
 def test_hadith_records_convert_nan_and_ints():
     from scripts.data_creation import _hadith_records
 
@@ -109,3 +98,17 @@ def test_no_raw_sql_in_backend(pattern):
             if re.search(pattern, line):
                 offenders.append(f"{path.relative_to(_BACKEND)}:{n}: {line.strip()}")
     assert not offenders, "raw SQL found; use the ORM:\n" + "\n".join(offenders)
+
+
+def test_build_all_index_and_embedding_checks(_search_index):
+    from scripts import build_all
+
+    assert build_all._has_index()
+    assert not build_all._has_embeddings()  # only 3 of the 13 rows have vectors
+    assert build_all._row_count() == 13
+
+
+def test_build_all_checks_are_false_on_an_empty_database(_patched_paths):
+    from scripts import build_all
+
+    assert not build_all._has_index() and not build_all._has_embeddings()

@@ -166,69 +166,52 @@ def generate_pairs_for_topic(topic, total_needed, batch_size=BATCH_SIZE):
     return all_pairs[:total_needed]
 
 
-def retrieve_hadith(query_text, language, inverted_index, document_lengths):
-    from scripts import bm25
+def retrieve_hadith(session, query_text, language):
+    """(id, display text) of the best BM25 match for the text, or (None, None)."""
+    from models import Hadith
+    from services import ranking
 
-    scores = bm25(query_text, language, inverted_index, document_lengths)
+    scores = ranking.bm25(session, query_text, language, limit=1)
     if not scores:
         return None, None
     top_id = next(iter(scores))
-
-    from database import get_sync_session
-    from models import Hadith
-
     col = Hadith.Arabic_Text if language == "AR" else Hadith.English_Text
-    with get_sync_session() as session:
-        row = session.execute(select(Hadith.id, col).where(Hadith.id == top_id)).first()
-
+    row = session.execute(select(Hadith.id, col).where(Hadith.id == top_id)).first()
     if row and row[1]:
         return row[0], row[1]
     return top_id, None
 
 
-def store_pairs(pairs, topic, inverted_index_en, inverted_index_ar, document_lengths):
-    return asyncio.run(
-        _store_pairs(pairs, topic, inverted_index_en, inverted_index_ar, document_lengths)
-    )
+def store_pairs(pairs, topic):
+    from database import get_sync_session, now_iso
 
-
-async def _store_pairs(pairs, topic, inverted_index_en, inverted_index_ar, document_lengths):
-    from database import get_session, now_iso
-
-    session = get_session()
     stored = 0
+    with get_sync_session() as session:
+        for pair in pairs:
+            en_hadith_id, en_hadith_text = retrieve_hadith(session, pair["entity_en"], "EN")
+            ar_hadith_id, ar_hadith_text = retrieve_hadith(session, pair["entity_ar"], "AR")
 
-    for pair in pairs:
-        en_hadith_id, en_hadith_text = retrieve_hadith(
-            pair["entity_en"], "EN", inverted_index_en, document_lengths
-        )
-        ar_hadith_id, ar_hadith_text = retrieve_hadith(
-            pair["entity_ar"], "AR", inverted_index_ar, document_lengths
-        )
+            hadith_id = en_hadith_id or ar_hadith_id
+            if hadith_id is None:
+                continue
 
-        hadith_id = en_hadith_id or ar_hadith_id
-        if hadith_id is None:
-            continue
-
-        session.add(
-            KvPair(
-                topic=topic,
-                language="BOTH",
-                concept_en=pair["concept_en"],
-                concept_ar=pair["concept_ar"],
-                entity_en=pair["entity_en"],
-                entity_ar=pair["entity_ar"],
-                hadith_id=hadith_id,
-                hadith_en=en_hadith_text,
-                hadith_ar=ar_hadith_text,
-                status="pending",
-                created_at=now_iso(),
+            session.add(
+                KvPair(
+                    topic=topic,
+                    language="BOTH",
+                    concept_en=pair["concept_en"],
+                    concept_ar=pair["concept_ar"],
+                    entity_en=pair["entity_en"],
+                    entity_ar=pair["entity_ar"],
+                    hadith_id=hadith_id,
+                    hadith_en=en_hadith_text,
+                    hadith_ar=ar_hadith_text,
+                    status="pending",
+                    created_at=now_iso(),
+                )
             )
-        )
-        stored += 1
-
-    await session.commit()
-    await session.close()
+            stored += 1
+        session.commit()
     return stored
 
 
@@ -244,19 +227,8 @@ def generate_all(pairs_per_topic=PAIRS_PER_TOPIC, topics=None):
     print()
 
     from database import init_schema_sync
-    from scripts import (
-        get_arabic_inverted_index,
-        get_document_lengths,
-        get_english_inverted_index,
-    )
 
     init_schema_sync()
-
-    print("Loading retrieval resources...")
-    en_index = get_english_inverted_index()
-    ar_index = get_arabic_inverted_index()
-    doc_lengths = get_document_lengths()
-    print("Resources loaded.\n")
 
     total_stored = 0
 
@@ -269,7 +241,7 @@ def generate_all(pairs_per_topic=PAIRS_PER_TOPIC, topics=None):
             print("  No pairs generated, skipping")
             continue
 
-        stored = store_pairs(pairs, topic, en_index, ar_index, doc_lengths)
+        stored = store_pairs(pairs, topic)
         print(f"  Stored {stored} KV pairs (with retrieved hadiths)")
         total_stored += stored
         print()

@@ -15,7 +15,7 @@ if hasattr(sys.stdout, "reconfigure"):
 from sqlalchemy import func, inspect, or_, select
 
 from database import get_sync_engine, get_sync_session
-from models import Hadith
+from models import Hadith, HadithEmbedding, Posting
 from scripts import data_creation
 
 DATA_DIR = os.path.join(SCRIPTS_DIR, "..", "data")
@@ -70,6 +70,23 @@ def _row_count():
         return None
 
 
+def _count(model):
+    try:
+        with get_sync_session() as session:
+            return session.execute(select(func.count()).select_from(model)).scalar_one()
+    except Exception:
+        return 0
+
+
+def _has_index():
+    return _count(Posting) > 0
+
+
+def _has_embeddings():
+    rows = _row_count()
+    return bool(rows) and _count(HadithEmbedding) == rows
+
+
 def _output_exists(step):
     if step.get("always_run"):
         return False
@@ -115,13 +132,9 @@ def _make_steps(skip_embeddings):
             "check": _has_preprocessed_data,
         },
         {
-            "name": "Building matn-focused inverted indices",
+            "name": "Building matn-focused BM25 index in PostgreSQL",
             "module": "scripts.build_inverted_index",
-            "markers": [
-                os.path.join(DATA_DIR, "english_inverted_index.pkl"),
-                os.path.join(DATA_DIR, "arabic_inverted_index.pkl"),
-                os.path.join(DATA_DIR, "document_lengths.pkl"),
-            ],
+            "check": _has_index,
         },
     ]
 
@@ -131,11 +144,7 @@ def _make_steps(skip_embeddings):
                 {
                     "name": "Generating dense embeddings",
                     "module": "scripts.build_embeddings",
-                    "markers": [
-                        os.path.join(DATA_DIR, "english_embeddings.npy"),
-                        os.path.join(DATA_DIR, "arabic_embeddings.npy"),
-                        os.path.join(DATA_DIR, "hadith_ids.npy"),
-                    ],
+                    "check": _has_embeddings,
                 },
                 {
                     "name": "Pooling candidate qrels",

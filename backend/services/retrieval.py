@@ -1,28 +1,19 @@
 """Retrieval systems as a registry of strategies over an injected `SearchContext`.
 
-Strangler-fig facade: the algorithms still live in the legacy `scripts.search` module (which
-the offline pooling/evaluation scripts keep using); the API now reaches them only through
-this registry, so endpoints, feature gating and dependencies are declared in one place.
+The ranking itself lives in `services.ranking` (SQL over PostgreSQL); this registry maps each
+public slug to a ranking function and declares which feature flags it needs, so endpoints,
+feature gating and dependencies are declared in one place.
 """
 
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from sqlalchemy.orm import Session
+
 from features import Features
 from models import SearchRequest, SearchResponse
-from scripts import (
-    bm25,
-    bm25_cross_encoder_rerank,
-    bm25_semantic_rrf,
-    bm25_tfidf_hybrid,
-    bm25_with_expansion,
-    final_search_pipeline,
-    ranked_term_overlap,
-    semantic_reranker,
-    semantic_search_e5,
-    tf_idf,
-)
+from services import ranking
 from services.results import build_results
 
 RERANK_CANDIDATES = 50
@@ -34,42 +25,10 @@ Scores = dict[int, float]
 
 @dataclass(frozen=True)
 class SearchContext:
-    """Everything a retrieval system may need, as lazy accessors (language is "EN" or "AR")."""
+    """A database session plus a lazy accessor for the E5 model."""
 
-    inverted_index: Callable[[str], dict]
-    embeddings: Callable[[str], Any]
-    doc_lengths: Callable[[], dict]
-    hadith_ids: Callable[[], Any]
+    session: Session
     model: Callable[[], Any]
-    hadiths_df: Callable[[], Any]
-    get_hadith: Callable[[int], dict]
-
-
-def default_search_context() -> SearchContext:
-    """Context backed by the real indices, embeddings and model (loaded on first use)."""
-    from scripts import (
-        get_arabic_embeddings,
-        get_arabic_inverted_index,
-        get_document_lengths,
-        get_english_embeddings,
-        get_english_inverted_index,
-        get_hadith,
-        get_hadith_ids,
-        get_hadiths_df,
-        get_model,
-    )
-
-    by_language = {"EN": get_english_inverted_index, "AR": get_arabic_inverted_index}
-    embeddings = {"EN": get_english_embeddings, "AR": get_arabic_embeddings}
-    return SearchContext(
-        inverted_index=lambda lang: by_language[lang](),
-        embeddings=lambda lang: embeddings[lang](),
-        doc_lengths=get_document_lengths,
-        hadith_ids=get_hadith_ids,
-        model=get_model,
-        hadiths_df=get_hadiths_df,
-        get_hadith=get_hadith,
-    )
 
 
 @dataclass(frozen=True)
@@ -95,86 +54,55 @@ def _system(slug: str, *requires: str):
 
 @_system("term-overlap")
 def _term_overlap(ctx, query, lang):
-    return ranked_term_overlap(query, lang, ctx.inverted_index(lang))
+    return ranking.term_overlap(ctx.session, query, lang)
 
 
 @_system("tfidf")
 def _tfidf(ctx, query, lang):
-    return tf_idf(query, lang, ctx.inverted_index(lang), ctx.doc_lengths())
+    return ranking.tf_idf(ctx.session, query, lang)
 
 
 @_system("bm25")
 def _bm25(ctx, query, lang):
-    return bm25(query, lang, ctx.inverted_index(lang), ctx.doc_lengths())
+    return ranking.bm25(ctx.session, query, lang)
 
 
 @_system("bm25-tf-idf")
 def _hybrid(ctx, query, lang):
-    return bm25_tfidf_hybrid(query, lang, ctx.inverted_index(lang), ctx.doc_lengths())
+    return ranking.bm25_tfidf_hybrid(ctx.session, query, lang)
 
 
 @_system("bm25-prf")
 def _bm25_prf(ctx, query, lang):
-    return bm25_with_expansion(
-        query, lang, ctx.inverted_index(lang), ctx.doc_lengths(), ctx.get_hadith
-    )
+    return ranking.bm25_prf(ctx.session, query, lang)
 
 
 @_system("semantic-rerank", "dense_retrieval")
 def _semantic_rerank(ctx, query, lang):
-    candidates = list(_bm25(ctx, query, lang))[:RERANK_CANDIDATES]
-    return semantic_reranker(
-        query,
-        lang,
-        candidates,
-        ctx.model(),
-        ctx.embeddings(lang),
-        ctx.hadith_ids(),
-        top_k=RERANK_TOP_K,
+    candidates = list(ranking.bm25(ctx.session, query, lang, limit=RERANK_CANDIDATES))
+    return ranking.semantic_rerank(
+        ctx.session, query, lang, candidates, ctx.model(), top_k=RERANK_TOP_K
     )
 
 
 @_system("cosine-similarity", "dense_retrieval")
 def _cosine(ctx, query, lang):
-    return semantic_search_e5(
-        query, lang, ctx.model(), ctx.embeddings(lang), ctx.hadith_ids(), top_k=COSINE_TOP_K
-    )
+    return ranking.cosine_search(ctx.session, query, lang, ctx.model(), top_k=COSINE_TOP_K)
 
 
 @_system("semantic-rrf", "dense_retrieval")
 def _semantic_rrf(ctx, query, lang):
-    return bm25_semantic_rrf(
-        query,
-        lang,
-        ctx.inverted_index(lang),
-        ctx.doc_lengths(),
-        ctx.embeddings(lang),
-        ctx.hadith_ids(),
-        ctx.model(),
-    )
+    return ranking.bm25_dense_rrf(ctx.session, query, lang, ctx.model())
 
 
 @_system("cross-encoder-rerank", "cross_encoder")
 def _cross_encoder(ctx, query, lang):
-    return bm25_cross_encoder_rerank(
-        query, lang, ctx.inverted_index(lang), ctx.doc_lengths(), ctx.hadiths_df()
-    )
+    return ranking.bm25_cross_encoder(ctx.session, query, lang)
 
 
 @_system("final-pipeline", "dense_retrieval", "cross_encoder")
 def _final_pipeline(ctx, query, lang):
-    text_column = "English_Text" if lang == "EN" else "Arabic_Text"
-    return final_search_pipeline(
-        query=query,
-        language=lang,
-        index=ctx.inverted_index(lang),
-        doc_lengths=ctx.doc_lengths(),
-        embeddings=ctx.embeddings(lang),
-        hadith_ids=ctx.hadith_ids(),
-        model=ctx.model(),
-        eval_ids=set(map(int, ctx.hadith_ids())),
-        texts_dict=ctx.hadiths_df()[text_column].dropna().astype(str).to_dict(),
-    )
+    return ranking.final_pipeline(ctx.session, query, lang, ctx.model())
 
 
 def enabled_systems(features: Features) -> list[RetrievalSystem]:
@@ -183,5 +111,5 @@ def enabled_systems(features: Features) -> list[RetrievalSystem]:
 
 def run_search(system: RetrievalSystem, ctx: SearchContext, req: SearchRequest) -> SearchResponse:
     raw = system.run(ctx, req.query, req.lang.value.upper())
-    results = build_results(raw, ctx.hadiths_df(), req.grade_filter, req.book_filter)
+    results = build_results(ctx.session, raw, req.grade_filter, req.book_filter)
     return SearchResponse(number_of_results=len(results), results=results)

@@ -1,10 +1,8 @@
 import json
 import os
 
-from sqlalchemy import select
-
 from database import get_sync_session
-from models import Hadith
+from services import ranking
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
 POOLING_MANIFEST_PATH = os.path.join(DATA_DIR, "pooling_manifest.json")
@@ -13,107 +11,40 @@ QRELS_UNGRADED_PATH = os.path.join(DATA_DIR, "qrels_ungraded.json")
 
 POOL_DEPTH_PER_SYSTEM = 50
 
-from scripts import (
-    bm25,
-    bm25_semantic_rrf,
-    bm25_with_expansion,
-    final_search_pipeline,
-    get_arabic_embeddings,
-    get_arabic_inverted_index,
-    get_document_lengths,
-    get_english_embeddings,
-    get_english_inverted_index,
-    get_hadith,
-    get_hadith_ids,
-    get_model,
-    semantic_reranker,
-    semantic_search_e5,
-)
-
-print("Loading indices and embeddings...")
-en_index = get_english_inverted_index()
-ar_index = get_arabic_inverted_index()
-doc_lengths = get_document_lengths()
-en_embeddings = get_english_embeddings()
-ar_embeddings = get_arabic_embeddings()
-hadith_ids = get_hadith_ids()
-model = get_model()
-
-print("Loading hadiths into memory...")
-with get_sync_session() as _session:
-    hadith_rows = _session.execute(select(Hadith.id, Hadith.English_Text, Hadith.Arabic_Text)).all()
-
-hadith_texts_en = {int(row[0]): row[1] for row in hadith_rows if row[1]}
-hadith_texts_ar = {int(row[0]): row[2] for row in hadith_rows if row[2]}
-all_hadith_ids = {int(hid) for hid in hadith_ids}
-
-
-def _index(language: str):
-    return en_index if language == "EN" else ar_index
-
-
-def _embeddings(language: str):
-    return en_embeddings if language == "EN" else ar_embeddings
-
-
-def _texts(language: str):
-    return hadith_texts_en if language == "EN" else hadith_texts_ar
-
 
 def _top_ids(scores: dict[int, float | int], limit: int) -> list[int]:
     return [int(hid) for hid in sorted(scores, key=scores.get, reverse=True)[:limit]]
 
 
 def pool_query(
-    query: str, language: str, per_system_size: int = POOL_DEPTH_PER_SYSTEM
+    session,
+    model,
+    query: str,
+    language: str,
+    per_system_size: int = POOL_DEPTH_PER_SYSTEM,
 ) -> tuple[list[int], dict]:
-    index = _index(language)
-    embeddings = _embeddings(language)
-    texts = _texts(language)
-
     systems = {
-        "BM25": lambda: bm25(query, language, index, doc_lengths),
-        "BM25_ROCCHIO": lambda: bm25_with_expansion(
-            query, language, index, doc_lengths, get_hadith
+        "BM25": lambda: ranking.bm25(session, query, language, limit=per_system_size),
+        "BM25_ROCCHIO": lambda: ranking.bm25_prf(session, query, language),
+        "COSINE_SIMILARITY": lambda: ranking.cosine_search(
+            session, query, language, model, top_k=per_system_size
         ),
-        "COSINE_SIMILARITY": lambda: semantic_search_e5(
-            query=query,
-            language=language,
-            model=model,
-            corpus_embeddings_normed=embeddings,
-            hadith_ids=hadith_ids,
+        "BM25_SEMANTIC_RERANK": lambda: ranking.semantic_rerank(
+            session,
+            query,
+            language,
+            list(ranking.bm25(session, query, language, limit=500)),
+            model,
             top_k=per_system_size,
         ),
-        "BM25_SEMANTIC_RERANK": lambda: semantic_reranker(
-            query=query,
-            language=language,
-            candidate_ids=list(bm25(query, language, index, doc_lengths).keys())[:500],
-            model=model,
-            embeddings=embeddings,
-            hadith_ids=hadith_ids,
-            top_k=per_system_size,
+        "BM25_RRF": lambda: ranking.bm25_dense_rrf(
+            session, query, language, model, candidate_k=500, top_k=per_system_size
         ),
-        "BM25_RRF": lambda: bm25_semantic_rrf(
-            query=query,
-            language=language,
-            index=index,
-            doc_lengths=doc_lengths,
-            corpus_embeddings_normed=embeddings,
-            hadith_ids=hadith_ids,
-            model=model,
-            candidate_k=500,
-            top_k=per_system_size,
-        ),
-        "FINAL_PIPELINE": lambda: final_search_pipeline(
-            query=query,
-            language=language,
-            index=index,
-            doc_lengths=doc_lengths,
-            embeddings=embeddings,
-            hadith_ids=hadith_ids,
-            model=model,
-            eval_ids=all_hadith_ids,
-            texts_dict=texts,
+        "FINAL_PIPELINE": lambda: ranking.final_pipeline(
+            session,
+            query,
+            language,
+            model,
             candidate_k=1000,
             rerank_k=per_system_size,
             final_k=per_system_size,
@@ -149,6 +80,8 @@ def pool_query(
 
 
 def run():
+    from scripts import get_model
+
     print("Loading queries.json...")
     with open(QUERIES_PATH, encoding="utf-8") as f:
         queries = json.load(f)
@@ -168,12 +101,15 @@ def run():
         "queries": {},
     }
 
+    print("\nLoading model...")
+    model = get_model()
     print("\nPooling queries...")
     for qid, query_text in queries.items():
         language = qid[:2]
 
         print(f"  Processing {qid}...")
-        pooled_ids, query_manifest = pool_query(query_text, language)
+        with get_sync_session() as session:
+            pooled_ids, query_manifest = pool_query(session, model, query_text, language)
 
         qrels_ungraded[qid] = pooled_ids
         distributions[qid] = len(pooled_ids)

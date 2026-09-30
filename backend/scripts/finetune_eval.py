@@ -8,7 +8,7 @@ Usage:
 This script:
 1. Loads the fine-tuned model (base E5 + LoRA adapter)
 2. Re-encodes all hadith embeddings (EN + AR)
-3. Saves new .npy files (overwrites existing)
+3. Overwrites the vectors in the hadith_embeddings table
 4. Runs the evaluation pipeline
 5. Saves results to data/finetuned_results.json
 """
@@ -19,8 +19,9 @@ import sys
 
 import numpy as np
 
-from database import read_hadiths_df
+from database import get_sync_session, read_hadiths_df
 from models import Hadith
+from scripts.embedding_store import store_embeddings
 
 SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(SCRIPTS_DIR, "..", "data")
@@ -42,6 +43,7 @@ def reencode_embeddings(adapter_path, batch_size=32):
     df = read_hadiths_df(Hadith.id, Hadith.English_Matn, Hadith.Arabic_Matn, order_by=Hadith.id)
 
     print(f"Loaded {len(df)} hadiths")
+    ids = df["id"].astype(int).tolist()
 
     model_name = "intfloat/multilingual-e5-large"
     tokenizer = AutoTokenizer.from_pretrained(model_name)
@@ -78,9 +80,9 @@ def reencode_embeddings(adapter_path, batch_size=32):
         if (i // batch_size + 1) % 50 == 0:
             print(f"  {i + len(batch)}/{len(en_texts)}")
     en_embeddings = np.vstack(en_embeddings)
-    en_path = os.path.join(DATA_DIR, "english_embeddings.npy")
-    np.save(en_path, en_embeddings)
-    print(f"Saved {en_embeddings.shape} -> {en_path}")
+    with get_sync_session() as session:
+        store_embeddings(session, ids, en_embeddings, "EN")
+    print(f"Stored {en_embeddings.shape} English embeddings in PostgreSQL")
 
     print("Encoding Arabic embeddings...")
     from camel_tools.utils.dediac import dediac_ar
@@ -95,13 +97,9 @@ def reencode_embeddings(adapter_path, batch_size=32):
         if (i // batch_size + 1) % 50 == 0:
             print(f"  {i + len(batch)}/{len(ar_texts)}")
     ar_embeddings = np.vstack(ar_embeddings)
-    ar_path = os.path.join(DATA_DIR, "arabic_embeddings.npy")
-    np.save(ar_path, ar_embeddings)
-    print(f"Saved {ar_embeddings.shape} -> {ar_path}")
-
-    ids_path = os.path.join(DATA_DIR, "hadith_ids.npy")
-    np.save(ids_path, df["id"].values)
-    print(f"Saved hadith IDs -> {ids_path}")
+    with get_sync_session() as session:
+        store_embeddings(session, ids, ar_embeddings, "AR")
+    print(f"Stored {ar_embeddings.shape} Arabic embeddings in PostgreSQL")
 
     print("Done re-encoding.\n")
 
@@ -135,7 +133,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--skip-encode",
         action="store_true",
-        help="Skip re-encoding embeddings (use existing .npy files)",
+        help="Skip re-encoding embeddings (use the vectors already in the database)",
     )
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--k", type=int, default=20)
@@ -155,10 +153,8 @@ if __name__ == "__main__":
     if not args.skip_encode:
         reencode_embeddings(adapter_path, args.batch_size)
 
-    from scripts import get_arabic_embeddings, get_english_embeddings, get_model
+    from scripts import get_model
 
     get_model.cache_clear()
-    get_english_embeddings.cache_clear()
-    get_arabic_embeddings.cache_clear()
 
     run_evaluation(args.mode, args.k)

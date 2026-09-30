@@ -1,0 +1,335 @@
+"""Frozen copy of the old in-memory retrieval code, kept only as the oracle that the SQL
+ranking in `services/ranking.py` is tested against."""
+
+from collections import Counter
+from math import log
+
+import numpy as np
+from camel_tools.utils.dediac import dediac_ar
+
+from scripts.preprocess import normalize_arabic_text, preprocess_arabic, preprocess_english
+
+
+def ranked_term_overlap(query: str, language: str, inverted_index) -> dict[int, int]:
+    query = preprocess_arabic(query) if language == "AR" else preprocess_english(query)
+    query_terms = query.split()
+    valid_hadiths = {}
+    for term in set(query_terms):
+        if term not in inverted_index:
+            continue
+        term_postings = inverted_index[term]
+        term_hadith_ids = [posting[0] for posting in term_postings]
+        for hadith_id in term_hadith_ids:
+            valid_hadiths[hadith_id] = valid_hadiths.get(hadith_id, 0) + 1
+    sorted_hadiths = dict(sorted(valid_hadiths.items(), key=lambda item: (-item[1], item[0])))
+    return sorted_hadiths
+
+
+def tf_idf(query: str, language: str, inverted_index, document_lengths) -> dict[int, float]:
+    query = preprocess_arabic(query) if language == "AR" else preprocess_english(query)
+    document_scores = {}
+    term_query_frequency = {}
+    query_terms = query.split()
+    for term in query_terms:
+        term_query_frequency[term] = term_query_frequency.get(term, 0) + 1
+    for term in term_query_frequency:
+        if term not in inverted_index:
+            continue
+        postings = inverted_index[term]
+        idf = log(len(document_lengths) / len(postings))
+        for posting in postings:
+            hadith_id = posting[0]
+            normalized_tf = 1 + log(posting[1])
+            tf_idf_score = normalized_tf * idf
+            final_score = term_query_frequency[term] * tf_idf_score
+            document_scores[hadith_id] = document_scores.get(hadith_id, 0) + final_score
+    sorted_hadiths = dict(sorted(document_scores.items(), key=lambda item: item[1], reverse=True))
+    return sorted_hadiths
+
+
+def query_expansion(
+    query: str,
+    top_hadiths: list[str],
+    language: str,
+    inverted_index,
+    document_lengths,
+    top_n: int = 3,
+    alpha: float = 1.0,
+    beta: float = 0.5,
+) -> dict[str, float]:
+    preprocessed_query = preprocess_arabic(query) if language == "AR" else preprocess_english(query)
+    total_docs = len(document_lengths)
+    original_terms = preprocessed_query.split()
+    query_vector = {term: alpha for term in original_terms}
+    hadiths_string = " ".join(top_hadiths)
+    local_tf = Counter(hadiths_string.split())
+    pool_scores = {}
+    for term, tf in local_tf.items():
+        if term not in inverted_index or term in query_vector:
+            continue
+        df = len(inverted_index[term])
+        idf = log((total_docs - df + 0.5) / (df + 0.5))
+        pool_scores[term] = (tf / len(top_hadiths)) * idf
+    sorted_expansion = sorted(pool_scores.items(), key=lambda x: x[1], reverse=True)[:top_n]
+    max_pool_score = max(pool_scores.values()) if pool_scores else 1
+    for term, score in sorted_expansion:
+        normalized_score = score / max_pool_score
+        query_vector[term] = normalized_score * beta
+    return query_vector
+
+
+def bm25(
+    query: str,
+    language: str,
+    inverted_index,
+    document_lengths,
+    k1: float = 1.2,
+    b: float = 0.75,
+    custom_weights: dict = None,
+) -> dict[int, float]:
+    preprocessed_query = preprocess_arabic(query) if language == "AR" else preprocess_english(query)
+    lang_idx = 0 if language == "AR" else 1
+    lavg = sum(v[lang_idx] for v in document_lengths.values()) / len(document_lengths)
+    if custom_weights:
+        term_query_frequency = custom_weights
+    else:
+        query_terms = preprocessed_query.split()
+        term_query_frequency = {}
+        for term in query_terms:
+            term_query_frequency[term] = term_query_frequency.get(term, 0) + 1
+    document_scores = {}
+    for term, qtf in term_query_frequency.items():
+        if term not in inverted_index:
+            continue
+        postings = inverted_index[term]
+        df = len(postings)
+        idf = log((len(document_lengths) - df + 0.5) / (df + 0.5))
+        for hadith_id, tf in postings:
+            ld = document_lengths[hadith_id][lang_idx]
+            tf_component = ((k1 + 1) * tf) / (k1 * ((1 - b) + b * (ld / lavg)) + tf)
+            document_scores[hadith_id] = document_scores.get(hadith_id, 0) + (
+                tf_component * idf * qtf
+            )
+    return dict(sorted(document_scores.items(), key=lambda x: x[1], reverse=True))
+
+
+def get_ranked_ids(results: dict[int, float]) -> list[int]:
+    return [docid for docid, _ in sorted(results.items(), key=lambda x: x[1], reverse=True)]
+
+
+def bm25_with_expansion(
+    query: str,
+    language: str,
+    inverted_index,
+    document_lengths,
+    get_hadith_fn,
+    k: int = 5,
+    top_n: int = 3,
+) -> dict[int, float]:
+    initial_results = bm25(query, language, inverted_index, document_lengths)
+    top_ids = get_ranked_ids(initial_results)[:k]
+    col = "Preprocessed_English_Matn" if language == "EN" else "Preprocessed_Arabic_Matn"
+    top_hadiths = [get_hadith_fn(hadith_id)[col] for hadith_id in top_ids]
+    custom_weights = query_expansion(
+        query=query,
+        top_hadiths=top_hadiths,
+        language=language,
+        inverted_index=inverted_index,
+        document_lengths=document_lengths,
+        top_n=top_n,
+    )
+    return bm25(
+        query=query,
+        language=language,
+        inverted_index=inverted_index,
+        document_lengths=document_lengths,
+        custom_weights=custom_weights,
+    )
+
+
+def bm25_tfidf_hybrid(
+    query: str, language: str, inverted_index, document_lengths, alpha: float = 0.8
+) -> dict[int, float]:
+    bm25_scores = bm25(query, language, inverted_index, document_lengths)
+    tfidf_scores = tf_idf(query, language, inverted_index, document_lengths)
+    bm25_max = max(bm25_scores.values(), default=1)
+    tfidf_max = max(tfidf_scores.values(), default=1)
+    all_ids = set(bm25_scores) | set(tfidf_scores)
+    return {
+        doc_id: alpha * (bm25_scores.get(doc_id, 0) / bm25_max)
+        + (1 - alpha) * (tfidf_scores.get(doc_id, 0) / tfidf_max)
+        for doc_id in all_ids
+    }
+
+
+def hybrid_with_expansion(
+    query: str,
+    language: str,
+    inverted_index,
+    document_lengths,
+    get_hadith_fn,
+    k: int = 5,
+    top_n: int = 3,
+) -> dict[int, float]:
+    initial_results = bm25_tfidf_hybrid(query, language, inverted_index, document_lengths)
+    top_ids = get_ranked_ids(initial_results)[:k]
+    col = "Preprocessed_English_Matn" if language == "EN" else "Preprocessed_Arabic_Matn"
+    top_hadiths = [get_hadith_fn(hadith_id)[col] for hadith_id in top_ids]
+    custom_weights = query_expansion(
+        query=query,
+        top_hadiths=top_hadiths,
+        language=language,
+        inverted_index=inverted_index,
+        document_lengths=document_lengths,
+        top_n=top_n,
+    )
+    return bm25(
+        query=query,
+        language=language,
+        inverted_index=inverted_index,
+        document_lengths=document_lengths,
+        custom_weights=custom_weights,
+    )
+
+
+EPS = 1e-12
+
+
+def build_id2idx(hadith_ids: np.ndarray) -> dict[int, int]:
+    return {int(hid): i for i, hid in enumerate(hadith_ids)}
+
+
+def cosine_similarity_search(
+    query_embedding: np.ndarray,
+    corpus_embeddings_normed: np.ndarray,
+    hadith_ids: np.ndarray,
+    top_k: int = 50,
+) -> dict[int, float]:
+    """
+    corpus_embeddings_normed must already be L2-normalized row-wise.
+    query_embedding should be normalized inside this function.
+    """
+    q_norm = np.linalg.norm(query_embedding)
+    query_norm = query_embedding / (q_norm + EPS)
+
+    scores = corpus_embeddings_normed @ query_norm
+
+    top_k = min(top_k, len(scores))
+    top_k_indices = np.argpartition(-scores, top_k - 1)[:top_k]
+    top_k_indices = top_k_indices[np.argsort(-scores[top_k_indices])]
+
+    return {int(hadith_ids[idx]): float(scores[idx]) for idx in top_k_indices}
+
+
+def semantic_search_e5(
+    query: str,
+    language: str,
+    model,
+    corpus_embeddings_normed: np.ndarray,
+    hadith_ids: np.ndarray,
+    top_k: int = 50,
+) -> dict[int, float]:
+    """
+    Dense semantic retrieval using E5-style query formatting.
+    """
+    if language == "AR":
+        query_text = f"query: {normalize_arabic_text(dediac_ar(query))}"
+    else:
+        query_text = f"query: {query}"
+    query_embedding = model.encode([query_text])[0]
+
+    return cosine_similarity_search(
+        query_embedding=query_embedding,
+        corpus_embeddings_normed=corpus_embeddings_normed,
+        hadith_ids=hadith_ids,
+        top_k=top_k,
+    )
+
+
+def semantic_reranker(
+    query: str,
+    language: str,
+    candidate_ids: list[int],
+    model,
+    embeddings: np.ndarray,
+    hadith_ids: np.ndarray,
+    top_k: int = 50,
+) -> dict[int, float]:
+    if language == "AR":
+        e5_query = f"query: {normalize_arabic_text(dediac_ar(query))}"
+    else:
+        e5_query = f"query: {query}"
+    query_embedding = model.encode([e5_query])[0]
+    query_embedding = query_embedding / np.linalg.norm(query_embedding)
+    id2idx = build_id2idx(hadith_ids)
+    scores = {}
+    for hadith_id in candidate_ids:
+        idx = id2idx[int(hadith_id)]
+        doc_embedding = embeddings[idx]
+        doc_embedding = doc_embedding / np.linalg.norm(doc_embedding)
+        scores[hadith_id] = float(np.dot(query_embedding, doc_embedding))
+
+    return dict(sorted(scores.items(), key=lambda x: x[1], reverse=True)[:top_k])
+
+
+def rrf_fusion(ranked_lists: list[dict[int, int]], k: int = 60) -> dict[int, float]:
+    """
+    Each input dict is {hadith_id: rank}, where rank is 1-indexed.
+    """
+    scores: dict[int, float] = {}
+
+    for ranked_list in ranked_lists:
+        for hadith_id, rank in ranked_list.items():
+            scores[hadith_id] = scores.get(hadith_id, 0.0) + 1.0 / (k + rank)
+
+    return dict(sorted(scores.items(), key=lambda x: x[1], reverse=True))
+
+
+def bm25_semantic_rrf(
+    query: str,
+    language: str,
+    index,
+    doc_lengths,
+    corpus_embeddings_normed: np.ndarray,
+    hadith_ids: np.ndarray,
+    model,
+    candidate_k: int = 500,
+    top_k: int = 50,
+    rrf_k: int = 60,
+    judged_ids: set[int] | None = None,
+) -> dict[int, float]:
+    """
+    Returns fused RRF scores over BM25 and dense semantic search.
+    """
+
+    # BM25 full ranked list
+    bm25_scores = bm25(query, language, index, doc_lengths)
+    bm25_ranked_ids = list(bm25_scores.keys())
+
+    if judged_ids is not None:
+        bm25_ranked_ids = [hid for hid in bm25_ranked_ids if int(hid) in judged_ids]
+
+    bm25_ranked = {int(hid): rank + 1 for rank, hid in enumerate(bm25_ranked_ids[:candidate_k])}
+
+    # Dense ranked list
+    semantic_scores = semantic_search_e5(
+        query=query,
+        language=language,
+        model=model,
+        corpus_embeddings_normed=corpus_embeddings_normed,
+        hadith_ids=hadith_ids,
+        top_k=candidate_k,
+    )
+
+    semantic_ranked_ids = list(semantic_scores.keys())
+    if judged_ids is not None:
+        semantic_ranked_ids = [hid for hid in semantic_ranked_ids if int(hid) in judged_ids]
+
+    semantic_ranked = {
+        int(hid): rank + 1 for rank, hid in enumerate(semantic_ranked_ids[:candidate_k])
+    }
+
+    # Fuse
+    fused = rrf_fusion([bm25_ranked, semantic_ranked], k=rrf_k)
+
+    return dict(list(fused.items())[:top_k])

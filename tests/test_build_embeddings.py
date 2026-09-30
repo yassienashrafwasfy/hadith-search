@@ -35,19 +35,33 @@ class _Model:
         return np.ones((self.rows, 2))
 
 
-def test_encode_and_save_writes_npy(tmp_path, monkeypatch):
-    monkeypatch.setattr(be, "DATA_DIR", str(tmp_path))
-    out = be._encode_and_save(_Model(2), ["a", "b"], "English", 2)
+def test_encode_and_save_stores_vectors(_patched_paths):
+    import database
+    from models import HadithEmbedding
+
+    out = be._encode_and_save(_Model(2), ["a", "b"], "EN", [1, 3])
     assert out.shape == (2, 2)
-    assert np.load(tmp_path / "english_embeddings.npy").shape == (2, 2)
+    with database.get_sync_session() as session:
+        rows = {r.hadith_id: r for r in session.query(HadithEmbedding)}
+    assert sorted(rows) == [1, 3]
+    assert list(rows[1].english) == [1.0, 1.0] and rows[1].arabic is None
 
 
-def test_encode_and_save_detects_count_mismatch(tmp_path, monkeypatch):
-    monkeypatch.setattr(be, "DATA_DIR", str(tmp_path))
-    with pytest.raises(
-        ValueError, match="Arabic embedding count mismatch: 1 embeddings for 3 rows"
-    ):
-        be._encode_and_save(_Model(1), ["a"], "Arabic", 3)
+def test_storing_one_language_keeps_the_other(_patched_paths):
+    import database
+    from models import HadithEmbedding
+
+    be._encode_and_save(_Model(1), ["a"], "EN", [1])
+    be._encode_and_save(_Model(1), ["a"], "AR", [1])
+    be._encode_and_save(_Model(1), ["a"], "EN", [1])  # re-running replaces, not duplicates
+    with database.get_sync_session() as session:
+        (row,) = session.query(HadithEmbedding).all()
+    assert row.english is not None and row.arabic is not None
+
+
+def test_encode_and_save_detects_count_mismatch():
+    with pytest.raises(ValueError, match="AR embedding count mismatch: 1 embeddings for 3 rows"):
+        be._encode_and_save(_Model(1), ["a"], "AR", [1, 2, 3])
 
 
 def test_choose_device(monkeypatch):
@@ -73,14 +87,17 @@ def test_load_corpus_rejects_missing_matn(_patched_paths, monkeypatch):
         be._load_corpus()
 
 
-def test_run_end_to_end_with_fake_model(_patched_paths, tmp_path, monkeypatch):
-    monkeypatch.setattr(be, "DATA_DIR", str(tmp_path))
+def test_run_end_to_end_with_fake_model(_patched_paths, monkeypatch):
+    import database
+    from models import HadithEmbedding
+
     monkeypatch.setattr(be, "_choose_device", lambda: "cpu")
     monkeypatch.setattr(be, "SentenceTransformer", lambda name, device: _Model(3))
     be.run()
-    assert np.load(tmp_path / "hadith_ids.npy").tolist() == [1, 2, 3]
-    assert (tmp_path / "english_embeddings.npy").exists()
-    assert (tmp_path / "arabic_embeddings.npy").exists()
+    with database.get_sync_session() as session:
+        rows = session.query(HadithEmbedding).order_by(HadithEmbedding.hadith_id).all()
+    assert [r.hadith_id for r in rows] == [1, 2, 3]
+    assert all(r.english is not None and r.arabic is not None for r in rows)
 
 
 def test_run_aborts_without_device(monkeypatch):

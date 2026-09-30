@@ -1,10 +1,9 @@
 import json
 import os
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 
 from rest import API_PREFIX, href, json_response, link
-from scripts import get_hadiths_df
 
 router = APIRouter(prefix=f"{API_PREFIX}/benchmark", tags=["benchmark"])
 
@@ -52,7 +51,7 @@ def benchmark_stats(request: Request):
 
 
 @router.get("/qrels")
-def benchmark_qrels(request: Request, hadiths_df=Depends(get_hadiths_df)):
+def benchmark_qrels(request: Request):
     queries_data = load_json(QUERIES_PATH)
 
     enhanced = {}

@@ -3,30 +3,26 @@
 import types
 
 import numpy as np
-import pandas as pd
 import pytest
 
 import lazy_exports
 from features import load_features
+from models import Hadith
 from services import agreement, results
 
 
 def test_to_hadith_maps_every_column():
-    row = pd.Series(
-        {
-            "Book": "B",
-            "English_Text": "en",
-            "Arabic_Text": "ar",
-            "Chapter_Title_English": "cen",
-            "Chapter_Title_Arabic": "car",
-            "Normalized_Grade": "Sahih",
-            "Grade": "raw",
-            "Reference": "ref",
-            "In-book reference": "ibr",
-        }
+    row = Hadith(
+        id=5,
+        Book="B",
+        English_Text="en",
+        Arabic_Text="ar",
+        Chapter_Title_English="cen",
+        Chapter_Title_Arabic="car",
+        Normalized_Grade="Sahih",
+        Grade="raw",
     )
-    h = results._to_hadith(5, row)
-    assert h.model_dump() == {
+    assert results._to_hadith(row).model_dump() == {
         "hadith_id": 5,
         "book": "B",
         "hadith_en_text": "en",
@@ -35,34 +31,34 @@ def test_to_hadith_maps_every_column():
         "chapter_title_ar": "car",
         "grade": "Sahih",
         "raw_grade": "raw",
-        "reference": "ref",
-        "in_book_reference": "ibr",
+        "reference": "",
+        "in_book_reference": "",
     }
 
 
 def test_to_hadith_defaults():
-    h = results._to_hadith(1, pd.Series({}, dtype=object))
+    h = results._to_hadith(Hadith(id=1))
     assert (h.book, h.hadith_en_text, h.hadith_ar_text) == ("", "", "")
     assert (h.chapter_title_en, h.chapter_title_ar) == ("", "")
     assert (h.grade, h.raw_grade) == ("Unknown", "Unknown")
     assert (h.reference, h.in_book_reference) == ("", "")
 
 
-def test_build_results_skips_missing_but_keeps_going(_hadiths_df):
-    out = results.build_results({99: 1.0, 1: 0.5, 2: 0.4}, _hadiths_df)
+def test_build_results_skips_missing_but_keeps_going(_db_session):
+    out = results.build_results(_db_session, {99: 1.0, 1: 0.5, 2: 0.4})
     assert [r.hadith.hadith_id for r in out] == [1, 2]
     assert [r.score for r in out] == [0.5, 0.4]
 
 
-def test_build_results_filters_skip_only_the_failing_row(_hadiths_df):
-    out = results.build_results({2: 1.0, 1: 0.5, 3: 0.4}, _hadiths_df, book_filter="Bukhari")
+def test_build_results_filters_skip_only_the_failing_row(_db_session):
+    out = results.build_results(_db_session, {2: 1.0, 1: 0.5, 3: 0.4}, book_filter="Bukhari")
     assert [r.hadith.hadith_id for r in out] == [1, 3]
-    out = results.build_results({2: 1.0, 1: 0.5}, _hadiths_df, "Hasan", "Muslim")
+    out = results.build_results(_db_session, {2: 1.0, 1: 0.5}, "Hasan", "Muslim")
     assert [r.hadith.hadith_id for r in out] == [2]
-    assert results.build_results({2: 1.0}, _hadiths_df, "Hasan", "Bukhari") == []
+    assert results.build_results(_db_session, {2: 1.0}, "Hasan", "Bukhari") == []
 
 
-def test_build_results_default_top_k(_hadiths_df):
+def test_build_results_default_top_k():
     assert results.DEFAULT_TOP_K == 500
 
 
@@ -207,37 +203,6 @@ def test_app_mode_default_and_explicit():
 
 
 class TestRetrievalService:
-    def test_default_context_wires_real_accessors(self, monkeypatch):
-        import scripts
-        from services import retrieval
-
-        marks = {
-            n: (lambda n=n: n)
-            for n in (
-                "get_english_inverted_index",
-                "get_arabic_inverted_index",
-                "get_document_lengths",
-                "get_english_embeddings",
-                "get_arabic_embeddings",
-                "get_hadith_ids",
-                "get_model",
-                "get_hadiths_df",
-            )
-        }
-        for name, fn in marks.items():
-            monkeypatch.setitem(scripts.__dict__, name, fn)
-        monkeypatch.setitem(scripts.__dict__, "get_hadith", lambda hid: hid * 2)
-        ctx = retrieval.default_search_context()
-        assert ctx.inverted_index("EN") == "get_english_inverted_index"
-        assert ctx.inverted_index("AR") == "get_arabic_inverted_index"
-        assert ctx.embeddings("EN") == "get_english_embeddings"
-        assert ctx.embeddings("AR") == "get_arabic_embeddings"
-        assert ctx.doc_lengths() == "get_document_lengths"
-        assert ctx.hadith_ids() == "get_hadith_ids"
-        assert ctx.model() == "get_model"
-        assert ctx.hadiths_df() == "get_hadiths_df"
-        assert ctx.get_hadith(4) == 8
-
     def test_registry_slugs_and_requirements(self):
         from services.retrieval import SYSTEMS
 
@@ -255,20 +220,12 @@ class TestRetrievalService:
         }
         assert all(SYSTEMS[s].slug == s for s in SYSTEMS)
 
-    def test_run_search_reports_counts(self, _hadiths_df):
+    def test_run_search_reports_counts(self, _db_session):
         from models import SearchRequest
         from services.retrieval import RetrievalSystem, SearchContext, run_search
 
         system = RetrievalSystem("x", lambda ctx, q, lang: {1: 2.0, 3: 1.0} if lang == "EN" else {})
-        ctx = SearchContext(
-            inverted_index=lambda _lang: {},
-            embeddings=lambda _lang: None,
-            doc_lengths=dict,
-            hadith_ids=list,
-            model=lambda: None,
-            hadiths_df=lambda: _hadiths_df,
-            get_hadith=lambda h: {},
-        )
+        ctx = SearchContext(session=_db_session, model=lambda: None)
         res = run_search(system, ctx, SearchRequest(query="q", lang="en"))
         assert res.number_of_results == 2
         assert [r.score for r in res.results] == [2.0, 1.0]

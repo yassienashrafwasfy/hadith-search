@@ -11,22 +11,20 @@ def _run_step(label: str, load: Callable[[], object]) -> None:
     print("done")
 
 
-def _sparse_steps() -> list[tuple[str, Callable[[], object]]]:
-    from scripts import (
-        get_arabic_inverted_index,
-        get_document_lengths,
-        get_english_inverted_index,
-        get_hadith_ids,
-        get_hadiths_df,
-    )
+def check_index() -> None:
+    """Warn when the search index tables are empty (run the build scripts first)."""
+    from sqlalchemy import func, select
 
-    return [
-        ("English inverted index", get_english_inverted_index),
-        ("Arabic inverted index", get_arabic_inverted_index),
-        ("Document lengths", get_document_lengths),
-        ("Hadith IDs", get_hadith_ids),
-        ("Hadiths DataFrame", get_hadiths_df),
-    ]
+    from database import get_sync_session
+    from models import Posting
+
+    with get_sync_session() as session:
+        if session.scalar(select(func.count()).select_from(Posting).limit(1)) == 0:
+            print("WARNING: no postings in the database; searches will be empty. ", end="")
+
+
+def _index_steps() -> list[tuple[str, Callable[[], object]]]:
+    return [("Search index in PostgreSQL", check_index)]
 
 
 def _model_steps(features: Features) -> list[tuple[str, Callable[[], object]]]:
@@ -42,8 +40,8 @@ def preload_resources(features: Features) -> None:
     if not features.search:
         print("Search disabled: skipping model/index preload")
         return
-    print("Loading indices and models at startup...")
-    for label, load in _sparse_steps() + _model_steps(features):
+    print("Checking the search index and loading models at startup...")
+    for label, load in _index_steps() + _model_steps(features):
         _run_step(label, load)
     if features.dense_retrieval and not features.eager_model:
         print("Dense retrieval enabled: lazy-loading E5 model on first request")

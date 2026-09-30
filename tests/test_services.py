@@ -2,19 +2,25 @@ from services import build_results, overall_summary, summarize_query
 from services.agreement import QueryAgreement
 
 
-def test_build_results_filters_and_orders(_hadiths_df):
-    out = build_results({1: 0.9, 2: 0.5, 3: 0.7}, _hadiths_df, None, "Bukhari")
+def test_build_results_filters_and_orders(_db_session):
+    out = build_results(_db_session, {1: 0.9, 2: 0.5, 3: 0.7}, None, "Bukhari")
     assert [r.hadith.hadith_id for r in out] == [1, 3]
-    out = build_results({1: 0.9, 2: 0.5}, _hadiths_df, "Hasan", None)
+    out = build_results(_db_session, {1: 0.9, 2: 0.5}, "Hasan", None)
     assert [r.hadith.hadith_id for r in out] == [2]
 
 
-def test_build_results_skips_unknown_ids(_hadiths_df):
-    assert build_results({99: 1.0}, _hadiths_df, None, None) == []
+def test_build_results_keeps_the_ranking_order(_db_session):
+    out = build_results(_db_session, {3: 0.9, 1: 0.5, 2: 0.1})
+    assert [r.hadith.hadith_id for r in out] == [3, 1, 2]
+    assert out[0].hadith.book == "Bukhari" and out[0].score == 0.9
 
 
-def test_build_results_top_k(_hadiths_df):
-    assert len(build_results({1: 3, 2: 2, 3: 1}, _hadiths_df, None, None, top_k=2)) == 2
+def test_build_results_skips_unknown_ids(_db_session):
+    assert build_results(_db_session, {99: 1.0}, None, None) == []
+
+
+def test_build_results_top_k(_db_session):
+    assert len(build_results(_db_session, {1: 3, 2: 2, 3: 1}, None, None, top_k=2)) == 2
 
 
 def test_summarize_needs_two_annotators():

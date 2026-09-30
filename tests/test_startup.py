@@ -17,26 +17,25 @@ def test_model_steps_need_dense_and_eager():
     assert "e5" in label and callable(load)
 
 
-def test_sparse_steps_cover_indices():
-    labels = [label for label, _ in startup._sparse_steps()]
-    assert labels == [
-        "English inverted index",
-        "Arabic inverted index",
-        "Document lengths",
-        "Hadith IDs",
-        "Hadiths DataFrame",
-    ]
+def test_index_step_warns_when_the_index_is_empty(_patched_paths, capsys):
+    startup.check_index()
+    assert "no postings" in capsys.readouterr().out
+
+
+def test_index_step_is_quiet_when_the_index_is_built(_search_index, capsys):
+    startup.check_index()
+    assert capsys.readouterr().out == ""
 
 
 def test_preload_skipped_when_search_disabled(monkeypatch, capsys):
-    monkeypatch.setattr(startup, "_sparse_steps", lambda: pytest.fail("must not load"))
+    monkeypatch.setattr(startup, "_index_steps", lambda: pytest.fail("must not load"))
     startup.preload_resources(Features(search=False))
     assert "Search disabled" in capsys.readouterr().out
 
 
 def test_preload_runs_every_step(monkeypatch, capsys):
     ran = []
-    monkeypatch.setattr(startup, "_sparse_steps", lambda: [("a", lambda: ran.append("a"))])
+    monkeypatch.setattr(startup, "_index_steps", lambda: [("a", lambda: ran.append("a"))])
     monkeypatch.setattr(startup, "_model_steps", lambda f: [("m", lambda: ran.append("m"))])
     startup.preload_resources(Features(dense_retrieval=True, eager_model=False))
     assert ran == ["a", "m"]

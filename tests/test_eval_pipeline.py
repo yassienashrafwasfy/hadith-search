@@ -83,25 +83,53 @@ def test_print_best_systems(capsys):
 class _Res:
     """Minimal EvalResources stand-in for the simulated pipelines."""
 
+    session = "session"
+    model = "model"
     eval_ids = {1, 3}
-    indexes = {"EN": {"prayer": [(1, 1), (2, 1), (3, 1)]}}
-    doc_lengths = {i: (3, 3) for i in range(1, 40)}
-    texts = {"EN": {1: "a", 3: "c"}}
 
 
-def test_bm25_candidates_keep_only_eval_pool(monkeypatch):
-    monkeypatch.setattr("scripts.bm25", lambda q, lang, idx, _dl: {1: 2.0, 2: 9.0, 3: 5.0})
-    assert ep._bm25_candidates(_Res, "prayer", "EN") == [3, 1]
-
-
-def test_cross_encoder_gets_candidate_texts(monkeypatch):
+def test_bm25_candidates_are_restricted_to_the_eval_pool(monkeypatch):
     seen = {}
-    monkeypatch.setattr("scripts.bm25", lambda q, lang, idx, _dl: {1: 2.0, 2: 9.0, 3: 5.0})
 
-    def fake(query, language, candidate_ids, hadith_texts):
-        seen.update(candidates=candidate_ids, texts=hadith_texts)
+    def fake(session, query, lang, restrict, limit):
+        seen.update(session=session, query=query, lang=lang, restrict=restrict, limit=limit)
+        return {3: 5.0, 1: 2.0}
+
+    monkeypatch.setattr(ep.ranking, "bm25", fake)
+    assert ep._bm25_candidates(_Res, "prayer", "EN") == [3, 1]
+    assert seen == {
+        "session": "session",
+        "query": "prayer",
+        "lang": "EN",
+        "restrict": {1, 3},
+        "limit": ep.BM25_CANDIDATES,
+    }
+
+
+def test_cross_encoder_gets_the_bm25_candidates(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(ep.ranking, "bm25", lambda *a, **k: {3: 5.0, 1: 2.0})
+
+    def fake(session, query, lang, ids, top_k):
+        seen.update(ids=ids, top_k=top_k)
         return {1: 1.0}
 
-    monkeypatch.setattr("scripts.cross_encoder_rerank", fake)
+    monkeypatch.setattr(ep.ranking, "cross_encode", fake)
     assert ep.simulated_pipeline(_Res, "prayer", "EN", "cross-encoder") == {1: 1.0}
-    assert seen == {"candidates": [3, 1], "texts": {3: "c", 1: "a"}}
+    assert seen == {"ids": [3, 1], "top_k": 100}
+
+
+def test_every_system_is_registered():
+    assert set(ep.build_systems(_Res)) == {
+        "BM25",
+        "TF_IDF",
+        "Term Overlap",
+        "BM25_ROCCHIO",
+        "BM25_TF_IDF",
+        "BM25_TF_IDF_ROCCHIO",
+        "COSINE_SIMILARITY",
+        "BM25_SEMANTIC_RERANK",
+        "BM25_RRF",
+        "BM25_CROSS_ENCODER",
+        "FINAL_PIPELINE",
+    }

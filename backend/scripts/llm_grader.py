@@ -198,22 +198,9 @@ def grade_all(queries_path, output_path, pool_fn=None, pool_depth=100, resume=Tr
 if __name__ == "__main__":
     import argparse
 
-    from camel_tools.utils.dediac import dediac_ar
-
-    from scripts import (
-        bm25,
-        bm25_with_expansion,
-        cosine_similarity_search,
-        get_arabic_embeddings,
-        get_arabic_inverted_index,
-        get_document_lengths,
-        get_english_embeddings,
-        get_english_inverted_index,
-        get_hadith_ids,
-        get_model,
-        normalize_arabic_text,
-        tf_idf,
-    )
+    from database import get_sync_session
+    from scripts import get_model
+    from services import ranking
 
     parser = argparse.ArgumentParser(description="LLM grading pipeline for training queries")
     parser.add_argument(
@@ -294,43 +281,21 @@ if __name__ == "__main__":
         print(f"Max workers: {LLM_MAX_WORKERS}")
         print()
 
-        print("Loading retrieval resources...")
-        en_index = get_english_inverted_index()
-        ar_index = get_arabic_inverted_index()
-        doc_lengths = get_document_lengths()
-        en_embeddings = get_english_embeddings()
-        ar_embeddings = get_arabic_embeddings()
-        hadith_ids = get_hadith_ids()
+        print("Loading model...")
         model = get_model()
-        print("Resources loaded.")
+        print("Model loaded.")
 
         def pool_fn(query, language, per_algo_size):
-            index = en_index if language == "EN" else ar_index
-            embeddings = en_embeddings if language == "EN" else ar_embeddings
-
-            bm25_scores = bm25(query, language, index, doc_lengths)
-            bm25_top = list(bm25_scores.keys())[:per_algo_size]
-
-            tfidf_scores = tf_idf(query, language, index, doc_lengths)
-            tfidf_top = list(tfidf_scores.keys())[:per_algo_size]
-
-            if language == "AR":
-                e5_query = f"query: {normalize_arabic_text(dediac_ar(query))}"
-            else:
-                e5_query = f"query: {query}"
-            query_emb = model.encode([e5_query])[0]
-            cosine_scores = cosine_similarity_search(
-                query_emb, embeddings, hadith_ids, top_k=per_algo_size
-            )
-            cosine_top = list(cosine_scores.keys())[:per_algo_size]
-
-            bm25_rocchio = bm25_with_expansion(query, language, index, doc_lengths, get_hadith)
-            rocchio_top = list(bm25_rocchio.keys())[:per_algo_size]
-
-            combined = set(bm25_top) | set(tfidf_top) | set(cosine_top) | set(rocchio_top)
+            with get_sync_session() as session:
+                combined = set()
+                for scores in (
+                    ranking.bm25(session, query, language, limit=per_algo_size),
+                    ranking.tf_idf(session, query, language, limit=per_algo_size),
+                    ranking.cosine_search(session, query, language, model, top_k=per_algo_size),
+                    ranking.bm25_prf(session, query, language),
+                ):
+                    combined |= set(list(scores)[:per_algo_size])
             return list(combined)
-
-        from scripts import get_hadith
 
         grade_all(
             queries_path=args.queries,

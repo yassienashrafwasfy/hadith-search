@@ -1,10 +1,17 @@
-import os
-import pickle
+"""Build the BM25 index (terms, postings, document lengths) in PostgreSQL from the matn columns."""
+
 import time
+from collections import Counter
 
 import pandas as pd
+from sqlalchemy import delete, insert
+from sqlalchemy.orm import Session
 
-from database import read_hadiths_df
+from database import get_sync_session, init_schema_sync, read_hadiths_df
+from models import HadithLength, Posting, Term
+
+LANGUAGES = {"EN": "Preprocessed_English_Matn", "AR": "Preprocessed_Arabic_Matn"}
+INSERT_BATCH = 20_000
 
 
 def has_text(value):
@@ -14,86 +21,70 @@ def has_text(value):
     return bool(text) and text.lower() not in {"nan", "none", "null"}
 
 
-def create_term_frequency_dict(text):
-    terms = text.split()
-    term_frequency_dict = {}
-    for term in terms:
-        if term in term_frequency_dict:
-            term_frequency_dict[term] += 1
-        else:
-            term_frequency_dict[term] = 1
-    return term_frequency_dict
+def _matn_terms(row, language):
+    column = LANGUAGES[language]
+    if not has_text(row.get(column)):
+        raise ValueError(
+            f"Hadith id {row['id']} has empty {column}; refusing to build matn-only index"
+        )
+    return str(row[column]).strip().split()
 
 
-def build_inverted_index(df, data_dir):
-    english_inverted_index = {}
-    arabic_inverted_index = {}
-    document_lengths = {}
-
+def build_index_rows(df):
+    """(lengths, terms, postings) row dicts for every hadith in `df`."""
+    lengths, postings = [], []
+    frequencies = {language: Counter() for language in LANGUAGES}  # term -> document frequency
     for _, row in df.iterrows():
-        matn_en = row.get("Preprocessed_English_Matn")
-        if not has_text(matn_en):
-            raise ValueError(
-                f"Hadith id {row['id']} has empty Preprocessed_English_Matn; refusing to build matn-only index"
-            )
-        english_text = str(matn_en).strip()
+        hadith_id = int(row["id"])
+        terms = {language: _matn_terms(row, language) for language in LANGUAGES}
+        lengths.append(
+            {
+                "hadith_id": hadith_id,
+                "english_len": len(terms["EN"]),
+                "arabic_len": len(terms["AR"]),
+            }
+        )
+        for language, tokens in terms.items():
+            for term, tf in Counter(tokens).items():
+                postings.append(
+                    {"language": language, "term": term, "hadith_id": hadith_id, "tf": tf}
+                )
+                frequencies[language][term] += 1
+    term_rows = [
+        {"language": language, "term": term, "df": df_count}
+        for language, counter in frequencies.items()
+        for term, df_count in counter.items()
+    ]
+    return lengths, term_rows, postings
 
-        matn_ar = row.get("Preprocessed_Arabic_Matn")
-        if not has_text(matn_ar):
-            raise ValueError(
-                f"Hadith id {row['id']} has empty Preprocessed_Arabic_Matn; refusing to build matn-only index"
-            )
-        arabic_text = str(matn_ar).strip()
 
-        english_terms = english_text.split()
-        arabic_terms = arabic_text.split()
+def _insert_in_batches(session: Session, model, rows):
+    for start in range(0, len(rows), INSERT_BATCH):
+        session.execute(insert(model), rows[start : start + INSERT_BATCH])
 
-        document_lengths[row["id"]] = (len(arabic_terms), len(english_terms))
 
-        arabic_term_freq = create_term_frequency_dict(arabic_text)
-        english_term_freq = create_term_frequency_dict(english_text)
-
-        for term in english_term_freq:
-            if term not in english_inverted_index:
-                english_inverted_index[term] = [(row["id"], english_term_freq[term])]
-            else:
-                english_inverted_index[term].append((row["id"], english_term_freq[term]))
-
-        for term in arabic_term_freq:
-            if term not in arabic_inverted_index:
-                arabic_inverted_index[term] = [(row["id"], arabic_term_freq[term])]
-            else:
-                arabic_inverted_index[term].append((row["id"], arabic_term_freq[term]))
-
-    for term in english_inverted_index:
-        english_inverted_index[term] = sorted(english_inverted_index[term], key=lambda x: x[0])
-
-    for term in arabic_inverted_index:
-        arabic_inverted_index[term] = sorted(arabic_inverted_index[term], key=lambda x: x[0])
-
-    with open(os.path.join(data_dir, "english_inverted_index.pkl"), "wb") as f:
-        pickle.dump(english_inverted_index, f)
-
-    with open(os.path.join(data_dir, "arabic_inverted_index.pkl"), "wb") as f:
-        pickle.dump(arabic_inverted_index, f)
-
-    with open(os.path.join(data_dir, "document_lengths.pkl"), "wb") as f:
-        pickle.dump(document_lengths, f)
-
-    return len(english_inverted_index), len(arabic_inverted_index)
+def write_index(session: Session, df) -> tuple[int, int]:
+    """Replace the stored index with one built from `df`; returns (English, Arabic) term counts."""
+    lengths, terms, postings = build_index_rows(df)
+    for model in (Posting, Term, HadithLength):
+        session.execute(delete(model))
+    _insert_in_batches(session, HadithLength, lengths)
+    _insert_in_batches(session, Term, terms)
+    _insert_in_batches(session, Posting, postings)
+    session.commit()
+    return tuple(sum(1 for t in terms if t["language"] == language) for language in LANGUAGES)
 
 
 def run():
-    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-    DATA_DIR = os.path.join(BASE_DIR, "..", "data")
-
+    init_schema_sync()
     df = read_hadiths_df()
 
     print(f"Loaded {len(df)} hadiths")
     print("Indexing Preprocessed_English_Matn / Preprocessed_Arabic_Matn only...")
 
     start = time.perf_counter()
-    en_terms, ar_terms = build_inverted_index(df, DATA_DIR)
+    with get_sync_session() as session:
+        en_terms, ar_terms = write_index(session, df)
     elapsed = time.perf_counter() - start
 
     print(f"English inverted index: {en_terms} unique terms")

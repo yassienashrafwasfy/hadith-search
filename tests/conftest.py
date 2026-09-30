@@ -142,14 +142,17 @@ def _fake_model() -> _FakeModel:
 
 @pytest.fixture
 def _mock_preprocess(monkeypatch):
-    """Replace NLTK/CAMeL preprocessing in scripts.search with lowercase whitespace split."""
-    import scripts.search as s
+    """Replace NLTK/CAMeL preprocessing in the ranking code with lowercase whitespace split."""
+    import _legacy_search
+
+    from services import ranking
 
     def fake(text):
         return " ".join(text.lower().split())
 
-    monkeypatch.setattr(s, "preprocess_english", fake)
-    monkeypatch.setattr(s, "preprocess_arabic", fake)
+    for module in (ranking, _legacy_search):
+        monkeypatch.setattr(module, "preprocess_english", fake)
+        monkeypatch.setattr(module, "preprocess_arabic", fake)
     return fake
 
 
@@ -257,6 +260,15 @@ async def _patched_paths(monkeypatch, _data_dir, _pg_schema, _hadiths_df):
 
 
 @pytest_asyncio.fixture
+async def _db_session(_patched_paths):
+    """A sync session on the test schema holding the 3-hadith corpus."""
+    import database
+
+    with database.get_sync_session() as session:
+        yield session
+
+
+@pytest_asyncio.fixture
 async def _client(_patched_paths):
     """App with the annotation/auth/kv/benchmark routers only (no model or index loading)."""
     from rest import install_error_handlers
@@ -308,32 +320,47 @@ async def _kv_rows(_patched_paths):
 
 
 @pytest_asyncio.fixture
-async def _search_client(
-    _patched_paths,
-    _hadiths_df,
-    _inverted_index,
-    _document_lengths,
-    _hadith_ids,
-    _embeddings,
-    _fake_model,
-    _mock_preprocess,
-    _jina_env,
-    monkeypatch,
-):
-    """App with every search endpoint; all data/model dependencies injected as fakes."""
+async def _search_index(_patched_paths, _hadiths_df, _embeddings):
+    """The 3-hadith corpus plus filler hadiths (so BM25 idf stays positive), the BM25 index
+    and the embeddings, all in the test schema."""
+    import database
+    from models import HadithEmbedding
+    from scripts.build_inverted_index import write_index
+
+    filler = {
+        "id": 0,
+        "Book": "Filler",
+        "Preprocessed_English_Matn": "x y z",
+        "Preprocessed_Arabic_Matn": "x y z",
+    }
+    with database.get_sync_session() as session:
+        session.execute(insert(Hadith), [{**filler, "id": i} for i in range(100, 110)])
+        session.commit()
+        write_index(session, database.read_hadiths_df())
+        session.execute(
+            insert(HadithEmbedding),
+            [
+                {"hadith_id": hid, "english": vec.tolist(), "arabic": vec.tolist()}
+                for hid, vec in zip((1, 2, 3), _embeddings)
+            ],
+        )
+        session.commit()
+
+
+@pytest_asyncio.fixture
+async def _search_client(_search_index, _fake_model, _mock_preprocess, _jina_env, monkeypatch):
+    """App with every search endpoint over the test schema; model and Jina are fakes."""
+    from collections.abc import Iterator
+
+    import database
     from features import Features
     from routers.search import get_search_context, make_search_router
     from services.retrieval import SearchContext
 
-    ctx = SearchContext(
-        inverted_index=lambda lang: _inverted_index,
-        embeddings=lambda lang: _embeddings,
-        doc_lengths=lambda: _document_lengths,
-        hadith_ids=lambda: _hadith_ids,
-        model=lambda: _fake_model,
-        hadiths_df=lambda: _hadiths_df,
-        get_hadith=lambda hid: _hadiths_df.loc[hid].to_dict(),
-    )
+    def context() -> Iterator[SearchContext]:
+        with database.get_sync_session() as session:
+            yield SearchContext(session=session, model=lambda: _fake_model)
+
     from rest import install_error_handlers
 
     app = FastAPI()
@@ -341,7 +368,7 @@ async def _search_client(
     app.include_router(
         make_search_router(Features(search=True, dense_retrieval=True, cross_encoder=True))
     )
-    app.dependency_overrides[get_search_context] = lambda: ctx
+    app.dependency_overrides[get_search_context] = context
     # Jina API replaced: score by document order, no network
     import scripts.search as s
 

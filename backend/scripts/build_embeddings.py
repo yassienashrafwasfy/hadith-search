@@ -1,12 +1,11 @@
 import os
 import sys
 
-import numpy as np
 import pandas as pd
 import torch
 from sentence_transformers import SentenceTransformer
 
-from database import read_hadiths_df
+from database import get_sync_session, init_schema_sync, read_hadiths_df
 from models import Hadith
 
 BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -18,6 +17,7 @@ if BACKEND_DIR not in sys.path:
 from camel_tools.utils.dediac import dediac_ar
 
 from scripts import normalize_arabic_text
+from scripts.embedding_store import store_embeddings
 
 
 def has_text(value):
@@ -39,7 +39,6 @@ def normalize_arabic_passage(text):
 EMBEDDING_BATCH_SIZE = 32
 MODEL_NAME = "intfloat/multilingual-e5-large"
 MAX_REPORTED_IDS = 20
-DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data")
 
 
 def _choose_device():
@@ -94,14 +93,16 @@ def _passages(df, language, prepare):
     return texts
 
 
-def _encode_and_save(model, texts, language, expected_rows):
+def _encode_and_save(model, texts, language, hadith_ids):
+    """Encode `texts` and upsert the vectors into PostgreSQL; `language` is "EN" or "AR"."""
     embeddings = model.encode(texts, batch_size=EMBEDDING_BATCH_SIZE, show_progress_bar=True)
-    if len(embeddings) != expected_rows:
+    if len(embeddings) != len(hadith_ids):
         raise ValueError(
             f"{language} embedding count mismatch: {len(embeddings)} embeddings "
-            f"for {expected_rows} rows"
+            f"for {len(hadith_ids)} rows"
         )
-    np.save(os.path.join(DATA_DIR, f"{language.lower()}_embeddings.npy"), embeddings)
+    with get_sync_session() as session:
+        store_embeddings(session, hadith_ids, embeddings, language)
     print(f"{language} embeddings saved")
     return embeddings
 
@@ -110,21 +111,22 @@ def run():
     device = _choose_device()
     if device is None:
         return
+    init_schema_sync()
     df = _load_corpus()
+    ids = df["id"].astype(int).tolist()
     model = SentenceTransformer(MODEL_NAME, device=device)
 
     # English: raw matn only (no chapter). E5 expects natural text; the query
     # path uses `query: {query}` with no preprocessing, so passages stay raw too.
     print("Generating English embeddings (passage: [Matn])...")
-    _encode_and_save(model, _passages(df, "English", str), "English", len(df))
+    _encode_and_save(model, _passages(df, "English", str), "EN", ids)
 
     # Arabic: raw matn only (no chapter), normalized to mirror the query path
     # in search.py: `query: {normalize_arabic_text(dediac_ar(query))}`.
     print("Generating Arabic embeddings (passage: [normalized Matn])...")
     ar_texts = _passages(df, "Arabic", normalize_arabic_passage)
-    _encode_and_save(model, ar_texts, "Arabic", len(df))
+    _encode_and_save(model, ar_texts, "AR", ids)
 
-    np.save(os.path.join(DATA_DIR, "hadith_ids.npy"), df["id"].values)
     print("Done")
 
 

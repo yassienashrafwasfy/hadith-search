@@ -9,10 +9,8 @@ import os
 from dataclasses import dataclass
 from datetime import datetime
 
-import numpy as np
-
-from database import read_hadiths_df
-from models import Hadith
+from database import get_sync_session
+from services import ranking
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data")
 
@@ -55,89 +53,43 @@ def eval_pool_ids(relevant_list):
 
 
 class EvalResources:
-    """Indices, embeddings (restricted to the eval pool) and texts shared by every system."""
+    """A database session, the E5 model and the eval pool shared by every system."""
 
-    def __init__(self, eval_ids):
-        from scripts import (
-            get_arabic_embeddings,
-            get_arabic_inverted_index,
-            get_document_lengths,
-            get_english_embeddings,
-            get_english_inverted_index,
-            get_hadith_ids,
-            get_model,
-        )
+    def __init__(self, eval_ids, session):
+        from scripts import get_model
 
-        hadiths_df = read_hadiths_df(Hadith.id, Hadith.English_Text, Hadith.Arabic_Text)
-        hadiths_df = hadiths_df.set_index("id")
+        self.session = session
         self.eval_ids = eval_ids
-        self.texts = {
-            "EN": hadiths_df["English_Text"].to_dict(),
-            "AR": hadiths_df["Arabic_Text"].to_dict(),
-        }
-        print("Loading indexes and models...")
-        self.indexes = {"EN": get_english_inverted_index(), "AR": get_arabic_inverted_index()}
-        self.doc_lengths = get_document_lengths()
+        print("Loading model...")
         self.model = get_model()
-        hadith_ids = get_hadith_ids()
-        mask = np.array([hid in eval_ids for hid in hadith_ids])
-        self.hadith_ids = hadith_ids[mask]
-        self.embeddings = {
-            "EN": get_english_embeddings()[mask],
-            "AR": get_arabic_embeddings()[mask],
-        }
-        print(f"hadith_ids:       {hadith_ids.shape}")
-        print(f"eval pool size:   {mask.sum()}")
+        print(f"eval pool size:   {len(eval_ids)}")
 
 
 def _bm25_candidates(res, query, language):
-    from scripts import bm25
-
-    scores = bm25(query, language, res.indexes[language], res.doc_lengths)
-    ranked = sorted(scores, key=scores.get, reverse=True)
-    return [doc_id for doc_id in ranked if doc_id in res.eval_ids]
+    """BM25 ranking cut to the eval pool, best first."""
+    return list(
+        ranking.bm25(res.session, query, language, restrict=res.eval_ids, limit=BM25_CANDIDATES)
+    )
 
 
 def _bi_encoder(res, query, language):
-    from scripts import semantic_reranker
-
-    return semantic_reranker(
-        query=query,
-        language=language,
-        candidate_ids=_bm25_candidates(res, query, language)[:BM25_CANDIDATES],
-        model=res.model,
-        embeddings=res.embeddings[language],
-        hadith_ids=res.hadith_ids,
+    return ranking.semantic_rerank(
+        res.session,
+        query,
+        language,
+        _bm25_candidates(res, query, language),
+        res.model,
         top_k=BM25_CANDIDATES,
     )
 
 
 def _rrf(res, query, language):
-    from scripts import bm25_semantic_rrf
-
-    return bm25_semantic_rrf(
-        query=query,
-        language=language,
-        index=res.indexes[language],
-        judged_ids=res.eval_ids,
-        doc_lengths=res.doc_lengths,
-        corpus_embeddings_normed=res.embeddings[language],
-        hadith_ids=res.hadith_ids,
-        model=res.model,
-    )
+    return ranking.bm25_dense_rrf(res.session, query, language, res.model, restrict=res.eval_ids)
 
 
 def _cross_encoder(res, query, language):
-    from scripts import cross_encoder_rerank
-
     candidates = _bm25_candidates(res, query, language)[:CROSS_ENCODER_CANDIDATES]
-    texts = res.texts[language]
-    return cross_encoder_rerank(
-        query=query,
-        language=language,
-        candidate_ids=candidates,
-        hadith_texts={hid: texts[hid] for hid in candidates if hid in texts},
-    )
+    return ranking.cross_encode(res.session, query, language, candidates, top_k=100)
 
 
 _SIMULATED = {"bi-encoder": _bi_encoder, "rrf": _rrf, "cross-encoder": _cross_encoder}
@@ -150,51 +102,30 @@ def simulated_pipeline(res, query, language, model_type):
 
 
 def _lexical_systems(res):
-    from scripts import (
-        bm25,
-        bm25_tfidf_hybrid,
-        bm25_with_expansion,
-        get_hadith,
-        hybrid_with_expansion,
-        ranked_term_overlap,
-        tf_idf,
-    )
-
-    def idx(lang):
-        return res.indexes[lang]
-
+    session = res.session
     return {
-        "BM25": lambda q, lang: bm25(q, lang, idx(lang), res.doc_lengths),
-        "TF_IDF": lambda q, lang: tf_idf(q, lang, idx(lang), res.doc_lengths),
-        "Term Overlap": lambda q, lang: ranked_term_overlap(q, lang, idx(lang)),
-        "BM25_ROCCHIO": lambda q, lang: bm25_with_expansion(
-            q, lang, idx(lang), res.doc_lengths, get_hadith
-        ),
-        "BM25_TF_IDF": lambda q, lang: bm25_tfidf_hybrid(q, lang, idx(lang), res.doc_lengths),
-        "BM25_TF_IDF_ROCCHIO": lambda q, lang: hybrid_with_expansion(
-            q, lang, idx(lang), res.doc_lengths, get_hadith
-        ),
+        "BM25": lambda q, lang: ranking.bm25(session, q, lang),
+        "TF_IDF": lambda q, lang: ranking.tf_idf(session, q, lang),
+        "Term Overlap": lambda q, lang: ranking.term_overlap(session, q, lang),
+        "BM25_ROCCHIO": lambda q, lang: ranking.bm25_prf(session, q, lang),
+        "BM25_TF_IDF": lambda q, lang: ranking.bm25_tfidf_hybrid(session, q, lang),
+        "BM25_TF_IDF_ROCCHIO": lambda q, lang: ranking.hybrid_prf(session, q, lang),
     }
 
 
 def _dense_systems(res):
-    from scripts import semantic_search_e5
-
     return {
-        "COSINE_SIMILARITY": lambda q, lang: semantic_search_e5(
-            query=q,
-            language=lang,
-            model=res.model,
-            corpus_embeddings_normed=res.embeddings[lang],
-            hadith_ids=res.hadith_ids,
-            top_k=COSINE_TOP_K,
+        "COSINE_SIMILARITY": lambda q, lang: ranking.dense_search(
+            res.session,
+            ranking.encode_query(res.model, q, lang),
+            lang,
+            COSINE_TOP_K,
+            restrict=res.eval_ids,
         )
     }
 
 
 def _hybrid_systems(res):
-    from scripts import final_search_pipeline
-
     simulated = {
         "BM25_SEMANTIC_RERANK": "bi-encoder",
         "BM25_RRF": "rrf",
@@ -204,16 +135,8 @@ def _hybrid_systems(res):
         name: (lambda q, lang, kind=kind: simulated_pipeline(res, q, lang, kind))
         for name, kind in simulated.items()
     }
-    systems["FINAL_PIPELINE"] = lambda q, lang: final_search_pipeline(
-        query=q,
-        language=lang,
-        index=res.indexes[lang],
-        doc_lengths=res.doc_lengths,
-        embeddings=res.embeddings[lang],
-        hadith_ids=res.hadith_ids,
-        model=res.model,
-        eval_ids=res.eval_ids,
-        texts_dict=res.texts[lang],
+    systems["FINAL_PIPELINE"] = lambda q, lang: ranking.final_pipeline(
+        res.session, q, lang, res.model, restrict=res.eval_ids
     )
     return systems
 
@@ -310,8 +233,9 @@ def run_pipeline(names, k=20):
     query_ids, _queries, relevant_list, _languages = eval_inputs
     eval_ids = eval_pool_ids(relevant_list)
 
-    systems = build_systems(EvalResources(eval_ids))
-    all_results = evaluate_systems(systems, eval_inputs, eval_ids, k)
+    with get_sync_session() as session:
+        systems = build_systems(EvalResources(eval_ids, session))
+        all_results = evaluate_systems(systems, eval_inputs, eval_ids, k)
 
     graded_qids = {qid for qid, rel in zip(query_ids, relevant_list) if rel}
     filtered = filter_graded_queries(all_results, graded_qids)

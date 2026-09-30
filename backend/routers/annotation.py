@@ -1,17 +1,19 @@
 import json
 import os
+from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
-from database import get_session, init_annotation_tables, now_iso
+from database import get_session, now_iso
 from models import Annotation, AnnotationProgress, Assignment, Hadith
+from rest import API_PREFIX, href, json_response, link
 from routers.auth import get_current_annotator
 from services import overall_summary, summarize_query
 
-router = APIRouter(prefix="/annotation", tags=["annotation"])
+router = APIRouter(prefix=API_PREFIX, tags=["annotation"])
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(BASE_DIR, "data")
@@ -112,12 +114,11 @@ async def set_progress(annotator_id: int, query_id: str, index: int, session):
 
 
 class LabelPayload(BaseModel):
-    hadith_id: int
+    label: Literal[0, 1, 2]
+
+
+class ProgressPayload(BaseModel):
     index: int
-    label: int
-
-
-VALID_LABELS = (0, 1, 2)
 
 
 async def get_db_session():
@@ -127,12 +128,12 @@ async def get_db_session():
 
 
 async def _require_query(annotator: dict, query_id: str, session) -> str:
-    """Query text for an assigned, existing query; 403 if unassigned, 404 if unknown."""
-    if not await verify_assignment(annotator["id"], query_id, session):
-        raise HTTPException(status_code=403, detail="You are not assigned to this query")
+    """Query text for a query assigned to this annotator; 404 for anything else."""
     queries_data = load_json(QUERIES_PATH)
-    if query_id not in queries_data:
-        raise HTTPException(status_code=404, detail="Query not found")
+    if query_id not in queries_data or not await verify_assignment(
+        annotator["id"], query_id, session
+    ):
+        raise HTTPException(status_code=404, detail="No such assignment")
     return queries_data[query_id]
 
 
@@ -141,48 +142,61 @@ def _clamp_index(index: int, total: int) -> int:
     return min(index, total - 1) if index >= total and total else (0 if index >= total else index)
 
 
-@router.get("/queries")
-async def get_queries(
-    annotator: dict = Depends(get_current_annotator), session=Depends(get_db_session)
+def _assignment_links(query_id: str) -> dict:
+    base = href("assignments", query_id)
+    return {
+        "self": link(base),
+        "collection": link(href("assignments")),
+        "progress": link(f"{base}/progress"),
+        "label": link(f"{base}/labels/{{hadith_id}}", templated=True),
+    }
+
+
+@router.get("/assignments")
+async def list_assignments(
+    request: Request,
+    annotator: dict = Depends(get_current_annotator),
+    session=Depends(get_db_session),
 ):
-    await init_annotation_tables()
     result = await session.execute(
         select(Assignment.query_id).where(Assignment.annotator_id == annotator["id"])
     )
     queries_data = load_json(QUERIES_PATH)
     qrels_ungraded = load_json(QRELS_UNGRADED_PATH)
 
-    queries = []
+    assignments = []
     for qid in result.scalars().all():
         total = len(qrels_ungraded.get(qid, []))
         labels = await get_annotator_labels(annotator["id"], qid, session)
         progress = await get_progress(annotator["id"], qid, session)
-        queries.append(
+        assignments.append(
             {
                 "query_id": qid,
                 "query": queries_data.get(qid, ""),
                 "total": total,
                 "graded": len(labels),
                 "current_index": _clamp_index(progress, total),
+                "_links": {"self": link(href("assignments", qid))},
             }
         )
-    return {"queries": queries}
+    body = {"assignments": assignments, "_links": {"self": link(href("assignments"))}}
+    return json_response(request, body, private=True)
 
 
-@router.get("/{query_id}/current")
-async def get_current_state(
+@router.get("/assignments/{query_id}")
+async def get_assignment(
     query_id: str,
+    request: Request,
     annotator: dict = Depends(get_current_annotator),
     session=Depends(get_db_session),
 ):
-    await init_annotation_tables()
     query_text = await _require_query(annotator, query_id, session)
     pooled_ids = load_json(QRELS_UNGRADED_PATH).get(query_id, [])
     labels = await get_annotator_labels(annotator["id"], query_id, session)
     progress = await get_progress(annotator["id"], query_id, session)
 
     hadith_texts = await get_hadith_texts(pooled_ids)
-    return {
+    body = {
         "query_id": query_id,
         "query": query_text,
         "current_index": _clamp_index(progress, len(pooled_ids)),
@@ -191,65 +205,88 @@ async def get_current_state(
             {"hadith_id": hid, **hadith_texts.get(hid, _EMPTY_HADITH_TEXT)} for hid in pooled_ids
         ],
         "labels": labels,
+        "_links": _assignment_links(query_id),
     }
+    return json_response(request, body, private=True)
 
 
-async def _upsert_label(session, annotator_id: int, query_id: str, payload: LabelPayload) -> None:
+async def _upsert_label(session, annotator_id: int, query_id: str, hadith_id: int, label: int):
+    """Returns True when the label is new (created), False when it replaced an earlier one."""
+    existing = await session.execute(
+        select(Annotation.label).where(
+            Annotation.annotator_id == annotator_id,
+            Annotation.query_id == query_id,
+            Annotation.hadith_id == hadith_id,
+        )
+    )
+    created = existing.first() is None
     ts = now_iso()
     stmt = sqlite_insert(Annotation).values(
         annotator_id=annotator_id,
         query_id=query_id,
-        hadith_id=payload.hadith_id,
-        label=payload.label,
+        hadith_id=hadith_id,
+        label=label,
         created_at=ts,
         updated_at=ts,
     )
     await session.execute(
         stmt.on_conflict_do_update(
             index_elements=["annotator_id", "query_id", "hadith_id"],
-            set_={"label": payload.label, "updated_at": ts},
+            set_={"label": label, "updated_at": ts},
         )
     )
+    return created
 
 
-@router.post("/{query_id}/label")
-async def save_label(
+@router.put("/assignments/{query_id}/labels/{hadith_id}")
+async def put_label(
     query_id: str,
+    hadith_id: int,
     payload: LabelPayload,
+    response: Response,
     annotator: dict = Depends(get_current_annotator),
     session=Depends(get_db_session),
 ):
-    await init_annotation_tables()
+    """Idempotent: 201 the first time a hadith is labelled, 200 when the label is replaced."""
     await _require_query(annotator, query_id, session)
-    if payload.label not in VALID_LABELS:
-        raise HTTPException(status_code=400, detail="Label must be 0, 1, or 2")
+    if hadith_id not in load_json(QRELS_UNGRADED_PATH).get(query_id, []):
+        raise HTTPException(status_code=404, detail="Hadith is not in this query's pool")
 
-    pooled = load_json(QRELS_UNGRADED_PATH).get(query_id, [])
-    await _upsert_label(session, annotator["id"], query_id, payload)
-
-    next_index = payload.index + 1
-    saved_index = next_index if next_index < len(pooled) else payload.index
-    await set_progress(annotator["id"], query_id, saved_index, session)
+    created = await _upsert_label(session, annotator["id"], query_id, hadith_id, payload.label)
     await session.commit()
-    return {"success": True, "current_index": next_index}
+    response.status_code = 201 if created else 200
+    return {
+        "query_id": query_id,
+        "hadith_id": hadith_id,
+        "label": payload.label,
+        "_links": {
+            "self": link(href("assignments", query_id, "labels", hadith_id)),
+            "assignment": link(href("assignments", query_id)),
+        },
+    }
 
 
-@router.post("/{query_id}/navigate")
-async def navigate(
+@router.put("/assignments/{query_id}/progress")
+async def put_progress(
     query_id: str,
-    index: int,
+    payload: ProgressPayload,
     annotator: dict = Depends(get_current_annotator),
     session=Depends(get_db_session),
 ):
-    await init_annotation_tables()
     await _require_query(annotator, query_id, session)
     pooled = load_json(QRELS_UNGRADED_PATH).get(query_id, [])
-    if index < 0 or index >= len(pooled):
-        raise HTTPException(status_code=400, detail="Invalid index")
+    if payload.index < 0 or payload.index >= len(pooled):
+        raise HTTPException(status_code=422, detail="index is outside this query's pool")
 
-    await set_progress(annotator["id"], query_id, index, session)
+    await set_progress(annotator["id"], query_id, payload.index, session)
     await session.commit()
-    return {"success": True, "current_index": index}
+    return {
+        "index": payload.index,
+        "_links": {
+            "self": link(href("assignments", query_id, "progress")),
+            "assignment": link(href("assignments", query_id)),
+        },
+    }
 
 
 async def _labels_by_annotator(session, query_id: str) -> dict[int, dict[int, int]]:
@@ -268,11 +305,12 @@ async def _labels_by_annotator(session, query_id: str) -> dict[int, dict[int, in
     return labels
 
 
-@router.get("/stats/agreement")
-async def get_agreement_stats(
-    _annotator: dict = Depends(get_current_annotator), session=Depends(get_db_session)
+@router.get("/agreement")
+async def get_agreement(
+    request: Request,
+    _annotator: dict = Depends(get_current_annotator),
+    session=Depends(get_db_session),
 ):
-    await init_annotation_tables()
     queries_data = load_json(QUERIES_PATH)
     qrels_ungraded = load_json(QRELS_UNGRADED_PATH)
 
@@ -283,7 +321,9 @@ async def get_agreement_stats(
             labels = await _labels_by_annotator(session, query_id)
             results.append(summarize_query(query_id, query_text, pooled_ids, labels))
 
-    return {
+    body = {
         "per_query": [r.entry for r in results],
         "overall": overall_summary(results, len(queries_data)),
+        "_links": {"self": link(href("agreement"))},
     }
+    return json_response(request, body, private=True)

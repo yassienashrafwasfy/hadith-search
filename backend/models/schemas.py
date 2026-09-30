@@ -45,7 +45,6 @@ class SearchResult(BaseModel):
 class SearchResponse(BaseModel):
     number_of_results: int = 0
     results: list[SearchResult]
-    response_time_ms: float | None = None
 
 
 class QrelEntry(BaseModel):

@@ -1,20 +1,27 @@
-from typing import Optional
+from typing import Literal, Optional
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 from sqlalchemy import func, select, update
 
 from database import get_session, now_iso
 from models import KvPair
+from rest import API_PREFIX, href, json_response, link, page_links
 
-router = APIRouter(prefix="/kv-pairs", tags=["kv-pairs"])
+router = APIRouter(prefix=f"{API_PREFIX}/kv-pairs", tags=["kv-pairs"])
+
+MAX_PAGE_SIZE = 200
 
 
-class VerifyRequest(BaseModel):
-    status: str  # "verified" or "rejected"
+class StatusUpdate(BaseModel):
+    status: Literal["verified", "rejected"]
 
 
-def _pair_dict(pair: KvPair, *, full: bool = True) -> dict:
+class BatchItem(StatusUpdate):
+    id: int
+
+
+def _pair_dict(pair: KvPair) -> dict:
     data = {
         "id": pair.id,
         "topic": pair.topic,
@@ -26,24 +33,30 @@ def _pair_dict(pair: KvPair, *, full: bool = True) -> dict:
         "hadith_id": pair.hadith_id,
         "hadith_en": pair.hadith_en,
         "hadith_ar": pair.hadith_ar,
+        "status": pair.status,
+        "created_at": pair.created_at,
+        "verified_at": pair.verified_at,
     }
-    if full:
-        data.update(status=pair.status, created_at=pair.created_at, verified_at=pair.verified_at)
+    data["_links"] = {"self": link(href("kv-pairs", pair.id))}
     return data
 
 
 @router.get("")
 async def list_kv_pairs(
+    request: Request,
     status: Optional[str] = None,
     topic: Optional[str] = None,
-    limit: int = 50,
-    offset: int = 0,
+    limit: int = Query(50, ge=1, le=MAX_PAGE_SIZE),
+    offset: int = Query(0, ge=0),
 ):
     conditions = []
+    filters = {}
     if status:
         conditions.append(KvPair.status == status)
+        filters["status"] = status
     if topic:
         conditions.append(KvPair.topic.like(f"%{topic}%"))
+        filters["topic"] = topic
 
     async with get_session() as session:
         total = (
@@ -54,11 +67,18 @@ async def list_kv_pairs(
         )
         pairs = [_pair_dict(pair) for pair in result.scalars()]
 
-    return {"pairs": pairs, "total": total, "limit": limit, "offset": offset}
+    body = {
+        "pairs": pairs,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "_links": page_links(href("kv-pairs"), filters, total, limit, offset),
+    }
+    return json_response(request, body)
 
 
-@router.get("/stats")
-async def kv_pairs_stats():
+@router.get("/statistics")
+async def kv_pairs_statistics(request: Request):
     async with get_session() as session:
         total = (await session.execute(select(func.count()).select_from(KvPair))).scalar_one()
         by_status = dict(
@@ -70,53 +90,46 @@ async def kv_pairs_stats():
             (await session.execute(select(KvPair.topic, func.count()).group_by(KvPair.topic))).all()
         )
 
-    return {"total": total, "by_status": by_status, "by_topic": by_topic}
+    body = {
+        "total": total,
+        "by_status": by_status,
+        "by_topic": by_topic,
+        "_links": {"self": link(href("kv-pairs", "statistics")), "pairs": link(href("kv-pairs"))},
+    }
+    return json_response(request, body)
 
 
-@router.post("/{pair_id}/verify")
-async def verify_kv_pair(pair_id: int, req: VerifyRequest):
-    if req.status not in ("verified", "rejected"):
-        return {"error": "status must be 'verified' or 'rejected'"}
-
+@router.patch("/{pair_id}")
+async def update_kv_pair(pair_id: int, update_request: StatusUpdate):
     async with get_session() as session:
         result = await session.execute(
             update(KvPair)
             .where(KvPair.id == pair_id)
-            .values(status=req.status, verified_at=now_iso())
+            .values(status=update_request.status, verified_at=now_iso())
         )
         await session.commit()
         affected = result.rowcount
 
     if affected == 0:
-        return {"error": "KV pair not found"}
-    return {"id": pair_id, "status": req.status}
+        raise HTTPException(status_code=404, detail="KV pair not found")
+    return {
+        "id": pair_id,
+        "status": update_request.status,
+        "_links": {"self": link(href("kv-pairs", pair_id))},
+    }
 
 
-@router.post("/verify-batch")
-async def verify_batch(reqs: list[dict]):
+@router.patch("")
+async def update_kv_pairs(items: list[BatchItem]):
+    """Set the status of several pairs at once; ids that do not exist are skipped."""
     updated = 0
     async with get_session() as session:
-        for r in reqs:
-            pair_id = r.get("id")
-            status = r.get("status")
-            if not pair_id or status not in ("verified", "rejected"):
-                continue
+        for item in items:
             result = await session.execute(
                 update(KvPair)
-                .where(KvPair.id == pair_id)
-                .values(status=status, verified_at=now_iso())
+                .where(KvPair.id == item.id)
+                .values(status=item.status, verified_at=now_iso())
             )
             updated += result.rowcount
         await session.commit()
     return {"updated": updated}
-
-
-@router.get("/export")
-async def export_verified():
-    async with get_session() as session:
-        result = await session.execute(
-            select(KvPair).where(KvPair.status == "verified").order_by(KvPair.id)
-        )
-        pairs = [_pair_dict(pair, full=False) for pair in result.scalars()]
-
-    return {"pairs": pairs, "count": len(pairs)}

@@ -81,14 +81,6 @@ class Annotator(Base):
     created_at: Mapped[str] = mapped_column(Text)
 
 
-class AuthSession(Base):
-    __tablename__ = "sessions"
-
-    token: Mapped[str] = mapped_column(Text, primary_key=True)
-    annotator_id: Mapped[int] = mapped_column(ForeignKey("annotators.id", ondelete="CASCADE"))
-    created_at: Mapped[str] = mapped_column(Text)
-
-
 class Assignment(Base):
     __tablename__ = "assignments"
     __table_args__ = (UniqueConstraint("annotator_id", "query_id"),)

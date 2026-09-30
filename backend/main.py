@@ -1,12 +1,13 @@
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from features import Features, load_features
+from rest import API_PREFIX, EXPOSED_HEADERS, install_error_handlers
 from startup import init_database, preload_resources
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -38,10 +39,14 @@ def _include_feature_routers(app: FastAPI, features: Features) -> None:
         annotation_router,
         auth_router,
         benchmark_router,
+        hadiths_router,
         kv_pairs_router,
+        make_root_router,
         make_search_router,
     )
 
+    app.include_router(make_root_router(features))
+    app.include_router(hadiths_router)
     if features.annotation:
         app.include_router(annotation_router)
         app.include_router(auth_router)
@@ -60,6 +65,8 @@ def _mount_frontend(app: FastAPI, static_dir: str) -> None:
 
     @app.get("/{full_path:path}")
     async def spa_fallback(full_path: str):
+        if f"/{full_path}".startswith(API_PREFIX):
+            raise HTTPException(status_code=404, detail="No such API resource")
         candidate = os.path.join(static_dir, full_path)
         if full_path and os.path.isfile(candidate):
             return FileResponse(candidate)
@@ -90,16 +97,11 @@ def create_app(features: Features | None = None, static_dir: str | None = None) 
         CORSMiddleware,
         allow_methods=["*"],
         allow_headers=["*"],
+        expose_headers=EXPOSED_HEADERS,
         **cors_settings(os.environ.get("CORS_ORIGINS", DEFAULT_CORS_ORIGINS)),
     )
+    install_error_handlers(app)
     _include_feature_routers(app, features)
-
-    @app.get("/hadith/{hadith_id}")
-    def get_hadith(hadith_id: int):
-        from database import get_hadith_row
-
-        row = get_hadith_row(hadith_id)
-        return {"error": "not found"} if row is None else row
 
     if static_dir:
         _mount_frontend(app, static_dir)

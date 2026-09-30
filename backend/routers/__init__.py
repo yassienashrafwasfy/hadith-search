@@ -13,7 +13,9 @@ install(
         "annotation_router": ("routers.annotation", "router"),
         "auth_router": ("routers.auth", "router"),
         "benchmark_router": ("routers.benchmark", "router"),
+        "hadiths_router": ("routers.hadiths", "router"),
         "kv_pairs_router": ("routers.kv_pairs", "router"),
+        "make_root_router": ("routers.root", "make_root_router"),
         "make_search_router": ("routers.search", "make_search_router"),
     },
 )

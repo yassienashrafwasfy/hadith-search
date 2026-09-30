@@ -5,7 +5,6 @@ the offline pooling/evaluation scripts keep using); the API now reaches them onl
 this registry, so endpoints, feature gating and dependencies are declared in one place.
 """
 
-import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -183,10 +182,6 @@ def enabled_systems(features: Features) -> list[RetrievalSystem]:
 
 
 def run_search(system: RetrievalSystem, ctx: SearchContext, req: SearchRequest) -> SearchResponse:
-    started = time.perf_counter()
     raw = system.run(ctx, req.query, req.lang.value.upper())
     results = build_results(raw, ctx.hadiths_df(), req.grade_filter, req.book_filter)
-    elapsed_ms = (time.perf_counter() - started) * 1000
-    return SearchResponse(
-        number_of_results=len(results), results=results, response_time_ms=round(elapsed_ms, 2)
-    )
+    return SearchResponse(number_of_results=len(results), results=results)

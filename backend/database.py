@@ -17,7 +17,6 @@ from models import (
     AnnotationProgress,
     Annotator,
     Assignment,
-    AuthSession,
     Base,
     Hadith,
     KvPair,
@@ -33,7 +32,6 @@ __all__ = [
     "AnnotationProgress",
     "Annotator",
     "Assignment",
-    "AuthSession",
     "Base",
     "DB_PATH",
     "Hadith",
@@ -53,7 +51,6 @@ __all__ = [
 
 ANNOTATION_TABLES = [
     Annotator.__table__,
-    AuthSession.__table__,
     Assignment.__table__,
     Annotation.__table__,
     AnnotationProgress.__table__,

@@ -3,14 +3,16 @@ import json
 import os
 import secrets
 
-from fastapi import APIRouter, Depends, Header, HTTPException
-from pydantic import BaseModel
-from sqlalchemy import delete, func, select
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
+from pydantic import BaseModel, Field
+from sqlalchemy import func, select
 
 from database import get_session, init_annotation_tables, now_iso
-from models import Annotator, Assignment, AuthSession
+from models import Annotator, Assignment
+from rest import API_PREFIX, href, json_response, link
+from tokens import AuthSettings, auth_settings, issue_token, read_token
 
-router = APIRouter(prefix="/auth", tags=["auth"])
+router = APIRouter(prefix=API_PREFIX, tags=["auth"])
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(BASE_DIR, "data")
@@ -20,14 +22,14 @@ QUERIES_PER_ANNOTATOR = 2
 ANNOTATORS_PER_QUERY = 3
 
 
-class SignupRequest(BaseModel):
+class Credentials(BaseModel):
     username: str
     password: str
 
 
-class SigninRequest(BaseModel):
-    username: str
-    password: str
+class NewAnnotator(Credentials):
+    username: str = Field(min_length=3)
+    password: str = Field(min_length=6)
 
 
 def hash_password(password: str, salt: str = None) -> tuple[str, str]:
@@ -40,10 +42,6 @@ def hash_password(password: str, salt: str = None) -> tuple[str, str]:
 def verify_password(password: str, stored_hash: str, salt: str) -> bool:
     key, _ = hash_password(password, salt)
     return secrets.compare_digest(key, stored_hash)
-
-
-def generate_token() -> str:
-    return secrets.token_urlsafe(32)
 
 
 def load_queries() -> dict:
@@ -72,23 +70,16 @@ async def auto_assign_queries(annotator_id: int, session) -> list[str]:
     return assigned
 
 
-async def get_current_annotator(authorization: str = Header(...)) -> dict:
-    if not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Invalid authorization header")
-    token = authorization[7:]
-
-    async with get_session() as session:
-        result = await session.execute(
-            select(AuthSession.annotator_id, Annotator.username)
-            .join(Annotator, AuthSession.annotator_id == Annotator.id)
-            .where(AuthSession.token == token)
-        )
-        row = result.first()
-
-    if not row:
+async def get_current_annotator(
+    authorization: str | None = Header(None), settings: AuthSettings = Depends(auth_settings)
+) -> dict:
+    scheme, _, token = (authorization or "").partition(" ")
+    if scheme.lower() != "bearer" or not token:
+        raise HTTPException(status_code=401, detail="Missing or malformed Authorization header")
+    annotator = read_token(token, settings)
+    if annotator is None:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
-
-    return {"id": row.annotator_id, "username": row.username}
+    return annotator
 
 
 async def get_annotator_assignments(annotator_id: int, session) -> list[str]:
@@ -100,94 +91,109 @@ async def get_annotator_assignments(annotator_id: int, session) -> list[str]:
 
 def _assignment_details(query_ids: list[str]) -> list[dict]:
     all_queries = load_queries()
-    return [{"query_id": qid, "query": all_queries.get(qid, "")} for qid in query_ids]
+    return [
+        {
+            "query_id": qid,
+            "query": all_queries.get(qid, ""),
+            "_links": {"self": link(href("assignments", qid))},
+        }
+        for qid in query_ids
+    ]
 
 
-@router.post("/signup")
-async def signup(req: SignupRequest):
-    if len(req.username) < 3:
-        raise HTTPException(status_code=400, detail="Username must be at least 3 characters")
-    if len(req.password) < 6:
-        raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+def _annotator_body(annotator: dict, assignment_ids: list[str]) -> dict:
+    return {
+        "id": annotator["id"],
+        "username": annotator["username"],
+        "assignments": _assignment_details(assignment_ids),
+        "_links": {
+            "self": link(href("annotators", annotator["id"])),
+            "assignments": link(href("assignments")),
+        },
+    }
 
+
+def _token_body(annotator: dict, assignment_ids: list[str], settings: AuthSettings) -> dict:
+    return {
+        "access_token": issue_token(annotator["id"], annotator["username"], settings),
+        "token_type": "Bearer",
+        "expires_in": settings.ttl_seconds,
+        "annotator": _annotator_body(annotator, assignment_ids),
+    }
+
+
+@router.post("/annotators", status_code=201)
+async def create_annotator(
+    credentials: NewAnnotator,
+    response: Response,
+    settings: AuthSettings = Depends(auth_settings),
+):
+    """Sign up: creates the annotator, assigns queries and returns a first token."""
     await init_annotation_tables()
 
     async with get_session() as session:
         existing = await session.execute(
-            select(Annotator.id).where(Annotator.username == req.username)
+            select(Annotator.id).where(Annotator.username == credentials.username)
         )
         if existing.first():
             raise HTTPException(status_code=409, detail="Username already taken")
 
-        pw_hash, pw_salt = hash_password(req.password)
+        pw_hash, pw_salt = hash_password(credentials.password)
         annotator = Annotator(
-            username=req.username,
+            username=credentials.username,
             password_hash=pw_hash,
             password_salt=pw_salt,
             created_at=now_iso(),
         )
         session.add(annotator)
         await session.flush()
-        annotator_id = annotator.id
-
-        assigned = await auto_assign_queries(annotator_id, session)
-
-        token = generate_token()
-        session.add(AuthSession(token=token, annotator_id=annotator_id, created_at=now_iso()))
+        identity = {"id": annotator.id, "username": annotator.username}
+        assigned = await auto_assign_queries(annotator.id, session)
         await session.commit()
 
-    return {
-        "token": token,
-        "annotator": {"id": annotator_id, "username": req.username},
-        "assignments": _assignment_details(assigned),
-    }
+    response.headers["Location"] = href("annotators", identity["id"])
+    return _token_body(identity, assigned, settings)
 
 
-@router.post("/signin")
-async def signin(req: SigninRequest):
+@router.post("/tokens", status_code=201)
+async def create_token(credentials: Credentials, settings: AuthSettings = Depends(auth_settings)):
+    """Sign in: exchanges a username and password for a bearer token."""
     await init_annotation_tables()
 
     async with get_session() as session:
-        result = await session.execute(select(Annotator).where(Annotator.username == req.username))
+        result = await session.execute(
+            select(Annotator).where(Annotator.username == credentials.username)
+        )
         annotator = result.scalar_one_or_none()
 
         if not annotator or not verify_password(
-            req.password, annotator.password_hash, annotator.password_salt
+            credentials.password, annotator.password_hash, annotator.password_salt
         ):
             raise HTTPException(status_code=401, detail="Invalid username or password")
 
-        token = generate_token()
-        session.add(AuthSession(token=token, annotator_id=annotator.id, created_at=now_iso()))
-        await session.commit()
-
+        identity = {"id": annotator.id, "username": annotator.username}
         assigned_ids = await get_annotator_assignments(annotator.id, session)
 
-    return {
-        "token": token,
-        "annotator": {"id": annotator.id, "username": annotator.username},
-        "assignments": _assignment_details(assigned_ids),
-    }
+    return _token_body(identity, assigned_ids, settings)
 
 
-@router.post("/signout")
-async def signout(authorization: str = Header(...)):
-    if not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Invalid authorization header")
-    token = authorization[7:]
-
-    async with get_session() as session:
-        await session.execute(delete(AuthSession).where(AuthSession.token == token))
-        await session.commit()
-
-    return {"success": True}
-
-
-@router.get("/me")
-async def me(annotator: dict = Depends(get_current_annotator)):
+async def _annotator_response(request: Request, annotator: dict) -> Response:
     async with get_session() as session:
         assigned_ids = await get_annotator_assignments(annotator["id"], session)
+    return json_response(request, _annotator_body(annotator, assigned_ids), private=True)
 
-    return {
-        "annotator": annotator,
-        "assignments": _assignment_details(assigned_ids),
-    }
+
+@router.get("/annotators/me")
+async def get_current_annotator_resource(
+    request: Request, annotator: dict = Depends(get_current_annotator)
+):
+    return await _annotator_response(request, annotator)
+
+
+@router.get("/annotators/{annotator_id}")
+async def get_annotator(
+    annotator_id: int, request: Request, annotator: dict = Depends(get_current_annotator)
+):
+    if annotator_id != annotator["id"]:
+        raise HTTPException(status_code=403, detail="You can only read your own profile")
+    return await _annotator_response(request, annotator)

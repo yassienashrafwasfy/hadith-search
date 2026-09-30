@@ -9,7 +9,6 @@ from sqlalchemy import func, select
 
 from database import get_session, init_annotation_tables, now_iso
 from models import Annotator, Assignment
-from ratelimit import auth_limit, limiter
 from rest import API_PREFIX, href, json_response, link
 from tokens import AuthSettings, auth_settings, issue_token, read_token
 
@@ -145,9 +144,7 @@ def _token_body(annotator: dict, assignment_ids: list[str], settings: AuthSettin
 
 
 @router.post("/annotators", status_code=201)
-@limiter.limit(auth_limit)
 async def create_annotator(
-    request: Request,
     credentials: NewAnnotator,
     response: Response,
     settings: AuthSettings = Depends(auth_settings),
@@ -180,13 +177,7 @@ async def create_annotator(
 
 
 @router.post("/tokens", status_code=201)
-@limiter.limit(auth_limit)
-async def create_token(
-    request: Request,
-    response: Response,
-    credentials: Credentials,
-    settings: AuthSettings = Depends(auth_settings),
-):
+async def create_token(credentials: Credentials, settings: AuthSettings = Depends(auth_settings)):
     """Sign in: exchanges a username and password for a bearer token."""
     await init_annotation_tables()
 

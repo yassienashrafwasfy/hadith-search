@@ -67,7 +67,6 @@ pydantic==2.12.5
 pydantic_core==2.41.5
 Pygments==2.19.2
 pyjwt==2.15.1
-slowapi==0.1.10
 pyrsistent==0.20.0
 python-dateutil==2.9.0.post0
 python-dotenv==1.2.2
@@ -101,6 +100,3 @@ urllib3==2.8.0
 uvicorn==0.41.0
 xxhash==3.6.0
 yarl==1.23.0
-limits==5.8.0
-deprecated==3.0.0
-wrapt==2.5.0

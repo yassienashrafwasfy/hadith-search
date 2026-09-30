@@ -7,7 +7,6 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from features import Features, load_features
-from ratelimit import install_rate_limiting, limiter
 from rest import API_PREFIX, EXPOSED_HEADERS, install_error_handlers
 from startup import init_database, preload_resources
 
@@ -96,7 +95,6 @@ def _mount_frontend(app: FastAPI, static_dir: str) -> None:
         app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
 
     @app.get("/{full_path:path}")
-    @limiter.exempt
     async def spa_fallback(full_path: str):
         if f"/{full_path}".startswith(API_PREFIX):
             raise HTTPException(status_code=404, detail="No such API resource")
@@ -135,7 +133,6 @@ def create_app(features: Features | None = None, static_dir: str | None = None) 
         expose_headers=EXPOSED_HEADERS,
         **cors_settings(os.environ.get("CORS_ORIGINS", DEFAULT_CORS_ORIGINS)),
     )
-    install_rate_limiting(app)
     add_security_headers(app)
     install_error_handlers(app)
     _include_feature_routers(app, features)

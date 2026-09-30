@@ -214,14 +214,12 @@ async def _patched_paths(monkeypatch, _data_dir, _db_path, _hadiths_df):
 @pytest_asyncio.fixture
 async def _client(_patched_paths):
     """App with the annotation/auth/kv/benchmark routers only (no model or index loading)."""
-    from ratelimit import install_rate_limiting
     from rest import install_error_handlers
     from routers import annotation, auth, benchmark, hadiths, kv_pairs
     from tokens import AuthSettings, auth_settings
 
     app = FastAPI()
     install_error_handlers(app)
-    install_rate_limiting(app)
     for r in (annotation.router, auth.router, kv_pairs.router, benchmark.router, hadiths.router):
         app.include_router(r)
     app.dependency_overrides[auth_settings] = lambda: AuthSettings(TEST_SECRET, ttl_seconds=3600)
@@ -319,15 +317,3 @@ async def _search_client(
     )
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         yield c
-
-
-@pytest.fixture(autouse=True)
-def _rate_limiter_off():
-    """Off by default (tests make many calls from one address); tests that need it turn it on."""
-    from ratelimit import limiter
-
-    limiter.enabled = False
-    limiter.reset()
-    yield
-    limiter.enabled = True
-    limiter.reset()

@@ -7,44 +7,58 @@ COPY frontend/ .
 # Skip tsc (pre-existing type errors), Vite/esbuild handles transpilation
 RUN npx vite build
 
-# ===== Stage 2: Python runtime =====
-FROM python:3.12-slim AS runtime
+# ===== Stage 2: Python build (compilers live only here) =====
+FROM python:3.12-slim AS python-builder
 
-# System dependencies for compiling C extensions + git for HF/camel_tools
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     git \
     && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /app
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+# Data lands outside any home directory so the non-root runtime user can read it
+ENV NLTK_DATA=/opt/nltk_data
+ENV CAMELTOOLS_DATA=/opt/camel_tools_data
+RUN mkdir -p "$NLTK_DATA" "$CAMELTOOLS_DATA"
 
-# Install Python dependencies
+WORKDIR /build
 COPY requirements.txt .
 # Install CPU-only torch first to avoid pulling CUDA wheels
 RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
-# Install remaining dependencies (torch line removed — already installed)
+# Install remaining dependencies (torch line removed, already installed)
 RUN grep -v '^torch==' requirements.txt > /tmp/req.txt && \
     pip install --no-cache-dir -r /tmp/req.txt
 
 # Pre-download NLTK data (needed for English preprocessing at search time)
 RUN python -c "import nltk; \
-    [nltk.download(p) for p in ['punkt','punkt_tab','averaged_perceptron_tagger', \
+    [nltk.download(p, download_dir='/opt/nltk_data') for p in ['punkt','punkt_tab','averaged_perceptron_tagger', \
     'averaged_perceptron_tagger_eng','wordnet','stopwords']]"
 
-# Pre-download camel_tools MLE data (needed for Arabic preprocessing at search time)
-# Non-fatal: if download fails, it will retry at runtime on first Arabic search
-RUN python -c "from camel_tools.disambig.mle import MLEDisambiguator; \
-    MLEDisambiguator.pretrained('calima-msa-r13')" \
-    || echo "Warning: camel_tools MLE data download failed (will retry at runtime)"
+# Pre-download camel_tools MLE data (needed for Arabic preprocessing at search time).
+# Installed at build time because the non-root runtime user cannot write to CAMELTOOLS_DATA.
+RUN camel_data -i disambig-mle-calima-msa-r13
+
+# ===== Stage 3: Runtime (no compilers, no git, non-root) =====
+FROM python:3.12-slim AS runtime
+
+RUN useradd --system --create-home --uid 10001 app
+
+COPY --from=python-builder /opt/venv /opt/venv
+COPY --from=python-builder /opt/nltk_data /opt/nltk_data
+COPY --from=python-builder /opt/camel_tools_data /opt/camel_tools_data
+
+WORKDIR /app
 
 # Copy backend code
-COPY backend/ ./backend/
+COPY --chown=app:app backend/ ./backend/
 
 # Copy frontend build from stage 1
-COPY --from=frontend-builder /build/dist ./static
+COPY --from=frontend-builder --chown=app:app /build/dist ./static
 
 # Create data directory (mounted as volume at runtime)
-RUN mkdir -p /app/backend/data
+# Owned by the app user so a fresh named volume inherits write access
+RUN mkdir -p /app/backend/data && chown app:app /app/backend/data
 
 # Copy entrypoint script and fix line endings (Windows CRLF -> LF)
 COPY docker-entrypoint.sh /app/docker-entrypoint.sh
@@ -53,9 +67,15 @@ RUN sed -i 's/\r$//' /app/docker-entrypoint.sh && chmod +x /app/docker-entrypoin
 # Working directory for Python module resolution (routers.*, scripts.*, database)
 WORKDIR /app/backend
 
+ENV PATH="/opt/venv/bin:$PATH"
+ENV NLTK_DATA=/opt/nltk_data
+ENV CAMELTOOLS_DATA=/opt/camel_tools_data
+ENV HF_HOME=/app/backend/data/.hf_cache
 ENV PYTHONPATH=/app/backend
 ENV PYTHONUNBUFFERED=1
 ENV APP_MODE=annotation
+
+USER app
 
 EXPOSE 8000
 

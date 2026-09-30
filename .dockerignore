@@ -4,6 +4,12 @@
 
 # Python virtual env & cache
 venv/
+.venv/
+.mutation/
+mutants/
+.ruff_cache/
+.coverage
+tests/
 __pycache__/
 *.pyc
 *.pyo
@@ -32,7 +38,6 @@ Thumbs.db
 # Docker artifacts
 Dockerfile
 docker-compose.yml
-docker-entrypoint.sh
 .dockerignore
 
 # Documentation (not needed in image)

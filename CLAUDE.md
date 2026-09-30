@@ -94,5 +94,6 @@ The DB layer is SQLAlchemy 2.0 ORM only (no raw SQL anywhere; `tests/test_databa
 ## Notes
 
 - `requirements.txt` pins `torch==2.11.0`; the Dockerfile installs CPU torch first and strips that line.
+- The Dockerfile has three stages: `frontend-builder` (Node), `python-builder` (compilers + venv in `/opt/venv`, NLTK/CAMeL data in `/opt/nltk_data` and `/opt/camel_tools_data`) and `runtime` (copies only those, no gcc/git, runs as uid 10001 `app`). `backend/data` is owned by `app`, so a fresh named volume is writable; a bind mount must be `chown 10001`. Anything the app downloads at runtime (e.g. HF models via `HF_HOME`) must land under that data dir.
 - README setup examples use Windows-style backslashes (`scripts\build_all.py`); on Linux/WSL use forward slashes.
 - Embedding generation wants a CUDA GPU (~12GB VRAM); pre-built embeddings can be dropped into `backend/data/`.

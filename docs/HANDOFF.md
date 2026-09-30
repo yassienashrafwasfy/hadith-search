@@ -1,6 +1,6 @@
 # Handoff: changes since Marawan's last commit
 
-Marawan's last commit is `93a4ff9` ("Align matn embeddings, training passages, and evaluation"). Everything below was added on top of it in 16 commits (the last 5 are the REST API, items 16 and 17, and the security pass, item 18): about 130 files. All 363 tests pass. The work sits on the branch `feat/rest-api-v1`, which builds on `chore/dockerfile-hardening` and `chore/precommit-hooks`, and has not been pushed.
+Marawan's last commit is `93a4ff9` ("Align matn embeddings, training passages, and evaluation"). Everything below was added on top of it in 18 commits (the last 6 are the REST API, items 16 and 17, the security pass, item 18, and rate limiting, item 19): about 130 files. All 368 tests pass. The work sits on the branch `feat/rest-api-v1`, which builds on `chore/dockerfile-hardening` and `chore/precommit-hooks`, and has not been pushed.
 
 Each change has the same three lines: which files, why this is the normal way to do it, and what you get out of it.
 
@@ -208,12 +208,25 @@ Behavior that differs from before:
 
 **Still open, on purpose:**
 
-- **No limit on sign-in attempts.** A per-server counter would not work once there are several servers, so this belongs at the load balancer or a shared store. Do it before exposing the app publicly.
+- **Rate limits count per server.** They are added now (item 19), but the counters sit in memory, so with several servers each one counts alone. Use a shared store (`RATE_LIMIT_STORAGE_URI`) before scaling out.
 - **The token lives in `localStorage`**, so an XSS bug would expose it. The CSP and the absence of raw HTML rendering reduce that risk; an httpOnly cookie would remove it but needs CSRF handling.
 - **Tokens cannot be revoked** before they expire (12 hours by default).
 - **Some dependency reports are not fixed:** `torch` (2.11 to 2.13), `datasets` (4 to 5), `setuptools`, `accelerate`, `nltk`, and React Router (needs version 7). The Python ones are build and training tools, or need a wider retest. React Router's open redirect needs a `<Link>` or `navigate()` fed a user-controlled URL, which this app does not do. Bump them when you can retest.
 - **`.pkl` index files are loaded with `pickle`**, which runs code from the file. They are built by us and never uploaded, so keep `backend/data` writable only by the app and never load a pickle from someone else.
 - **The LLM scripts** (`llm_grader.py`, `kv_generator.py`) send hadith text to a model. It is offline tooling and its output is a label, so prompt injection has little to hit, but treat its output as untrusted.
+
+### 19. Rate limiting
+
+**Files:** `backend/ratelimit.py` (new), `backend/main.py`, `backend/routers/auth.py`, `backend/rest.py`, `requirements.txt`, `.env.example`, `tests/test_ratelimit.py` (new), `tests/conftest.py`
+
+**Why it's best practice:** Without a limit, one client can try thousands of passwords a minute or keep the search busy for everyone. SlowAPI (a FastAPI version of Flask-Limiter) counts requests per client address. Every route gets 120 a minute. Sign-in and sign-up get 10 a minute, since those are what an attacker hammers. Going over gets a 429 in the same error format as the rest of the API, with a `Retry-After` header, and normal responses show `X-RateLimit-*` headers so clients can slow down on their own.
+
+**Benefit:** Password guessing becomes slow enough to be pointless, and a runaway script cannot starve other users. The frontend needs no change: the sign-in form already shows the server's message. Static files and the frontend pages are not counted. Change the numbers with `RATE_LIMIT_DEFAULT` and `RATE_LIMIT_AUTH`, or turn it off with `RATE_LIMIT_ENABLED=false`.
+
+Two things to set when deploying:
+
+- **Behind a proxy or load balancer,** the client address is the proxy's unless you set `FORWARDED_ALLOW_IPS` to the proxy's address. Otherwise everyone shares one counter.
+- **With several servers,** set `RATE_LIMIT_STORAGE_URI` to a shared store such as `redis://...` and add the `redis` package. The default in-memory counters are per server.
 
 ## Quick start after pulling
 

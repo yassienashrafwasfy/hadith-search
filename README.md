@@ -180,3 +180,17 @@ hadith-search/
 - **Backend**: FastAPI, PostgreSQL + pgvector, NLTK, CAMeL Tools, Sentence Transformers
 - **Frontend**: React, TypeScript, Tailwind CSS, Vite
 - **Retrieval**: BM25, BM25+PRF, Dense retrieval (multilingual-e5-large), Hybrid
+
+## Deploying
+
+Releases run blue/green behind nginx on one host, with optional canaries by client address.
+Set `POSTGRES_PASSWORD` and `AUTH_SECRET` in `.env`, then:
+
+```bash
+tools/deploy.sh init              # first time: postgres, nginx, blue
+tools/deploy.sh deploy --build    # new version on the idle colour
+tools/deploy.sh canary 10         # 10% of client addresses
+tools/deploy.sh promote           # or: tools/deploy.sh rollback
+```
+
+Both colours share one database, so schema changes must be additive. Details are in `docs/HANDOFF.md`, item 21.

@@ -1,6 +1,6 @@
 # Handoff: changes since Marawan's last commit
 
-Marawan's last commit is `93a4ff9` ("Align matn embeddings, training passages, and evaluation"). Everything below was added on top of it in 20 commits (the last ones are the REST API, items 16 and 17, the security pass, item 18, and nginx with the sign-in limit, item 19): about 130 files. All 368 tests pass. The work sits on the branch `feat/rest-api-v1`, which builds on `chore/dockerfile-hardening` and `chore/precommit-hooks`, and has not been pushed.
+Marawan's last commit is `93a4ff9` ("Align matn embeddings, training passages, and evaluation"). Everything below was added on top of it in about 32 commits (the last ones are the REST API, items 16 and 17, the security pass, item 18, nginx with the sign-in limit, item 19, PostgreSQL with pgvector, item 20, and blue/green and canary releases, item 21): about 140 files. All 425 tests pass (1 skipped: it needs NLTK data). The tests need a PostgreSQL with pgvector, see item 20. The work sits on the branch `feat/blue-green-canary`, which builds on `feat/postgres-pgvector`, `feat/rest-api-v1`, `chore/dockerfile-hardening` and `chore/precommit-hooks`, and has not been pushed.
 
 Each change has the same three lines: which files, why this is the normal way to do it, and what you get out of it.
 
@@ -221,7 +221,7 @@ Behavior that differs from before:
 
 **Why it's best practice:** Rate limiting belongs at the edge. nginx turns away a flood before it reaches Python, it counts in one place even with several app servers (no shared store needed), and it sees the real client address. It also caps request bodies at 1 MB, hides its version and follows the app container by name when it restarts. The nginx container is the `nginx-unprivileged` image, so like the app it does not run as root.
 
-**Benefit:** Sign-in and sign-up allow 5 tries at once per client address, then 1 more per minute (429 after that, as `application/problem+json` with `Retry-After: 60`). Every other route is not limited. Guessing passwords is slowed hard. `docker compose up` still serves the site on port 8000, but now through nginx: the app's own port is no longer published.
+**Benefit:** Sign-in and sign-up allow 5 tries at once per client address, then 1 more per minute (429 after that, as `application/problem+json` with `Retry-After: 60`). Every other route is not limited. Guessing passwords is slowed hard. The site is served on port 8000 through nginx: the app's own port is not published. Start it with `tools/deploy.sh init` (item 21); plain `docker compose up` no longer starts an app.
 
 **What changed and why:**
 
@@ -258,6 +258,50 @@ Behavior that differs from before:
 
 **Not checked here:** I did not build the app image or run `docker compose up` with the real data, and the local NLTK data is missing so I could not run a real English query end to end (the ASGI tests use a stub preprocessor). The Docker image was not re-scanned.
 
+### 21. Blue/green releases and canaries on one host
+
+**Files:** `tools/deploy.sh` (new), `docker-compose.yml`, `nginx/default.conf`, `nginx/proxy_app.conf`, `tools/test-nginx.sh`, `tests/test_deploy_script.py` (new), `tests/test_database.py`, `.gitignore`, `.env.example`
+
+**Why it's best practice:** Two copies of the app (blue and green) run side by side behind nginx. A new version starts on the idle colour, is checked, and then takes traffic in steps. Going back is a config reload, not a rebuild, so a bad release costs seconds, and users never see a restart.
+
+**Benefit:** `tools/deploy.sh` gives you `init`, `status`, `deploy`, `canary N`, `promote`, `rollback` and `stop-idle`. Traffic only moves to a colour whose container reports healthy, a failed deploy is stopped and leaves live traffic alone, and a canary that turns unhealthy while watched puts all traffic back on the live colour by itself.
+
+**Decisions made with you:**
+
+- **Platform:** one host, docker compose plus the nginx already in front of the app. No Kubernetes.
+- **Canary split:** by a hash of the client address (`split_clients` on `$remote_addr`), at a percentage you choose. One address stays on one colour for the whole canary, so a person does not bounce between versions.
+- **Database:** one shared PostgreSQL for both colours. Schema changes must be backward compatible (see the rule below).
+- **Promotion:** manual commands with an automatic health gate. There is no automatic promotion on error rate, because the app does not export metrics yet.
+
+**How a release goes:**
+
+```bash
+tools/deploy.sh init                # first time only: postgres, nginx and blue
+tools/deploy.sh deploy --build      # build the working tree, start it on the idle colour, wait for healthy
+tools/deploy.sh canary 10           # 10% of client addresses go to the new colour; watched for 30 s
+tools/deploy.sh canary 50           # raise it as you gain confidence
+tools/deploy.sh promote             # everyone on the new colour; the old one keeps running
+tools/deploy.sh rollback            # in a canary: stop it. After a promote: go back to the old colour
+tools/deploy.sh stop-idle           # when you are sure, stop the old colour
+```
+
+`deploy IMAGE` uses an image you built or pulled instead of building. Responses carry an `X-Release: blue|green` header, so you can see which colour answered. `.env` needs `POSTGRES_PASSWORD` and `AUTH_SECRET` (compose refuses to start without them). `AUTH_SECRET` must be the same on both colours, or a token from one is rejected by the other.
+
+**The schema rule:** both colours run against the same database at the same time, and the app only ever adds tables and columns (`create_all`, no migrations). So a release may add tables and columns, but must not rename or drop anything the previous release reads or writes. Do a rename in two releases: add the new name and write both, then remove the old one in the next release once the old colour is gone. `tests/test_database.py` checks that starting the older release does not remove columns or tables a newer one added. Embeddings are one column per language with no fixed size, so a release that changes the embedding model must re-encode every row before it goes live; a canary cannot mix two models in one column.
+
+**How the routing works:** `tools/deploy.sh` writes `deploy/state/routing.conf` (git-ignored) and runs `nginx -s reload`. nginx checks the file first (`nginx -t`); if it rejects it, the old file is restored and nothing changes. The state (live colour, canary percent, previous colour) is in `deploy/state/state.env`. The app service in compose is now `app-blue` and `app-green`, each behind a profile, so plain `docker compose up` starts no app: use `tools/deploy.sh init`.
+
+**Test it:** `tests/test_deploy_script.py` runs the script against a fake `docker` and checks every transition (canary, health gate, failed deploy, nginx rejecting the file, promote, rollback, stop-idle). `tools/test-nginx.sh` (also run in CI) checks the real nginx: live colour, promote, rollback, and that one address stays on one colour during a canary.
+
+**Not checked here:** I did not run `deploy.sh` against real containers (no app image was built in this checkout), and I could not test the percentage split over many client addresses, because every local request comes from one address. The split itself is nginx's documented `split_clients`. Try `deploy --build`, `canary 10` and `promote` once on the real host before relying on it.
+
+**Limits:**
+
+- **One host.** If the machine goes down, both colours go with it. This is release safety, not high availability.
+- **Memory:** both colours run at once during a release. With `APP_MODE=search` each loads its own E5 model, so the host needs room for two.
+- **Behind another proxy** (see item 19) every client may share one address, so a canary would send all or none of them to the new colour. Fix the real address first.
+- **One colour is live at a time in the state file.** Do not run two `deploy.sh` commands at once.
+
 ## Quick start after pulling
 
 ```bash
@@ -265,7 +309,9 @@ uv venv --python 3.12 .venv
 uv pip install --python .venv/bin/python -r requirements-dev.txt
 .venv/bin/pre-commit install
 .venv/bin/python -m pytest
-cp .env.example .env    # then fill in JINA_API_KEY and anything else you need
+cp .env.example .env    # then fill in DATABASE_URL, POSTGRES_PASSWORD, AUTH_SECRET, JINA_API_KEY and anything else you need
+docker run -d -p 55432:5432 -e POSTGRES_PASSWORD=test-only-password -e POSTGRES_DB=hadith_test pgvector/pgvector:pg17   # for the tests
+tools/test-nginx.sh     # nginx limits and blue/green routing (needs Docker)
 ```
 
-The commit list, oldest first: `360399f` pre-commit hooks, `4d800cf` backend rewrite, `55d9704` tests and tooling, `92759cf` Docker stages and non-root user, `4b963eb` build caching, `8535ee5` library upgrades, `ea50b33` image scans, `56d8081` Hadolint, health check and labels, `5964375` and `1306ddc` this note, `1981518` REST routes and tokens, `65f4c77` tests for them, `111fb0d` frontend on the new URLs, `b88692b` docs for the REST changes, `a5aac74` security fixes, `bfda508` CI pins and dependency bumps. The last edit to this note is the commit after those.
+The commit list, oldest first: `360399f` pre-commit hooks, `4d800cf` backend rewrite, `55d9704` tests and tooling, `92759cf` Docker stages and non-root user, `4b963eb` build caching, `8535ee5` library upgrades, `ea50b33` image scans, `56d8081` Hadolint, health check and labels, `5964375` and `1306ddc` this note, `1981518` REST routes and tokens, `65f4c77` tests for them, `111fb0d` frontend on the new URLs, `b88692b` docs for the REST changes, `a5aac74` security fixes, `bfda508` CI pins and dependency bumps. Later commits, newest last: the PostgreSQL move (`74f0ec6`, `50c892b`, `d4c9fec`, `367184f`), nginx and the sign-in limit (`a8bfda0`, after removing SlowAPI in `8dbcaed`), then blue/green and canary releases (item 21). The last edit to this note is the commit after those.

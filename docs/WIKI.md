@@ -89,7 +89,7 @@ hadith-search/
 │   │   ├── profile.py            # Read-only corpus audit
 │   │   ├── preprocess.py         # Text preprocessing (6 columns)
 │   │   ├── build_inverted_index.py  # BM25 sparse index
-│   │   ├── build_embeddings.py   # E5 dense embeddings
+│   │   ├── build_embeddings.py   # Arabic dense embeddings (ONNX)
 │   │   ├── pooling.py            # Candidate pool for annotation
 │   │   ├── search.py             # All 11 retrieval algorithms
 │   │   ├── loading.py            # LRU-cached loaders for indexes/models
@@ -213,14 +213,14 @@ Both pipelines are run over three text fields (full text, isnad, matn) independe
 | BM25 + TF-IDF Hybrid | Sparse | Weighted fusion of BM25 and TF-IDF scores |
 | BM25 + PRF | Sparse | BM25 with pseudo-relevance feedback query expansion |
 | BM25 + TF-IDF + PRF | Sparse | Hybrid with PRF |
-| Cosine Similarity | Dense | E5 embeddings, cosine similarity |
+| Cosine Similarity | Dense | Arabic embeddings, cosine similarity (Arabic queries only) |
 | Semantic Rerank | Dense | BM25 candidates reranked by cosine similarity |
 | Semantic RRF | Dense+Sparse | Reciprocal Rank Fusion of BM25 and cosine |
 
 **Dense retrieval details**:
-- Model: `intfloat/multilingual-e5-large`
-- Query prefix: `query: {text}`
-- Passage prefix: `passage: {Matn}`; Arabic passages use query-side light normalization and diacritic removal. Building, training, and fine-tuned re-encoding share this representation. Existing embedding files require regeneration before claiming matn-only provenance.
+- Model: `akhooli/sbert-nli-500k-triplets-MB`, exported to ONNX, vectors cut to 256 dimensions
+- No query or passage prefix
+- Passages are the Arabic matn with diacritics removed. Queries are cleaned the same way.
 
 **Sparse retrieval details**:
 - Index: `terms`, `postings`, `hadith_lengths` tables
@@ -295,7 +295,7 @@ Three LoRA adapters are trained on top of `intfloat/multilingual-e5-large`. The 
 
 The annotation platform is a web UI where human annotators rate hadith relevance for each query.
 
-**Access**: Deployed with `APP_MODE=annotation`. This disables heavy model imports (E5, BM25 loaders) so the app runs on ~200MB RAM.
+**Access**: Deployed with `APP_MODE=annotation`. This disables heavy model imports (the Arabic encoder, BM25 loaders) so the app runs on ~200MB RAM.
 
 **Flow**:
 1. Annotator signs up → account created, query assignments auto-generated
@@ -352,7 +352,7 @@ The annotation platform is a web UI where human annotators rate hadith relevance
 | Mode | Loaded | Use case |
 |------|--------|----------|
 | `annotation` | Auth, annotation routers only | Annotation deployment — no heavy model imports |
-| `search` (default) | All routers, E5 lazy-loaded | Development and production search |
+| `search` (default) | All routers, Arabic encoder lazy-loaded | Development and production search |
 | Any other / unset | All routers | Full system |
 
 **Key env vars**:
@@ -407,7 +407,7 @@ React + TypeScript + Tailwind CSS + Vite SPA.
 - Port 8000 is nginx (rate limit on sign-in/sign-up), which proxies to the app; the app serves both the API and the built frontend files
 - Data volume must be mounted at `/app/backend/data` in the container
 - For annotation-only deployment: `APP_MODE=annotation` — minimal RAM (~200MB)
-- For full search deployment: E5 model loads lazily on first query (~3GB RAM after load)
+- For full search deployment: the Arabic encoder loads lazily on first dense query (about 0.7 GB RAM)
 
 ---
 
@@ -439,6 +439,6 @@ These are design constraints that must be maintained for the system to function 
 
 4. **The corpus must be rebuilt deterministically.** No random sampling during corpus construction. Reconstruction rules are rule-based only. The LK source commit SHA is recorded for reproducibility.
 
-5. **`APP_MODE=annotation` must not import E5 or BM25 loaders.** The annotation deployment environment does not have enough RAM. Routers that depend on search/benchmark functionality are conditionally loaded in `main.py`.
+5. **`APP_MODE=annotation` must not import the Arabic encoder or BM25 loaders.** The annotation deployment environment does not have enough RAM. Routers that depend on search/benchmark functionality are conditionally loaded in `main.py`.
 
 6. **Evaluation must use human-annotated qrels, not LLM-graded ones.** LLM grades are used only for the training data (`training_qrels_graded.json`). The 20 eval queries use `qrels_graded.json` from human annotators. These must not be mixed.

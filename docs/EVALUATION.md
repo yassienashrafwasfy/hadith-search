@@ -1,5 +1,7 @@
 # Evaluation Pipeline
 
+> **Note:** dense systems (cosine, semantic rerank, RRF) now run on Arabic queries only (item 23). The fine-tuning sections mention the old E5 model and are switched off.
+
 > This document describes the full evaluation methodology: queries, relevance judgments, metrics, statistical testing, and the baseline vs. fine-tuned comparison framework.
 
 ---

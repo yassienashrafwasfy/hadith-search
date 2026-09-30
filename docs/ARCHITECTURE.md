@@ -26,7 +26,7 @@
 │              │                      │                        │
 │  ┌───────────▼──────┐  ┌────────────▼────────────────────┐  │
 │  │  Sparse Index    │  │  Dense Index                    │  │
-│  │  BM25 / TF-IDF   │  │  E5 embeddings (pgvector)       │  │
+│  │  BM25 / TF-IDF   │  │  Arabic embeddings (pgvector)       │  │
 │  │  (postings SQL)  │  │                                 │  │
 │  └───────────┬──────┘  └────────────┬────────────────────┘  │
 │              │                      │                        │
@@ -71,10 +71,10 @@ build_inverted_index.py
         │
         ▼
 build_embeddings.py
-  ├── Read English_Matn, Arabic_Matn
-  ├── Format: "passage: {matn}" (Arabic: query-side light normalization)
-  ├── Encode with intfloat/multilingual-e5-large (CUDA)
-  └── Upsert float32 vectors into hadith_embeddings (english, arabic)
+  ├── Read Arabic_Matn
+  ├── Remove diacritics and extra spaces (encoding_text), no prefix
+  ├── Encode with the ONNX export of akhooli/sbert-nli-500k-triplets-MB (ONNX Runtime, CPU)
+  └── Upsert 256-dimension float32 vectors into hadith_embeddings.arabic
         │
         ▼
 pooling.py
@@ -101,8 +101,8 @@ routers/search.py
   │     └── Score with BM25 / TF-IDF / Overlap
   │
   └── Dense path:
-        ├── Format: "query: {query_text}"
-        ├── Encode with E5 model (loading.py LRU cache)
+        ├── Arabic only (English queries get HTTP 422)
+        ├── Clean the query with encoding_text and encode it (loading.py LRU cache)
         └── Cosine distance against the embeddings in PostgreSQL (pgvector)
                 │
                 ▼
@@ -117,13 +117,11 @@ Only the NLP and model objects are loaded lazily and cached with `functools.lru_
 
 | Loader | Object | Trigger |
 |--------|--------|---------|
-| `get_model()` | SentenceTransformer + optional LoRA adapter | First dense search |
+| `get_model()` | ONNX Runtime session (Arabic encoder) | First dense search |
 | `get_mle()` | CAMeL MLE disambiguator | First Arabic preprocessing |
 | `get_english_lemmatizer()` | NLTK WordNetLemmatizer | First English preprocessing |
 
-**LoRA adapter loading**: If `FINETUNED_ADAPTER_PATH` env var is set, `get_model()` loads the base E5 model and applies the PEFT adapter from that path. Otherwise, the base model is loaded as-is.
-
-**Warning**: Changing `FINETUNED_ADAPTER_PATH` at runtime does not invalidate the LRU cache. The server must be restarted to switch adapters.
+**Model files**: `get_model()` reads `model.onnx` and `tokenizer.json` from `backend/data/onnx/arabic` (override with `ARABIC_MODEL_DIR`). If they are missing it says to run `python -m scripts.export_onnx`.
 
 ---
 

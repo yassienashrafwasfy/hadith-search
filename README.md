@@ -77,7 +77,7 @@ You can also run steps individually:
 | 2 | `python scripts\profile.py` | Profiles the loaded corpus without modifying it | Console report |
 | 3 | `python scripts\preprocess.py` | Tokenizes, lemmatizes, and removes stopwords for full text, isnad, and matn | Adds/updates six `Preprocessed_*` columns |
 | 4 | `python scripts\build_inverted_index.py` | Builds the BM25 index over matn only | `terms`, `postings` and `hadith_lengths` tables |
-| 5 | `python scripts\build_embeddings.py` | Generates dense embeddings using `intfloat/multilingual-e5-large` over chapter title + matn only | `hadith_embeddings` table (float32 vectors) |
+| 5 | `python scripts\build_embeddings.py` | Generates Arabic dense embeddings with the ONNX encoder over the matn only (first run `python -m scripts.export_onnx` once to create the model) | `hadith_embeddings` table (float32 vectors) |
 | 6 | `python scripts\pooling.py` | Pools candidate documents for relevance judgment | `qrels_ungraded.json` |
 
 > **Note:** Step 5 requires significant VRAM (~12GB recommended). If you don't have a GPU, the script will prompt you before falling back to CPU (extremely slow).
@@ -162,14 +162,14 @@ hadith-search/
 
 ### Search Architecture
 - **Sparse Retrieval**: BM25, TF-IDF, Term Overlap — Fast, interpretable, language-independent
-- **Dense Retrieval**: Cosine Similarity using `intfloat/multilingual-e5-large` embeddings
+- **Dense Retrieval**: Cosine similarity over Arabic embeddings from `akhooli/sbert-nli-500k-triplets-MB` (ONNX, 256 dimensions). Arabic queries only
 - **Fusion**: Reciprocal Rank Fusion (RRF) for combining multiple retrieval methods
 
 ## Tech Stack
 
-- **Backend**: FastAPI, PostgreSQL + pgvector, NLTK, CAMeL Tools, Sentence Transformers
+- **Backend**: FastAPI, PostgreSQL + pgvector, NLTK, CAMeL Tools, ONNX Runtime
 - **Frontend**: React, TypeScript, Tailwind CSS, Vite
-- **Retrieval**: BM25, BM25+PRF, Dense retrieval (multilingual-e5-large), Hybrid
+- **Retrieval**: BM25, BM25+PRF, Dense retrieval (Arabic only), Hybrid
 
 ## Deploying
 

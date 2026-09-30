@@ -1,18 +1,19 @@
 # Handoff: changes since Marawan's last commit
 
-Marawan's last commit is `93a4ff9` ("Align matn embeddings, training passages, and evaluation"). Everything below was added on top of it in 35 commits (the last ones are the REST API, items 16 and 17, the security pass, item 18, nginx with the sign-in limit, item 19, PostgreSQL with pgvector, item 20, and blue/green and canary releases, item 21): about 140 files. All 418 tests pass (1 skipped: it needs NLTK data). The tests need a PostgreSQL with pgvector, see item 20. The work sits on the branch `feat/blue-green-canary`, which builds on `feat/postgres-pgvector`, `feat/rest-api-v1`, `chore/dockerfile-hardening` and `chore/precommit-hooks`, and has not been pushed.
+Marawan's last commit is `93a4ff9` ("Align matn embeddings, training passages, and evaluation"). Everything below was added on top of it in 41 commits (the last ones are the REST API, items 16 and 17, the security pass, item 18, nginx with the sign-in limit, item 19, PostgreSQL with pgvector, item 20, and blue/green and canary releases, item 21): about 140 files. All 422 tests pass (2 skipped: one needs NLTK data, one needs the exported Arabic model). The tests need a PostgreSQL with pgvector, see item 20. The work sits on the branch `feat/blue-green-canary`, which builds on `feat/postgres-pgvector`, `feat/rest-api-v1`, `chore/dockerfile-hardening` and `chore/precommit-hooks`, and has not been pushed.
 
 Each change has the same three lines: which files, why this is the normal way to do it, and what you get out of it.
 
 ## Read this first
 
-1. **The Jina reranker is gone** (item 22). `JINA_API_KEY` is no longer read, so you can delete it from your `.env` and server settings.
-2. **The database (now PostgreSQL, item 20) enforces foreign keys.** Links between tables are declared in the models and Postgres blocks a bad link and cascades deletes. Tables are created with `create_all`: it adds missing tables and never changes existing ones, and there are no migrations.
-3. **The diff looks bigger than the real change.** Every Python file was reformatted to one style, so many lines only moved or wrapped differently. Read the commit messages first, then the files.
-4. **Libraries were upgraded** to fix known security holes: numpy 1.26 to 2.5, transformers 4.43 to 5.17, starlette 0.52 to 1.3, nltk 3.9 to 3.10. The tests pass, but I could not test saved index files (`.pkl`) built with the old numpy, because this copy has no real data. If loading fails, rebuild them. A full fine-tuning run and the real E5 model were also not re-run.
-5. **Every API URL changed, and there are no old aliases.** Everything now lives under `/api/v1`, the frontend is updated, and anything else that calls the API (scripts, bookmarks) must move. The map is in item 16 below. Sign-in also works differently: set `AUTH_SECRET` (32+ characters) in `.env`, and use the same value on every server.
-6. **Passwords must now be 8 to 128 characters, and `/kv-pairs` needs a login.** Anything that called `/kv-pairs` without a token now gets 401.
-7. **The Docker container no longer runs as root.** It runs as user 10001. If you mount a folder for `backend/data` instead of using a Docker volume, run `chown 10001 <folder>` on it once.
+1. **Semantic search is Arabic only and runs on an ONNX model** (item 23). Export the model and build the embeddings before turning `FEATURE_DENSE_RETRIEVAL` on.
+2. **The Jina reranker is gone** (item 22). `JINA_API_KEY` is no longer read, so you can delete it from your `.env` and server settings.
+3. **The database (now PostgreSQL, item 20) enforces foreign keys.** Links between tables are declared in the models and Postgres blocks a bad link and cascades deletes. Tables are created with `create_all`: it adds missing tables and never changes existing ones, and there are no migrations.
+4. **The diff looks bigger than the real change.** Every Python file was reformatted to one style, so many lines only moved or wrapped differently. Read the commit messages first, then the files.
+5. **Libraries were upgraded** to fix known security holes: numpy 1.26 to 2.5, transformers 4.43 to 5.17, starlette 0.52 to 1.3, nltk 3.9 to 3.10. The tests pass, but I could not test saved index files (`.pkl`) built with the old numpy, because this copy has no real data. If loading fails, rebuild them. A full fine-tuning run and the real E5 model were also not re-run.
+6. **Every API URL changed, and there are no old aliases.** Everything now lives under `/api/v1`, the frontend is updated, and anything else that calls the API (scripts, bookmarks) must move. The map is in item 16 below. Sign-in also works differently: set `AUTH_SECRET` (32+ characters) in `.env`, and use the same value on every server.
+7. **Passwords must now be 8 to 128 characters, and `/kv-pairs` needs a login.** Anything that called `/kv-pairs` without a token now gets 401.
+8. **The Docker container no longer runs as root.** It runs as user 10001. If you mount a folder for `backend/data` instead of using a Docker volume, run `chown 10001 <folder>` on it once.
 
 `uvicorn main:app` still starts the server the same way, and the scripts still run from the command line.
 
@@ -298,7 +299,7 @@ tools/deploy.sh stop-idle           # when you are sure, stop the old colour
 **Limits:**
 
 - **One host.** If the machine goes down, both colours go with it. This is release safety, not high availability.
-- **Memory:** both colours run at once during a release. With `APP_MODE=search` each loads its own E5 model, so the host needs room for two.
+- **Memory:** both colours run at once during a release. With `APP_MODE=search` each loads its own Arabic encoder, so the host needs room for two.
 - **Behind another proxy** (see item 19) every client may share one address, so a canary would send all or none of them to the new colour. Fix the real address first.
 - **One colour is live at a time in the state file.** Do not run two `deploy.sh` commands at once.
 
@@ -317,6 +318,25 @@ tools/deploy.sh stop-idle           # when you are sure, stop the old colour
 - **Docs:** `README.md`, `docs/WIKI.md`, `docs/ARCHITECTURE.md`, `docs/EVALUATION.md` and `docs/FINE_TUNING.md` no longer list the two methods. Older items in this note that mention Jina describe how things were then.
 
 **Follow-up fix (search method picker):** the user search page had no method picker, and the dev page's picker listed methods the server had switched off, so choosing one showed a red error panel (HTTP 422). Both pages now use a shared `AlgorithmSelect` filled from `GET /api/v1/search-methods` (`frontend/src/api/useSearchMethods.ts`), so only methods the server offers are listed. The picker is there before the first search, changing it re-runs the search, and a method in the URL that the server does not offer falls back to `bm25-prf`. I checked both pages in headless Chromium against the running app: five options listed, no error panel, switching to BM25 changed the URL and results, and `?algorithm=final-pipeline` fell back to `bm25-prf`. `tsc` shows the same 6 errors as before, none in the files I touched.
+
+### 23. Semantic search uses an Arabic ONNX model instead of multilingual E5
+
+**Files:** `backend/scripts/export_onnx.py` (new), `backend/scripts/arabic_encoder.py` (new), `backend/scripts/loading.py`, `backend/scripts/build_embeddings.py`, `backend/scripts/embedding_store.py`, `backend/services/ranking.py`, `backend/services/retrieval.py`, `backend/routers/search.py`, `backend/scripts/eval_pipeline.py`, `backend/scripts/pooling.py`, `backend/scripts/finetune_eval.py`, `backend/scripts/migrate_to_postgres.py`, `backend/features.py`, `frontend/src/api/useSearchMethods.ts`, `requirements.txt`, tests.
+
+**What changed:** the dense methods (`cosine-similarity`, `semantic-rerank`, `semantic-rrf`) now use `akhooli/sbert-nli-500k-triplets-MB` (ModernBERT, Arabic only, trained with Matryoshka loss, Apache-2.0, revision `73ca7f3`). `scripts/export_onnx.py` downloads it and writes an ONNX file whose graph does the mean pooling, keeps the first 256 values and normalises them. Queries run through ONNX Runtime, so torch is only needed to export. Choices made with the owner: Arabic only, vectors cut to 256, newest opset that passes.
+
+**Opset:** the script tries opsets from the newest ONNX knows (28) down to 17 and keeps the first that ONNX Runtime 1.30 loads and whose output matches the PyTorch model (cosine 0.9999 or better on five Arabic texts, single and padded batch). Opsets 28, 27 and 26 were rejected by ONNX Runtime ("invalid graph" in the attention node). **Opset 25 was accepted, lowest cosine 0.999977.** The result is in `export.json` next to the model.
+
+**Effects you should know about:**
+
+- **English has no semantic search.** The dense methods return HTTP 422 for `lang=en`; `/search-methods` lists `languages` for each method and the picker shows only methods that fit the chosen language.
+- **Evaluation:** dense systems are scored on Arabic queries only (`ARABIC_ONLY_SYSTEMS` in `pooling.py`), and pooling skips them for English queries. Their numbers are not comparable with the BM25 rows, which cover all queries, and earlier results made with E5 cannot be reproduced.
+- **The model is not in git** (596 MB). Create it with `cd backend && python -m scripts.export_onnx`; it goes to `backend/data/onnx/arabic` (in Docker, the `hadith-data` volume), or to `ARABIC_MODEL_DIR`. Then run `python -m scripts.build_embeddings` (about an hour on 16 CPU cores for 33,064 hadiths). Both steps ran inside the container on this machine.
+- **The old E5 vectors are not used.** The `english` column of `hadith_embeddings` stays (blue and green share one schema) but is empty. `migrate_to_postgres.py` no longer copies `.npy` embeddings.
+- **Fine-tuning is disconnected.** `finetune.py` trains E5 LoRA adapters; `finetune_eval.py` stops with a message because those vectors would not match the new model. `FINETUNED_ADAPTER_PATH` is no longer read.
+- **Dependencies:** `onnxruntime` is needed at run time; `onnx` and `onnxscript` only for the export.
+
+**Not checked:** search quality. Parity with PyTorch is checked, but nobody has measured whether this model finds better hadiths than E5 on the 20 evaluation queries (`queries.json` is missing on this machine). The 256-dimension cut is the intended Matryoshka use, but its effect on ranking was not measured.
 
 ## Still open
 

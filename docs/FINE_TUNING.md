@@ -1,5 +1,7 @@
 # Fine-Tuning Methodology
 
+> **Out of date:** semantic search now uses the Arabic ONNX encoder (docs/HANDOFF.md, item 23). The fine-tuning pipeline described here targets the old E5 model and is switched off: `finetune_eval.py` stops with a message. The text below is kept as a record of that work.
+
 > This document describes the fine-tuning strategy, rationale, hyperparameters, and expected outputs for the three LoRA experiments that form the core contribution of the paper.
 
 ---

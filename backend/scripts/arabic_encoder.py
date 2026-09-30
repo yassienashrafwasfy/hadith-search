@@ -45,25 +45,29 @@ class OnnxEncoder:
 
         self._tokenizer = Tokenizer.from_file(tokenizer_path)
         self._tokenizer.enable_truncation(max_length=MAX_LENGTH)
+        self._tokenizer.no_padding()  # batches are padded here, per length-sorted batch
+        self._pad_id = self._tokenizer.token_to_id("[PAD]")
         self._session = onnxruntime.InferenceSession(model_path, providers=["CPUExecutionProvider"])
 
     def encode(self, texts: list[str], batch_size: int = BATCH_SIZE, **_ignored) -> np.ndarray:
         if not texts:
             return np.zeros((0, EMBEDDING_DIM), dtype=np.float32)
-        batches = []
-        for start in range(0, len(texts), batch_size):
-            encodings = self._tokenizer.encode_batch(texts[start : start + batch_size])
-            (vectors,) = self._session.run(
-                [OUTPUT_NAME],
-                {
-                    "input_ids": np.array([e.ids for e in encodings], dtype=np.int64),
-                    "attention_mask": np.array(
-                        [e.attention_mask for e in encodings], dtype=np.int64
-                    ),
-                },
-            )
-            batches.append(vectors)
-        return np.vstack(batches).astype(np.float32, copy=False)
+        encodings = self._tokenizer.encode_batch(texts)
+        # Texts of similar length share a batch, so short ones are not padded to the longest.
+        order = sorted(range(len(texts)), key=lambda i: len(encodings[i].ids))
+        vectors = np.empty((len(texts), EMBEDDING_DIM), dtype=np.float32)
+        for start in range(0, len(order), batch_size):
+            chosen = order[start : start + batch_size]
+            width = max(len(encodings[i].ids) for i in chosen)
+            ids = np.full((len(chosen), width), self._pad_id, dtype=np.int64)
+            mask = np.zeros((len(chosen), width), dtype=np.int64)
+            for row, i in enumerate(chosen):
+                n = len(encodings[i].ids)
+                ids[row, :n] = encodings[i].ids
+                mask[row, :n] = 1
+            (out,) = self._session.run([OUTPUT_NAME], {"input_ids": ids, "attention_mask": mask})
+            vectors[chosen] = out
+        return vectors
 
 
 def load_encoder(directory: str | None = None) -> OnnxEncoder:

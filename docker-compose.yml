@@ -5,7 +5,7 @@ x-app: &app
   expose:
     - "8000"
   environment:
-    # annotation = lightweight (no E5/index preload), search = lazy E5, research = eager E5
+    # annotation = lightweight (no encoder/index preload), search = lazy Arabic encoder, research = eager
     # Set these in .env to change what the app serves. The defaults match the annotation preset.
     - APP_MODE=${APP_MODE:-annotation}
     - FEATURE_ANNOTATION=${FEATURE_ANNOTATION:-true}

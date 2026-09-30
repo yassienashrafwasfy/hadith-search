@@ -100,3 +100,15 @@ def test_drop_rows_missing_bilingual_matn():
     kept, audit = dc.drop_rows_missing_bilingual_matn(df)
     assert list(kept["Book"]) == ["a"] and "id_before_drop" not in kept
     assert [a["id_before_drop"] for a in audit] == [2, 3]
+
+
+def test_number_labels_keep_ranges_and_drop_float_suffix():
+    from scripts import data_creation as dc
+
+    assert dc._number_label("622 -623") == "622 -623"
+    assert dc._number_label("5, 6") == "5, 6"
+    assert dc._number_label(5.0) == "5"
+    records = dc._hadith_records(
+        pd.DataFrame([{**{c: None for c in dc._MODEL_COLUMNS}, "id": 1, "Hadith_Number": "1-2"}])
+    )
+    assert records[0]["Hadith_Number"] == "1-2"

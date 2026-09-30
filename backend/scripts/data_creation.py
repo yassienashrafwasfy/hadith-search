@@ -368,6 +368,16 @@ _INT_COLUMNS = [c.name for c in Hadith.__table__.c if isinstance(c.type, Integer
 _MODEL_COLUMNS = [c.name for c in Hadith.__table__.c]
 
 
+_NUMBER_LABEL_COLUMNS = ["Section_Number", "Hadith_Number"]
+
+
+def _number_label(value):
+    """Keep ranges such as "622 -623" as written; turn whole-number floats (5.0) into "5"."""
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return str(value).strip()
+
+
 def _hadith_records(df):
     """DataFrame -> list of dicts for Hadith: NaN becomes None, integer columns become int."""
     records = df[_MODEL_COLUMNS].astype(object).where(df[_MODEL_COLUMNS].notna(), None)
@@ -376,6 +386,9 @@ def _hadith_records(df):
         for column in _INT_COLUMNS:
             if row[column] is not None:
                 row[column] = int(row[column])
+        for column in _NUMBER_LABEL_COLUMNS:
+            if row[column] is not None:
+                row[column] = _number_label(row[column])
     return rows
 
 

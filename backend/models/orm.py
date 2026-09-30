@@ -32,10 +32,11 @@ class Hadith(Base):
     Chapter_Title_Arabic = _text()
     Chapter_English = _text()
     Chapter_Arabic = _text()
-    Section_Number = _int()
+    # Text: the corpus has ranges such as "622 -623" and "5, 6" that an integer column rejects
+    Section_Number = _text()
     Section_English = _text()
     Section_Arabic = _text()
-    Hadith_Number = _int()
+    Hadith_Number = _text()
 
     English_Hadith = _text()
     English_Text = _text()

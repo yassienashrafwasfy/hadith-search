@@ -112,3 +112,17 @@ def test_build_all_checks_are_false_on_an_empty_database(_patched_paths):
     from scripts import build_all
 
     assert not build_all._has_index() and not build_all._has_embeddings()
+
+
+def test_init_schema_keeps_extra_columns_and_tables(_pg_schema):
+    """Blue/green relies on this: a newer schema's additions survive the older version starting."""
+    from sqlalchemy import inspect, text
+
+    database.init_schema_sync()
+    with database.get_sync_engine().begin() as conn:
+        conn.execute(text("ALTER TABLE hadiths ADD COLUMN added_later text"))
+        conn.execute(text("CREATE TABLE added_table (id integer)"))
+    database.init_schema_sync()  # what the older release does on startup
+    inspector = inspect(database.get_sync_engine())
+    assert "added_later" in {c["name"] for c in inspector.get_columns("hadiths")}
+    assert "added_table" in inspector.get_table_names()

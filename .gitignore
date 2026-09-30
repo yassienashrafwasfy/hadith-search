@@ -38,3 +38,4 @@ mutants/
 .coverage
 .ruff_cache/
 .pytest_cache/
+deploy/state/

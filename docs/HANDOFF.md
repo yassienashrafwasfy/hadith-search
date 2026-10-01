@@ -1,8 +1,22 @@
 # Handoff: changes since Marawan's last commit
 
-Marawan's last commit is `93a4ff9` ("Align matn embeddings, training passages, and evaluation"). Everything below was added on top of it in 45 commits (the last ones are the REST API, items 16 and 17, the security pass, item 18, nginx with the sign-in limit, item 19, PostgreSQL with pgvector, item 20, and blue/green and canary releases, item 21): about 140 files. All 431 tests pass (2 skipped: one needs NLTK data, one needs the exported Arabic model). The tests need a PostgreSQL with pgvector, see item 20. The work sits on the branch `feat/blue-green-canary`, which builds on `feat/postgres-pgvector`, `feat/rest-api-v1`, `chore/dockerfile-hardening` and `chore/precommit-hooks`, and has not been pushed.
+Marawan's last commit is `93a4ff9` ("Align matn embeddings, training passages, and evaluation"). Everything below was added on top of it in 48 commits (39 on 2026-09-30, 9 on 2026-10-01; items 22 to 24 are the newest, the others are the REST API, items 16 and 17, the security pass, item 18, nginx with the sign-in limit, item 19, PostgreSQL with pgvector, item 20, and blue/green and canary releases, item 21): about 140 files. All 431 tests pass (2 skipped: one needs NLTK data, one needs the exported Arabic model). The tests need a PostgreSQL with pgvector, see item 20. The work sits on the branch `feat/blue-green-canary`, which builds on `feat/postgres-pgvector`, `feat/rest-api-v1`, `chore/dockerfile-hardening` and `chore/precommit-hooks`, and has not been pushed.
 
 Each change has the same three lines: which files, why this is the normal way to do it, and what you get out of it.
+
+## What changed when
+
+Newest first. The numbers in brackets are the items below.
+
+| Date | Change |
+| --- | --- |
+| 2026-10-01 | Load testing and performance, 20 users on a 2 vCPU / 4 GB container: 3.0 to 14.4 requests a second, p95 12 s to 0.36 s [24]. Cold-start memory crash fixed, unused columns no longer loaded, ONNX encoder limited to 1 thread (`ARABIC_ENCODER_THREADS`), search response serialised once [24]. |
+| 2026-10-01 | Recall@3 and @8 of the three Arabic semantic methods, measured with two proxy tests [23]. |
+| 2026-10-01 | Method picker updates as soon as the search language changes; Arabic encoder batches texts by length [23]. |
+| 2026-09-30 | Arabic ONNX semantic ranker replaces multilingual E5; the Jina reranker is removed [22, 23]. |
+| 2026-09-30 | Blue/green releases and canaries, nginx with a sign-in limit, PostgreSQL with pgvector [19, 20, 21]. |
+| 2026-09-30 | Security pass, signed tokens, REST API under `/api/v1` [16, 17, 18]. |
+| 2026-09-30 | Async ORM, tests, pre-commit hooks, hardened Docker image and scans [1 to 15]. |
 
 ## Read this first
 
@@ -19,7 +33,7 @@ Each change has the same three lines: which files, why this is the normal way to
 
 ## Database and async
 
-### 1. Database through models instead of hand-written SQL
+### 1. Database through models instead of hand-written SQL (2026-09-30)
 
 **Files:** `backend/database.py`, `backend/models/orm.py` (new), `backend/routers/annotation.py`, `auth.py`, `kv_pairs.py`, `backend/scripts/data_creation.py`, `kv_generator.py`, `build_embeddings.py`
 
@@ -27,7 +41,7 @@ Each change has the same three lines: which files, why this is the normal way to
 
 **Benefit:** Fewer bugs, safer queries, and one place to read what each table looks like.
 
-### 2. Async database access
+### 2. Async database access (2026-09-30)
 
 **Files:** `backend/database.py`, `backend/routers/annotation.py`, `auth.py`, `kv_pairs.py`, `backend/startup.py`, `backend/scripts/kv_generator.py`
 
@@ -35,7 +49,7 @@ Each change has the same three lines: which files, why this is the normal way to
 
 **Benefit:** Requests no longer block each other on database calls. Command-line scripts keep a plain blocking helper (`get_sync_session`, `read_hadiths_df`), and `kv_generator.py` wraps the async calls with `asyncio.run`, so nothing about how you run scripts changed.
 
-### 3. Async tests
+### 3. Async tests (2026-09-30)
 
 **Files:** `tests/conftest.py`, `tests/test_routers.py`, `test_search_api.py`, `test_app_factory.py`, `test_startup.py`, `test_services.py`, `pyproject.toml`
 
@@ -45,7 +59,7 @@ Each change has the same three lines: which files, why this is the normal way to
 
 ## Tests
 
-### 4. Test setup, speed and naming
+### 4. Test setup, speed and naming (2026-09-30)
 
 **Files:** `tests/` (22 test files), `tests/conftest.py`, `pyproject.toml`, `requirements-dev.txt`
 
@@ -53,7 +67,7 @@ Each change has the same three lines: which files, why this is the normal way to
 
 **Benefit:** The full suite takes under half a minute and runs the same on any machine. Run it with `.venv/bin/python -m pytest`.
 
-### 5. Snapshot tests
+### 5. Snapshot tests (2026-09-30)
 
 **Files:** `tests/_snapshot.py`, `tests/test_snapshots.py`, `tests/snapshots/` (29 saved files)
 
@@ -61,7 +75,7 @@ Each change has the same three lines: which files, why this is the normal way to
 
 **Benefit:** We could split the long evaluation scripts into small functions and prove the numbers did not change. If a number changes on purpose, run the tests with `UPDATE_SNAPSHOTS=1` to save the new version.
 
-### 6. Checks that the tests are actually good
+### 6. Checks that the tests are actually good (2026-09-30)
 
 **Files:** `tools/mutation.sh`, `tools/mutation.pyproject.toml`, `tests/test_mutation_killers.py`; vulture settings in `pyproject.toml`
 
@@ -71,7 +85,7 @@ Each change has the same three lines: which files, why this is the normal way to
 
 ## Code structure
 
-### 7. Settings in one place, and an app factory
+### 7. Settings in one place, and an app factory (2026-09-30)
 
 **Files:** `backend/features.py` (new), `backend/main.py`, `.env.example` (new)
 
@@ -79,7 +93,7 @@ Each change has the same three lines: which files, why this is the normal way to
 
 **Benefit:** You can run a light version (annotation only) or the full search stack without editing code. `.env.example` lists every variable without holding real keys.
 
-### 8. Retrieval methods as a list
+### 8. Retrieval methods as a list (2026-09-30)
 
 **Files:** `backend/services/` (new: `retrieval.py`, `results.py`, `agreement.py`), `backend/routers/search.py` (284 lines down to 37)
 
@@ -87,7 +101,7 @@ Each change has the same three lines: which files, why this is the normal way to
 
 **Benefit:** Adding a search method means adding one entry, not editing a big function. Tests can swap in fake indices and a fake model.
 
-### 9. Long scripts split into short functions
+### 9. Long scripts split into short functions (2026-09-30)
 
 **Files:** `backend/scripts/preprocess.py`, `full_evaluation.py`, `finetune.py`, `finetune_eval.py`, `evaluation.py`, `profile.py`, `stats_tests.py`, `data_creation.py`, `build_embeddings.py`, `llm_validation.py`, `build_all.py`, and the new `eval_pipeline.py`
 
@@ -95,7 +109,7 @@ Each change has the same three lines: which files, why this is the normal way to
 
 **Benefit:** Bugs are easier to find, and there is less copy-pasted code.
 
-### 10. Shorter import paths
+### 10. Shorter import paths (2026-09-30)
 
 **Files:** `backend/models/__init__.py`, `backend/routers/__init__.py`, `backend/scripts/__init__.py`, `backend/lazy_exports.py`
 
@@ -105,7 +119,7 @@ Each change has the same three lines: which files, why this is the normal way to
 
 ## Tooling and safety
 
-### 11. Style checks and pre-commit hooks
+### 11. Style checks and pre-commit hooks (2026-09-30)
 
 **Files:** `pyproject.toml`, `.pre-commit-config.yaml`, `.gitignore`, `requirements-dev.txt`
 
@@ -113,7 +127,7 @@ Each change has the same three lines: which files, why this is the normal way to
 
 **Benefit:** A leaked key never reaches the repository history, where it would be hard to remove. Run `.venv/bin/pre-commit install` once after cloning.
 
-### 12. Smaller, safer Docker image
+### 12. Smaller, safer Docker image (2026-09-30)
 
 **Files:** `Dockerfile`, `.dockerignore`
 
@@ -121,7 +135,7 @@ Each change has the same three lines: which files, why this is the normal way to
 
 **Benefit:** Faster rebuilds, a smaller attack surface, and the CAMeL Arabic data now really downloads at build time (the old step always failed quietly).
 
-### 13. Security scans and library upgrades
+### 13. Security scans and library upgrades (2026-09-30)
 
 **Files:** `tools/scan-image.sh`, `.github/workflows/docker-scan.yml`, `requirements.txt`
 
@@ -129,7 +143,7 @@ Each change has the same three lines: which files, why this is the normal way to
 
 **Benefit:** The first scan found 46 fixable problems. After the library upgrades (see "Read this first") there are none. Run it locally with `docker build --pull -t hadith-search:hardened . && tools/scan-image.sh`.
 
-### 14. Dockerfile lint, health check, labels
+### 14. Dockerfile lint, health check, labels (2026-09-30)
 
 **Files:** `Dockerfile`, `.hadolint.yaml`
 
@@ -137,7 +151,7 @@ Each change has the same three lines: which files, why this is the normal way to
 
 **Benefit:** Docker can restart a hung container by itself. Anyone holding an image can tell which commit it came from.
 
-### 15. Notes for the next person
+### 15. Notes for the next person (2026-09-30)
 
 **Files:** `CLAUDE.md`, `docs/WIKI.md` (key rename), this file
 
@@ -147,7 +161,7 @@ Each change has the same three lines: which files, why this is the normal way to
 
 ## REST API
 
-### 16. Resource URLs under /api/v1
+### 16. Resource URLs under /api/v1 (2026-09-30)
 
 **Files:** `backend/rest.py` (new), `backend/tokens.py` (new), `backend/routers/` (`auth.py`, `annotation.py`, `kv_pairs.py`, `benchmark.py`, `search.py` rewritten; `hadiths.py` and `root.py` new), `backend/main.py`, `frontend/src/api/`, `frontend/src/pages/`, `tests/`
 
@@ -175,7 +189,7 @@ Behavior that differs from before:
 - The `mode` parameter of `/benchmark/finetuned` accepts only letters, digits and underscores. It used to build a file path from raw input.
 - The `response_time_ms` field is gone from search results; read the `Server-Timing` header.
 
-### 17. Signed tokens instead of a sessions table
+### 17. Signed tokens instead of a sessions table (2026-09-30)
 
 **Files:** `backend/tokens.py`, `backend/routers/auth.py`, `backend/models/orm.py`, `backend/database.py`, `.env.example`
 
@@ -187,7 +201,7 @@ Behavior that differs from before:
 
 ## Security review
 
-### 18. Fixes from a security pass over the app
+### 18. Fixes from a security pass over the app (2026-09-30)
 
 **Files:** `backend/main.py`, `backend/routers/auth.py`, `backend/routers/kv_pairs.py`, `backend/routers/search.py`, `frontend/src/pages/KvVerificationPage.tsx`, `.github/workflows/docker-scan.yml`, `requirements.txt`, `tests/test_app_factory.py`, `tests/test_routers.py`
 
@@ -216,7 +230,7 @@ Behavior that differs from before:
 - **Pickle loading is gone** (item 20). Only `migrate_to_postgres.py` touches the old files, and it reads `.npy` with `allow_pickle=False` and never opens the `.pkl` ones.
 - **The LLM scripts** (`llm_grader.py`, `kv_generator.py`) send hadith text to a model. It is offline tooling and its output is a label, so prompt injection has little to hit, but treat its output as untrusted.
 
-### 19. nginx in front of the app, with a sign-in rate limit
+### 19. nginx in front of the app, with a sign-in rate limit (2026-09-30)
 
 **Files:** `nginx/default.conf` (new), `nginx/proxy_app.conf` (new), `docker-compose.yml`, `tools/test-nginx.sh` (new), `.github/workflows/docker-scan.yml`, `backend/routers/auth.py`, `backend/main.py`, `requirements.txt`
 
@@ -236,7 +250,7 @@ Behavior that differs from before:
 
 **Docker on Windows or WSL** can hide the real client address (all requests look like the Docker gateway). The limit is correct on a Linux server; do not judge it from a Windows laptop.
 
-### 20. PostgreSQL with pgvector replaces SQLite, the pickles and the .npy files
+### 20. PostgreSQL with pgvector replaces SQLite, the pickles and the .npy files (2026-09-30)
 
 **Files:** `backend/database.py`, `backend/models/orm.py`, `backend/services/ranking.py` (new), `backend/services/retrieval.py`, `backend/services/results.py`, `backend/scripts/build_inverted_index.py`, `backend/scripts/build_embeddings.py`, `backend/scripts/embedding_store.py` (new), `backend/scripts/migrate_to_postgres.py` (new), `backend/scripts/search.py` (cut down), `backend/scripts/loading.py` (cut down), `docker-compose.yml`, `.env.example`, `tests/conftest.py`, `tests/test_ranking.py` (new), `tests/_legacy_search.py` (new)
 
@@ -259,7 +273,7 @@ Behavior that differs from before:
 
 **Not checked here:** I did not build the app image or run `docker compose up` with the real data, and the local NLTK data is missing so I could not run a real English query end to end (the ASGI tests use a stub preprocessor). The Docker image was not re-scanned.
 
-### 21. Blue/green releases and canaries on one host
+### 21. Blue/green releases and canaries on one host (2026-09-30)
 
 **Files:** `tools/deploy.sh` (new), `docker-compose.yml`, `nginx/default.conf`, `nginx/proxy_app.conf`, `tools/test-nginx.sh`, `tests/test_deploy_script.py` (new), `tests/test_database.py`, `.gitignore`, `.env.example`
 
@@ -303,7 +317,7 @@ tools/deploy.sh stop-idle           # when you are sure, stop the old colour
 - **Behind another proxy** (see item 19) every client may share one address, so a canary would send all or none of them to the new colour. Fix the real address first.
 - **One colour is live at a time in the state file.** Do not run two `deploy.sh` commands at once.
 
-### 22. The Jina reranker methods are removed
+### 22. The Jina reranker methods are removed (2026-09-30)
 
 **Files:** `backend/scripts/search.py`, `backend/services/ranking.py`, `backend/services/retrieval.py`, `backend/features.py`, `backend/scripts/eval_pipeline.py`, `backend/scripts/pooling.py`, `backend/scripts/stats_tests.py`, `frontend/src/pages/UserSearchPage.tsx`, `frontend/src/types/index.ts`, tests and snapshots, `.env.example`, `docker-compose.yml`, `README.md`, `CLAUDE.md`, `docs/`
 
@@ -319,7 +333,7 @@ tools/deploy.sh stop-idle           # when you are sure, stop the old colour
 
 **Follow-up fix (search method picker):** the user search page had no method picker, and the dev page's picker listed methods the server had switched off, so choosing one showed a red error panel (HTTP 422). Both pages now use a shared `AlgorithmSelect` filled from `GET /api/v1/search-methods` (`frontend/src/api/useSearchMethods.ts`), so only methods the server offers are listed. The picker is there before the first search, changing it re-runs the search, and a method in the URL that the server does not offer falls back to `bm25-prf`. I checked both pages in headless Chromium against the running app: five options listed, no error panel, switching to BM25 changed the URL and results, and `?algorithm=final-pipeline` fell back to `bm25-prf`. `tsc` shows the same 6 errors as before, none in the files I touched.
 
-### 23. Semantic search uses an Arabic ONNX model instead of multilingual E5
+### 23. Semantic search uses an Arabic ONNX model instead of multilingual E5 (2026-09-30 to 2026-10-01)
 
 **Files:** `backend/scripts/export_onnx.py` (new), `backend/scripts/arabic_encoder.py` (new), `backend/scripts/recall_proxy.py` (new), `backend/scripts/loading.py`, `backend/scripts/build_embeddings.py`, `backend/scripts/embedding_store.py`, `backend/services/ranking.py`, `backend/services/retrieval.py`, `backend/routers/search.py`, `backend/scripts/eval_pipeline.py`, `backend/scripts/pooling.py`, `backend/scripts/finetune_eval.py`, `backend/scripts/migrate_to_postgres.py`, `backend/features.py`, `frontend/src/api/useSearchMethods.ts`, `requirements.txt`, tests.
 

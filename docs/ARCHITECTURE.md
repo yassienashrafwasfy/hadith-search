@@ -73,7 +73,7 @@ build_inverted_index.py
 build_embeddings.py
   ├── Read Arabic_Matn
   ├── Remove diacritics and extra spaces (encoding_text), no prefix
-  ├── Encode with the ONNX export of akhooli/sbert-nli-500k-triplets-MB (ONNX Runtime, CPU)
+  ├── Encode with the ONNX export of masterofaudio2077/Fada_ar_embedding (ONNX Runtime, CPU)
   └── Upsert 256-dimension float32 vectors into hadith_embeddings.arabic
         │
         ▼

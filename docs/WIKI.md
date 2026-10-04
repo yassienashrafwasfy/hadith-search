@@ -218,7 +218,7 @@ Both pipelines are run over three text fields (full text, isnad, matn) independe
 | Semantic RRF | Dense+Sparse | Reciprocal Rank Fusion of BM25 and cosine |
 
 **Dense retrieval details**:
-- Model: `akhooli/sbert-nli-500k-triplets-MB`, exported to ONNX, vectors cut to 256 dimensions
+- Model: `masterofaudio2077/Fada_ar_embedding`, exported to ONNX, vectors cut to 256 dimensions
 - No query or passage prefix
 - Passages are the Arabic matn with diacritics removed. Queries are cleaned the same way.
 

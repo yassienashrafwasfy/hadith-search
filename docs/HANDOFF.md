@@ -400,6 +400,33 @@ Changes, in the order made (each re-measured):
 
 **Not done:** two uvicorn workers (about 1.5 GB each), a bigger DB pool, startup warm-up of the models, limiting the 500-result response or gzip (this changes the API, your call), and the stale warnings printed by the entrypoint.
 
+### 25. Settings class and dev/prod state (2026-10-03)
+
+**Files:** `backend/settings.py` (new), `backend/main.py`, `backend/tokens.py`, `backend/database.py`, `backend/scripts/arabic_encoder.py`, `tests/test_settings.py` (new), `tests/conftest.py`, `requirements.txt` (adds `pydantic-settings==2.15.0`), `Dockerfile`, `.env.example`, `CLAUDE.md`.
+
+**What changed:** the server's environment variables (`DATABASE_URL`, `AUTH_SECRET`, `AUTH_TOKEN_TTL_MINUTES`, `CORS_ORIGINS`, `STATIC_DIR`, `ARABIC_MODEL_DIR`, `ARABIC_ENCODER_THREADS`) are read by one pydantic `Settings` class instead of `os.environ` calls in four files. `get_settings()` is cached, so the environment is read once per process. `create_app` takes an optional `settings` argument. Feature flags (`APP_MODE`, `FEATURE_*`) and the script-only variables (`LLM_*`, `LORA_*`, `FINETUNE_*`) were left as they were, as agreed.
+
+**`APP_ENV`:** `dev` (default), `test`, `prod`. In `prod` the app will not start unless `AUTH_SECRET` (32 or more characters) and `CORS_ORIGINS` are set, and it serves no `/docs`, `/redoc` or `/openapi.json`. `dev` and `test` behave as before: a random secret with a warning, and local Vite origins for CORS. `*` is still accepted for `CORS_ORIGINS` in prod because it counts as set; say if prod should refuse it.
+
+**Things to know:**
+- Nothing sets `APP_ENV=prod` yet. Compose and the Dockerfile run as `dev` until you add it to `.env`.
+- The Docker `HEALTHCHECK` now calls `/api/v1` instead of `/openapi.json`, because prod hides the schema. The image was not rebuilt.
+- `AUTH_SECRET` shorter than 32 characters now raises a pydantic `ValidationError` (a `ValueError`) at startup, not a `RuntimeError` on first use.
+- Tests that change an environment variable must call `get_settings.cache_clear()`. `tests/conftest.py` clears it around every test and stops tests from reading the repo `.env`.
+- Existing coupling, not new: `tests/test_app_factory.py::test_lifespan_initialises_db_and_preloads` fails if `frontend/dist` exists, because `static_dir=""` falls back to it.
+
+**Database lifecycle (2026-10-03):** the app's lifespan now has three clear phases. On startup it creates the schema and, if the database cannot be reached, stops with "Cannot reach the database (...); check DATABASE_URL and that PostgreSQL is running" instead of a raw driver error. Then it serves. On shutdown, inside a `finally`, it calls `dispose_engines()` so pooled connections are closed even if startup or the app raised. Before this, shutdown only printed a message and nothing closed the pools except the test fixtures. Three tests in `tests/test_app_factory.py` cover it.
+
+### 26. No status codes or technical error text in the UI (2026-10-03)
+
+**Files:** `frontend/src/api/errors.ts` (new), `frontend/src/api/ApiContext.tsx`, `frontend/src/api/AuthContext.tsx`, `frontend/src/api/services.ts`, `frontend/src/components/ErrorBanner.tsx`, the sign-in, sign-up, annotation and KV pages, `frontend/src/i18n/translations/ar.ts`.
+
+**What changed:** users no longer see things like "HTTP 422" or "Search failed: 500", and the English `title` and `detail` from the server's error responses are no longer shown either. One function, `errorKey()` in `api/errors.ts`, turns any failure into an Arabic message: no connection, invalid input (400, 422), session expired (401), not allowed (403), not found (404), conflict (409), too many attempts (429), and a generic "something went wrong" for everything else. The number is still kept on `ApiError.status` so code can react to a 401, but it is never printed. Error state now holds a translation key and `ErrorBanner` and the pages show `t(key)`. A wrong password on sign-in has its own message. The sign-up checks (short name, short password, mismatch) are now Arabic too. The same rule applies to the dev pages.
+
+**Also fixed:** the old type errors (`isLanding`, `qrelData`, `idx`, the compare page passing a third argument to `search`). `npx tsc -b` and `vite build` pass. `npm run lint` still reports older problems that are not about errors: React fast-refresh rules in `ApiContext`, `AuthContext` and `Navbar`, and one setState-in-effect in `AuthContext`.
+
+**Test isolation (2026-10-03):** `_pg_schema` in `tests/conftest.py` already gave every DB test its own schema. It now also tags each connection with the schema name (`application_name`) and, in teardown, ends any connection of that test that is still open, which rolls back its transaction and frees its locks, before `DROP SCHEMA`. Other tests running in parallel are not touched. Tests: `tests/test_db_isolation.py`.
+
 ## Still open
 
 - Nothing has been pushed and no PR exists. Everything is on local branches.

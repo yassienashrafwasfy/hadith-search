@@ -162,7 +162,7 @@ hadith-search/
 
 ### Search Architecture
 - **Sparse Retrieval**: BM25, TF-IDF, Term Overlap — Fast, interpretable, language-independent
-- **Dense Retrieval**: Cosine similarity over Arabic embeddings from `akhooli/sbert-nli-500k-triplets-MB` (ONNX, 256 dimensions). Arabic queries only
+- **Dense Retrieval**: Cosine similarity over Arabic embeddings from `masterofaudio2077/Fada_ar_embedding` (ONNX, 256 dimensions). Arabic queries only
 - **Fusion**: Reciprocal Rank Fusion (RRF) for combining multiple retrieval methods
 
 ## Tech Stack

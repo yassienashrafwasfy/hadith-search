@@ -1,6 +1,7 @@
 import { useLanguage } from '../i18n/useLanguage';
 
 interface ErrorBannerProps {
+  // A translation key (see api/errors.ts), never raw text.
   message: string | null;
   onDismiss?: () => void;
 }
@@ -14,7 +15,7 @@ const ErrorBanner = ({ message, onDismiss }: ErrorBannerProps) => {
     <div className="flex items-center justify-between bg-error-container dark:bg-dark-error-container text-on-error-container dark:text-dark-on-error-container rounded-lg p-4 animate-fade-in">
       <div className="flex items-center gap-3">
         <span className="material-symbols-outlined text-[20px]">error</span>
-        <span className="font-ui-label text-ui-label">{message}</span>
+        <span className="font-ui-label text-ui-label">{t(message)}</span>
       </div>
       {onDismiss && (
         <button

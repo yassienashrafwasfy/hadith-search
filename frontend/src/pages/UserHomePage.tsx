@@ -5,7 +5,7 @@ import SearchBar from '../components/SearchBar';
 import GradeFilter from '../components/GradeFilter';
 import BookFilter from '../components/BookFilter';
 import HadithOfTheDay from '../components/HadithOfTheDay';
-import { POPULAR_QUERIES_EN, POPULAR_QUERIES_AR } from '../constants';
+import { POPULAR_QUERIES_AR } from '../constants';
 import { useLanguage } from '../i18n/useLanguage';
 import { getAppMode } from '../components/Navbar';
 import type { Lang } from '../types';
@@ -14,7 +14,7 @@ const HOTD_ID_KEY = 'hotd_id';
 
 const UserHomePage = () => {
   const navigate = useNavigate();
-  const { t, language } = useLanguage();
+  const { t } = useLanguage();
   const [selectedGrade, setSelectedGrade] = useState<string | null>(null);
   const [selectedBook, setSelectedBook] = useState<string | null>(null);
 
@@ -38,8 +38,6 @@ const UserHomePage = () => {
       navigate(`/user/search?${params.toString()}`);
     }
   };
-
-  const popularQueries = language === 'ar' ? POPULAR_QUERIES_AR : POPULAR_QUERIES_EN;
 
   return (
     <main className="flex-grow flex flex-col items-center justify-center px-margin-mobile md:px-margin-desktop py-16 w-full max-w-container-max-width mx-auto relative">
@@ -71,10 +69,10 @@ const UserHomePage = () => {
           <span className="font-ui-caption text-ui-caption text-on-surface-variant dark:text-dark-on-surface-variant uppercase tracking-wider me-1">
             {t('home.popular')}
           </span>
-          {popularQueries.map((tag) => (
+          {POPULAR_QUERIES_AR.map((tag) => (
             <button
               key={tag}
-              onClick={() => handleSearch(tag, language === 'ar' ? 'ar' : 'en')}
+              onClick={() => handleSearch(tag, 'ar')}
               className="px-3 py-1.5 rounded-full bg-surface-container dark:bg-dark-surface-container text-on-surface-variant dark:text-dark-on-surface-variant font-ui-caption text-ui-caption hover:bg-secondary-container dark:hover:bg-dark-secondary-container hover:text-on-secondary-container dark:hover:text-dark-on-secondary-container transition-colors duration-200 border border-outline-variant dark:border-dark-outline-variant hover:border-secondary dark:hover:border-dark-secondary"
             >
               {tag}

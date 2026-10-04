@@ -24,14 +24,12 @@ const ALGO_LABELS: Record<string, string> = {
 const DevBenchmarkPage = () => {
   const { t } = useLanguage();
   const { getBenchmarks, getQrels, loading, errors, clearError } = useApi();
-  const [qrelData, setQrelData] = useState<{ description: string; qrels: Record<string, { query: string; grades: Record<string, unknown> }> } | null>(null);
   const [benchmarkResults, setBenchmarkResults] = useState<BenchmarkResults | null>(null);
 
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [qrels, benchmarks] = await Promise.all([getQrels(), getBenchmarks()]);
-        setQrelData(qrels as { description: string; qrels: Record<string, { query: string; grades: Record<string, unknown> }> });
+        const [, benchmarks] = await Promise.all([getQrels(), getBenchmarks()]);
         setBenchmarkResults(benchmarks);
       } catch {
         // errors handled by ApiContext
@@ -101,7 +99,7 @@ const DevBenchmarkPage = () => {
       <tbody className="divide-y divide-outline-variant dark:divide-dark-outline-variant">
         {Object.entries(benchmarkResults.BM25)
           .filter(([queryId]) => queryId !== 'MEAN')
-          .map(([queryId, entry], idx) => {
+          .map(([queryId, entry]) => {
             const isArabic = queryId.startsWith('AR');
             return (
               <tr

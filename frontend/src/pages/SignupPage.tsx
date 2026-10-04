@@ -1,8 +1,11 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../api/AuthContext';
+import { errorKey } from '../api/errors';
+import { useLanguage } from '../i18n/useLanguage';
 
 const SignupPage = () => {
+  const { t } = useLanguage();
   const navigate = useNavigate();
   const { signup, token, loading: authLoading } = useAuth();
   const [username, setUsername] = useState('');
@@ -20,15 +23,15 @@ const SignupPage = () => {
     setError(null);
 
     if (username.length < 3) {
-      setError('Username must be at least 3 characters');
+      setError('error.usernameShort');
       return;
     }
     if (password.length < 6) {
-      setError('Password must be at least 6 characters');
+      setError('error.passwordShort');
       return;
     }
     if (password !== confirmPassword) {
-      setError('Passwords do not match');
+      setError('error.passwordMismatch');
       return;
     }
 
@@ -37,7 +40,7 @@ const SignupPage = () => {
       await signup(username, password);
       navigate('/dev/annotation/guidelines');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Signup failed');
+      setError(errorKey(err));
     } finally {
       setLoading(false);
     }
@@ -57,7 +60,7 @@ const SignupPage = () => {
       <form onSubmit={handleSubmit} className="flex flex-col gap-4">
         {error && (
           <div className="bg-error-container text-on-error-container p-4 rounded-lg text-sm">
-            {error}
+            {t(error)}
           </div>
         )}
 

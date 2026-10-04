@@ -1,15 +1,9 @@
 import { API_BASE_URL } from './config';
+import { ApiError } from './errors';
 import { validateSearchResponse, validateBenchmarkResults } from './validators';
 import type { SearchResponse, BenchmarkResults, SearchRequest, Lang } from '../types';
 
-export class ApiError extends Error {
-  status: number;
-  constructor(message: string, status: number) {
-    super(message);
-    this.name = 'ApiError';
-    this.status = status;
-  }
-}
+export { ApiError };
 
 const API_V1 = `${API_BASE_URL}/api/v1`;
 
@@ -31,7 +25,7 @@ export const searchHadiths = async (
   const response = await fetch(`${API_V1}/searches?${params}`, { signal });
 
   if (!response.ok) {
-    throw new ApiError(`Search failed: ${response.status} ${response.statusText}`, response.status);
+    throw new ApiError(`Search failed: ${response.status}`, response.status);
   }
 
   const data = validateSearchResponse(await response.json());

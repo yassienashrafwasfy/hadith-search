@@ -1,14 +1,3 @@
-export const POPULAR_QUERIES_EN = [
-  'Prayer times',
-  'Fasting',
-  'Charity',
-  'Patience',
-  'Forgiveness',
-  'Knowledge',
-  'Mercy',
-  'Truthfulness',
-];
-
 export const POPULAR_QUERIES_AR = [
   'أوقات الصلاة',
   'الصيام',

@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../api/AuthContext';
+import { errorKey, ensureOk } from '../api/errors';
+import { useLanguage } from '../i18n/useLanguage';
 import { API_BASE_URL } from '../api/config';
 import LoadingSpinner from '../components/LoadingSpinner';
 
@@ -39,6 +41,7 @@ type StatusFilter = (typeof STATUS_FILTERS)[number] | 'all';
 const PAGE_SIZE = 10;
 
 const KvVerificationPage = () => {
+  const { t } = useLanguage();
   const { token, loading: authLoading, authFetch } = useAuth();
   const navigate = useNavigate();
   const [pairs, setPairs] = useState<KvPair[]>([]);
@@ -57,7 +60,7 @@ const KvVerificationPage = () => {
   const fetchStats = useCallback(async () => {
     try {
       const res = await authFetch(`${API_BASE_URL}/api/v1/kv-pairs/statistics`);
-      if (!res.ok) throw new Error('Failed to fetch stats');
+      ensureOk(res);
       const data = await res.json();
       setStats(data);
     } catch {
@@ -75,12 +78,12 @@ const KvVerificationPage = () => {
       });
       if (statusFilter !== 'all') params.set('status', statusFilter);
       const res = await authFetch(`${API_BASE_URL}/api/v1/kv-pairs?${params}`);
-      if (!res.ok) throw new Error('Failed to fetch KV pairs');
+      ensureOk(res);
       const data: KvResponse = await res.json();
       setPairs(data.pairs);
       setTotal(data.total);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error');
+      setError(errorKey(err));
     } finally {
       setLoading(false);
     }
@@ -102,7 +105,7 @@ const KvVerificationPage = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status }),
       });
-      if (!res.ok) throw new Error('Failed to verify');
+      ensureOk(res);
       setPairs((prev) => prev.filter((p) => p.id !== pairId));
       setTotal((prev) => Math.max(0, prev - 1));
       fetchStats();
@@ -112,7 +115,7 @@ const KvVerificationPage = () => {
         fetchPairs();
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error');
+      setError(errorKey(err));
     } finally {
       setVerifyingId(null);
     }
@@ -176,7 +179,7 @@ const KvVerificationPage = () => {
 
       {error && (
         <div className="bg-error-container text-on-error-container p-4 rounded-lg">
-          Error: {error}
+          {t(error)}
         </div>
       )}
 

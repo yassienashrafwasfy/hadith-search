@@ -1,5 +1,6 @@
 import { createContext, useState, useRef, useCallback, useMemo, type ReactNode } from 'react';
 import { searchHadiths, getBenchmarkResults, getBenchmarkQrels, getHadithById } from './services';
+import { errorKey } from './errors';
 import type { SearchResponse, BenchmarkResults, SearchRequest } from '../types';
 
 interface ApiState {
@@ -16,7 +17,7 @@ interface ApiState {
 }
 
 export interface ApiContextValue extends ApiState {
-  search: (algorithm: string, request: SearchRequest) => Promise<SearchResponse>;
+  search: (algorithm: string, request: SearchRequest, signal?: AbortSignal) => Promise<SearchResponse>;
   getBenchmarks: () => Promise<BenchmarkResults>;
   getQrels: () => Promise<{ qrels: Record<string, { query: string; grades: Record<string, unknown> }> }>;
   getHadith: (id: number) => Promise<Record<string, unknown> | null>;
@@ -89,7 +90,7 @@ export const ApiProvider = ({ children }: { children: ReactNode }) => {
       if (err instanceof DOMException && err.name === 'AbortError') {
         return { number_of_results: 0, results: [] };
       }
-      const message = err instanceof Error ? err.message : 'Search failed';
+      const message = errorKey(err);
       setErrors((prev) => ({ ...prev, search: message }));
       return { number_of_results: 0, results: [] };
     }
@@ -114,7 +115,7 @@ export const ApiProvider = ({ children }: { children: ReactNode }) => {
       if (err instanceof DOMException && err.name === 'AbortError') {
         return {};
       }
-      const message = err instanceof Error ? err.message : 'Benchmark fetch failed';
+      const message = errorKey(err);
       setErrors((prev) => ({ ...prev, benchmarks: message }));
       return {};
     }
@@ -139,7 +140,7 @@ export const ApiProvider = ({ children }: { children: ReactNode }) => {
       if (err instanceof DOMException && err.name === 'AbortError') {
         return { qrels: {} };
       }
-      const message = err instanceof Error ? err.message : 'Qrels fetch failed';
+      const message = errorKey(err);
       setErrors((prev) => ({ ...prev, benchmarks: message }));
       return { qrels: {} };
     }
@@ -164,7 +165,7 @@ export const ApiProvider = ({ children }: { children: ReactNode }) => {
       if (err instanceof DOMException && err.name === 'AbortError') {
         return null;
       }
-      const message = err instanceof Error ? err.message : 'Hadith fetch failed';
+      const message = errorKey(err);
       setErrors((prev) => ({ ...prev, hadith: message }));
       return null;
     }

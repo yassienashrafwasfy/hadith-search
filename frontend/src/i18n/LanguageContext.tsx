@@ -1,11 +1,10 @@
 import { createContext } from 'react';
 
-export type Language = 'en' | 'ar';
+// The site is Arabic only; the context stays so components keep one way to read text.
+export type Language = 'ar';
 
 export interface LanguageContextValue {
   language: Language;
-  setLanguage: (lang: Language) => void;
-  toggleLanguage: () => void;
   t: (key: string, params?: Record<string, string | number>) => string;
   isRTL: boolean;
 }

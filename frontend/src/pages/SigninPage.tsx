@@ -1,8 +1,11 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../api/AuthContext';
+import { ApiError, errorKey } from '../api/errors';
+import { useLanguage } from '../i18n/useLanguage';
 
 const SigninPage = () => {
+  const { t } = useLanguage();
   const navigate = useNavigate();
   const { signin, token, loading: authLoading } = useAuth();
   const [username, setUsername] = useState('');
@@ -23,7 +26,7 @@ const SigninPage = () => {
       await signin(username, password);
       navigate('/dev/annotation');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Signin failed');
+      setError(err instanceof ApiError && err.status === 401 ? 'error.badCredentials' : errorKey(err));
     } finally {
       setLoading(false);
     }
@@ -43,7 +46,7 @@ const SigninPage = () => {
       <form onSubmit={handleSubmit} className="flex flex-col gap-4">
         {error && (
           <div className="bg-error-container text-on-error-container p-4 rounded-lg text-sm">
-            {error}
+            {t(error)}
           </div>
         )}
 

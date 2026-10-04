@@ -24,7 +24,7 @@ const UserSearchPage = () => {
   const resultsRef = useRef<HTMLDivElement>(null);
 
   const [query, setQuery] = useState(searchParams.get('q') || '');
-  const [lang, setLang] = useState<Lang>((searchParams.get('lang') as Lang) || 'en');
+  const lang: Lang = 'ar';
   const { options, resolve, ready } = useSearchMethods(lang);
   const [selectedAlgorithm, setSelectedAlgorithm] = useState(searchParams.get('algorithm') || 'bm25-prf');
   const [selectedGrade, setSelectedGrade] = useState<string | null>(searchParams.get('grade') || null);
@@ -73,7 +73,6 @@ const UserSearchPage = () => {
 
   const handleSearch = (newQuery: string, newLang: Lang) => {
     setQuery(newQuery);
-    setLang(newLang);
     doSearch(newQuery, newLang);
   };
 
@@ -136,8 +135,6 @@ const UserSearchPage = () => {
       <div className="w-full max-w-4xl">
         <SearchBar
           onSearch={handleSearch}
-          onLangChange={setLang}
-          initialLang={lang}
           initialQuery={query}
           disabled={loading.search}
         />

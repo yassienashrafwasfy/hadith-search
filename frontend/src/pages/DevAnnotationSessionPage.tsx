@@ -2,6 +2,8 @@ import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { API_BASE_URL } from '../api/config';
 import { useAuth } from '../api/AuthContext';
+import { errorKey, ensureOk } from '../api/errors';
+import { useLanguage } from '../i18n/useLanguage';
 import LoadingSpinner from '../components/LoadingSpinner';
 
 interface Hadith {
@@ -36,6 +38,7 @@ const GRADE_COLORS: Record<number, string> = {
 };
 
 const DevAnnotationSessionPage = () => {
+  const { t } = useLanguage();
   const { queryId } = useParams<{ queryId: string }>();
   const navigate = useNavigate();
   const { token, loading: authLoading, authFetch } = useAuth();
@@ -65,11 +68,11 @@ const DevAnnotationSessionPage = () => {
           navigate('/dev/annotation/signin');
           return;
         }
-        if (!response.ok) throw new Error('Failed to fetch state');
+        ensureOk(response);
         const data = await response.json();
         if (mounted) setState(data);
       } catch (err) {
-        if (mounted) setError(err instanceof Error ? err.message : 'Unknown error');
+        if (mounted) setError(errorKey(err));
       } finally {
         if (mounted) setLoading(false);
       }
@@ -95,7 +98,7 @@ const DevAnnotationSessionPage = () => {
         headers: json,
         body: JSON.stringify({ label })
       });
-      if (!saved.ok) throw new Error(`Label save failed: ${saved.status}`);
+      ensureOk(saved);
       // Saving a label no longer moves the cursor; do that explicitly.
       await authFetch(`${base}/progress`, {
         method: 'PUT',
@@ -160,7 +163,7 @@ const DevAnnotationSessionPage = () => {
     return (
       <main className="flex-grow w-full max-w-[90rem] mx-auto px-4 sm:px-6 lg:px-8 py-10 flex flex-col gap-4 page-enter">
         <div className="bg-error-container text-on-error-container p-4 rounded-lg">
-          Error: {error}
+          {t(error)}
         </div>
         <button
           onClick={() => navigate('/dev/annotation')}

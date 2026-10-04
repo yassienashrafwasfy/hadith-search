@@ -1,6 +1,5 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { ThemeToggle } from './ThemeToggle';
-import { LanguageToggle } from './LanguageToggle';
 import { useLanguage } from '../i18n/useLanguage';
 
 export const APP_MODE_KEY = 'app_mode';
@@ -32,7 +31,6 @@ const Navbar = ({ mode, onModeChange }: NavbarProps) => {
 
   const handleModeToggle = () => {
     const path = location.pathname;
-    const isLanding = path === '/user/' || path === '/dev/';
     const isSearch = path === '/user/search' || path === '/dev/search';
 
     if (isDev) {
@@ -95,7 +93,6 @@ const Navbar = ({ mode, onModeChange }: NavbarProps) => {
           })}
         </nav>
         <div className="flex items-center gap-2">
-          <LanguageToggle />
           <ThemeToggle />
           <button
             onClick={handleModeToggle}

@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { API_BASE_URL } from '../api/config';
 import { useAuth } from '../api/AuthContext';
+import { errorKey, ensureOk } from '../api/errors';
+import { useLanguage } from '../i18n/useLanguage';
 import LoadingSpinner from '../components/LoadingSpinner';
 
 interface QueryInfo {
@@ -13,6 +15,7 @@ interface QueryInfo {
 }
 
 const DevAnnotationPage = () => {
+  const { t } = useLanguage();
   const navigate = useNavigate();
   const { token, annotator, loading: authLoading, signout, authFetch } = useAuth();
   const [queries, setQueries] = useState<QueryInfo[]>([]);
@@ -36,11 +39,11 @@ const DevAnnotationPage = () => {
           navigate('/dev/annotation/signin');
           return;
         }
-        if (!response.ok) throw new Error('Failed to fetch queries');
+        ensureOk(response);
         const data = await response.json();
         if (mounted) setQueries(data.assignments);
       } catch (err) {
-        if (mounted) setError(err instanceof Error ? err.message : 'Unknown error');
+        if (mounted) setError(errorKey(err));
       } finally {
         if (mounted) setLoading(false);
       }
@@ -110,7 +113,7 @@ const DevAnnotationPage = () => {
 
       {error && (
         <div className="bg-error-container text-on-error-container p-4 rounded-lg">
-          Error: {error}
+          {t(error)}
         </div>
       )}
 

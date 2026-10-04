@@ -18,7 +18,7 @@ const DevComparePage = () => {
   const resultsRef = useRef<HTMLDivElement>(null);
 
   const [query, setQuery] = useState('');
-  const [lang, setLang] = useState<Lang>('en');
+  const [lang, setLang] = useState<Lang>('ar');
   const [algorithmA, setAlgorithmA] = useState('bm25-prf');
   const [algorithmB, setAlgorithmB] = useState('bm25');
   const [selectedGrade, setSelectedGrade] = useState<string | null>(null);

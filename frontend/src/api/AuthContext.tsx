@@ -1,5 +1,6 @@
 import { createContext, useState, useCallback, useEffect, useContext, type ReactNode } from 'react';
 import { API_BASE_URL } from './config';
+import { ensureOk } from './errors';
 
 export const useAuth = () => {
   const ctx = useContext(AuthContext);
@@ -22,19 +23,6 @@ interface AnnotatorResource extends Annotator {
 }
 
 const API_V1 = `${API_BASE_URL}/api/v1`;
-
-// Errors come back as application/problem+json; `detail` is the human-readable part.
-const problemDetail = async (response: Response, fallback: string): Promise<string> => {
-  try {
-    const problem = await response.json();
-    if (Array.isArray(problem.errors) && problem.errors.length) {
-      return problem.errors.map((e: { field: string; message: string }) => `${e.field}: ${e.message}`).join(', ');
-    }
-    return problem.detail || fallback;
-  } catch {
-    return fallback;
-  }
-};
 
 interface AuthState {
   token: string | null;
@@ -114,9 +102,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username, password }),
     });
-    if (!response.ok) {
-      throw new Error(await problemDetail(response, 'Signup failed'));
-    }
+    ensureOk(response);
     const data: { access_token: string; annotator: AnnotatorResource } = await response.json();
     localStorage.setItem(TOKEN_KEY, data.access_token);
     setState({
@@ -133,9 +119,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username, password }),
     });
-    if (!response.ok) {
-      throw new Error(await problemDetail(response, 'Signin failed'));
-    }
+    ensureOk(response);
     const data: { access_token: string; annotator: AnnotatorResource } = await response.json();
     localStorage.setItem(TOKEN_KEY, data.access_token);
     setState({

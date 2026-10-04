@@ -2,8 +2,8 @@
 
     python -m scripts.export_onnx [--out DIR] [--opset N]
 
-Downloads `akhooli/sbert-nli-500k-triplets-MB` (a ModernBERT Arabic model, mean pooling, trained
-with Matryoshka loss), wraps it so the graph itself does the mean pooling, cuts the vector to
+Downloads `masterofaudio2077/Fada_ar_embedding` (an ARBERTv2-based Arabic BERT, mean pooling, trained
+with Matryoshka loss and distilled from Qwen3-Embedding-8B), wraps it so the graph itself does the mean pooling, cuts the vector to
 `EMBEDDING_DIM` and L2-normalises it, and writes `model.onnx`, `tokenizer.json` and
 `export.json` into the output directory.
 
@@ -29,7 +29,7 @@ from scripts.arabic_encoder import (
     encoding_text,
 )
 
-MODEL_ID = "akhooli/sbert-nli-500k-triplets-MB"
+MODEL_ID = "masterofaudio2077/Fada_ar_embedding"
 MIN_OPSET = 17
 PARITY_MIN_COSINE = 0.9999
 DEFAULT_OUT = os.path.join(
@@ -93,9 +93,9 @@ def reference_vectors(model_dir_or_id: str, texts: list[str]) -> np.ndarray:
     """What the original PyTorch SentenceTransformer gives, cut and renormalised the same way."""
     from sentence_transformers import SentenceTransformer
 
-    full = SentenceTransformer(model_dir_or_id, device="cpu").encode(
-        [encoding_text(t) for t in texts], convert_to_numpy=True
-    )
+    model = SentenceTransformer(model_dir_or_id, device="cpu")
+    model.max_seq_length = MAX_LENGTH  # the saved default is 200, but serving truncates at 512
+    full = model.encode([encoding_text(t) for t in texts], convert_to_numpy=True)
     cut = full[:, :EMBEDDING_DIM]
     return cut / np.linalg.norm(cut, axis=1, keepdims=True)
 

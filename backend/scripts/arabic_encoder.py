@@ -1,6 +1,6 @@
 """Arabic sentence encoder served through ONNX Runtime (no torch at query time).
 
-The model is `akhooli/sbert-nli-500k-triplets-MB`, exported by `scripts/export_onnx.py`. The
+The model is `masterofaudio2077/Fada_ar_embedding`, exported by `scripts/export_onnx.py`. The
 ONNX graph does the mean pooling, keeps the first `EMBEDDING_DIM` values (the model was trained
 with Matryoshka loss, so a cut vector is meant to work) and normalises to unit length. It has no
 query or passage prefix: queries and hadiths go through the same `encoding_text`.
@@ -13,8 +13,8 @@ import numpy as np
 
 from settings import DEFAULT_ENCODER_THREADS, get_settings
 
-EMBEDDING_DIM = 256
-MAX_LENGTH = 512  # the model accepts 8192, but it was trained on texts of up to ~250 tokens
+EMBEDDING_DIM = 64
+MAX_LENGTH = 512  # BERT limit; the model was trained on texts of up to 200 tokens
 MODEL_DIR_ENV = "ARABIC_MODEL_DIR"
 THREADS_ENV = "ARABIC_ENCODER_THREADS"
 DEFAULT_THREADS = DEFAULT_ENCODER_THREADS

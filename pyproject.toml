@@ -38,5 +38,5 @@ paths = ["backend", "tests"]
 exclude = ["backend/models/", ".mutation", "mutants"]  # declarative columns/fields only
 min_confidence = 60
 # ORM/pydantic fields, FastAPI handlers and pytest fixtures are used by frameworks, not by name
-ignore_decorators = ["@router.*", "@app.*", "@_system", "@pytest.fixture", "@pytest_asyncio.fixture"]
-ignore_names = ["model_config", "pytestmark", "forward"]  # forward: torch.nn.Module hook
+ignore_decorators = ["@router.*", "@app.*", "@_system", "@pytest.fixture", "@pytest_asyncio.fixture", "@model_validator*"]
+ignore_names = ["model_config", "pytestmark", "forward", "max_seq_length"]  # forward: torch.nn.Module hook; max_seq_length: set on a SentenceTransformer

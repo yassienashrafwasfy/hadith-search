@@ -6,7 +6,6 @@ be revoked before it expires (there is no sign-out call; the client just drops i
 """
 
 import logging
-import os
 import secrets
 import time
 from dataclasses import dataclass
@@ -14,10 +13,11 @@ from functools import lru_cache
 
 import jwt
 
+import settings as settings_module
+
 logger = logging.getLogger(__name__)
 
-DEFAULT_TTL_MINUTES = 720
-MIN_SECRET_LENGTH = 32  # HS256 wants a key as long as its 256-bit hash
+DEFAULT_TTL_MINUTES = settings_module.DEFAULT_TTL_MINUTES
 
 
 @dataclass(frozen=True)
@@ -28,18 +28,16 @@ class AuthSettings:
 
 @lru_cache
 def auth_settings() -> AuthSettings:
-    """Read once from the environment; override this dependency in tests."""
-    secret = os.environ.get("AUTH_SECRET")
+    """Built once from `get_settings()`; override this dependency in tests."""
+    env = settings_module.get_settings()
+    secret = env.auth_secret.get_secret_value() if env.auth_secret else None
     if not secret:
         secret = secrets.token_urlsafe(32)
         logger.warning(
             "AUTH_SECRET is not set: using a random secret, so tokens stop working on "
             "restart and are rejected by any other server. Set AUTH_SECRET to share it."
         )
-    if len(secret) < MIN_SECRET_LENGTH:
-        raise RuntimeError(f"AUTH_SECRET must be at least {MIN_SECRET_LENGTH} characters long")
-    ttl_minutes = int(os.environ.get("AUTH_TOKEN_TTL_MINUTES", DEFAULT_TTL_MINUTES))
-    return AuthSettings(secret=secret, ttl_seconds=ttl_minutes * 60)
+    return AuthSettings(secret=secret, ttl_seconds=env.auth_token_ttl_minutes * 60)
 
 
 def issue_token(annotator_id: int, username: str, settings: AuthSettings) -> str:

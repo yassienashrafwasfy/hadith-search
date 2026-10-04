@@ -5,6 +5,7 @@ import numpy as np
 import pytest
 
 from scripts import arabic_encoder as ae
+from settings import get_settings
 
 
 def test_encoding_text_drops_diacritics_and_collapses_space():
@@ -18,6 +19,7 @@ def test_missing_model_says_how_to_export(tmp_path):
 
 def test_model_dir_can_be_overridden(monkeypatch):
     monkeypatch.setenv(ae.MODEL_DIR_ENV, "/somewhere")
+    get_settings.cache_clear()
     assert ae.model_dir() == "/somewhere"
 
 
@@ -46,8 +48,10 @@ def test_real_model_vectors_are_unit_length_and_padding_independent():
 
 def test_serving_threads_default_and_override(monkeypatch):
     monkeypatch.delenv(ae.THREADS_ENV, raising=False)
+    get_settings.cache_clear()
     assert ae.serving_threads() == 1
     monkeypatch.setenv(ae.THREADS_ENV, "3")
+    get_settings.cache_clear()
     assert ae.serving_threads() == 3
 
 

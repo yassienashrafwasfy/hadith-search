@@ -5,7 +5,6 @@ Set `DATABASE_URL` to a SQLAlchemy URL using the psycopg driver, e.g.
 extension available; `init_schema` turns it on.
 """
 
-import os
 from datetime import datetime, timezone
 
 import pandas as pd
@@ -31,6 +30,7 @@ from models import (
     Posting,
     Term,
 )
+from settings import get_settings
 
 __all__ = [
     "Annotation",
@@ -80,7 +80,7 @@ _sync_engines: dict = {}
 
 
 def database_url() -> str:
-    url = os.environ.get("DATABASE_URL")
+    url = get_settings().database_url
     if not url:
         raise RuntimeError(
             "DATABASE_URL is not set. Example: "

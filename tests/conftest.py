@@ -17,12 +17,42 @@ import pytest
 import pytest_asyncio
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import DDL, create_engine, func, insert, select
+from sqlalchemy import (
+    DDL,
+    Column,
+    Integer,
+    MetaData,
+    String,
+    Table,
+    create_engine,
+    func,
+    insert,
+    select,
+)
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.pool import NullPool
 
 from models import Hadith
+from settings import Settings, get_settings
+
+# pg_stat_activity as a table, so the rollback helper needs no raw SQL
+PgStatActivity = Table(
+    "pg_stat_activity",
+    MetaData(schema="pg_catalog"),
+    Column("pid", Integer),
+    Column("application_name", String),
+)
+
+
+@pytest.fixture(autouse=True)
+def _hermetic_settings(monkeypatch):
+    """No repo `.env` in tests, and a fresh settings object for every test."""
+    monkeypatch.setitem(Settings.model_config, "env_file", None)
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
+
 
 TEST_DATABASE_URL = os.environ.get(
     "TEST_DATABASE_URL",
@@ -190,20 +220,45 @@ def _pg_ready():
     return TEST_DATABASE_URL
 
 
+def _rollback_open_transactions(admin, tag: str) -> int:
+    """Roll back whatever connections tagged `tag` (their application_name) left open.
+
+    A test that fails halfway can leave a transaction open with locks on its tables, and
+    DROP SCHEMA would then wait for it. Ending the backend rolls its transaction back.
+    Returns how many connections were ended.
+    """
+    with admin.connect() as conn:
+        pids = conn.execute(
+            select(func.pg_terminate_backend(PgStatActivity.c.pid)).where(
+                PgStatActivity.c.application_name == tag,
+                PgStatActivity.c.pid != func.pg_backend_pid(),
+            )
+        ).scalars()
+        return len(list(pids))
+
+
 @pytest.fixture
 def _pg_schema(_pg_ready, monkeypatch):
-    """A fresh empty schema for this test; DATABASE_URL points at it and it is dropped after."""
+    """A fresh empty schema for this test; DATABASE_URL points at it.
+
+    Every connection of the test is tagged with the schema name. After the test, anything still
+    open is rolled back, then the schema is dropped.
+    """
     import database
 
     name = f"t_{uuid.uuid4().hex[:12]}"
     admin = create_engine(_pg_ready, poolclass=NullPool, isolation_level="AUTOCOMMIT")
     with admin.connect() as conn:
         conn.execute(DDL(f'CREATE SCHEMA "{name}"'))
-    url = make_url(_pg_ready).update_query_dict({"options": f"-csearch_path={name},public"})
+    url = make_url(_pg_ready).update_query_dict(
+        {"options": f"-csearch_path={name},public", "application_name": name}
+    )
     monkeypatch.setenv("DATABASE_URL", url.render_as_string(hide_password=False))
+    get_settings.cache_clear()
     monkeypatch.setattr(database, "ENGINE_KWARGS", {"poolclass": NullPool})
     yield name
     asyncio.run(database.dispose_engines())
+    _rollback_open_transactions(admin, name)
     with admin.connect() as conn:
         conn.execute(DDL(f'DROP SCHEMA "{name}" CASCADE'))
     admin.dispose()

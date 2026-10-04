@@ -68,6 +68,59 @@ async def test_lifespan_initialises_db_and_preloads(_patched_paths, monkeypatch,
     assert "No frontend build found" in out and "Shutting down" in out
 
 
+async def test_lifespan_disposes_engines_on_shutdown(_patched_paths, monkeypatch):
+    calls = []
+
+    async def fake_dispose():
+        calls.append("disposed")
+
+    monkeypatch.setattr("main.preload_resources", lambda f: None)
+    monkeypatch.setattr("main.dispose_engines", fake_dispose)
+    app = create_app(Features(search=False, benchmark=False), static_dir="")
+    async with app.router.lifespan_context(app):
+        assert calls == []
+    assert calls == ["disposed"]
+
+
+async def test_lifespan_disposes_engines_and_explains_when_db_is_unreachable(
+    _patched_paths, monkeypatch
+):
+    import pytest
+
+    calls = []
+
+    async def fake_dispose():
+        calls.append("disposed")
+
+    async def broken_init():
+        raise OSError("connection refused")
+
+    monkeypatch.setattr("main.init_database", broken_init)
+    monkeypatch.setattr("main.dispose_engines", fake_dispose)
+    app = create_app(Features(search=False, benchmark=False), static_dir="")
+    with pytest.raises(RuntimeError, match="Cannot reach the database"):
+        async with app.router.lifespan_context(app):
+            pass
+    assert calls == ["disposed"]
+
+
+async def test_lifespan_disposes_engines_when_the_app_errors(_patched_paths, monkeypatch):
+    import pytest
+
+    calls = []
+
+    async def fake_dispose():
+        calls.append("disposed")
+
+    monkeypatch.setattr("main.preload_resources", lambda f: None)
+    monkeypatch.setattr("main.dispose_engines", fake_dispose)
+    app = create_app(Features(search=False, benchmark=False), static_dir="")
+    with pytest.raises(ValueError):
+        async with app.router.lifespan_context(app):
+            raise ValueError("boom")
+    assert calls == ["disposed"]
+
+
 async def test_hadith_route(_patched_paths):
     app = create_app(Features(search=False, benchmark=False), static_dir="")
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:

@@ -11,11 +11,13 @@ import re
 
 import numpy as np
 
+from settings import DEFAULT_ENCODER_THREADS, get_settings
+
 EMBEDDING_DIM = 256
 MAX_LENGTH = 512  # the model accepts 8192, but it was trained on texts of up to ~250 tokens
 MODEL_DIR_ENV = "ARABIC_MODEL_DIR"
 THREADS_ENV = "ARABIC_ENCODER_THREADS"
-DEFAULT_THREADS = 1  # a query is one short text; see handoff item 24 for why not more
+DEFAULT_THREADS = DEFAULT_ENCODER_THREADS
 DEFAULT_MODEL_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "onnx", "arabic"
 )
@@ -35,13 +37,13 @@ def encoding_text(text: str) -> str:
 
 
 def model_dir() -> str:
-    return os.environ.get(MODEL_DIR_ENV, DEFAULT_MODEL_DIR)
+    return get_settings().arabic_model_dir or DEFAULT_MODEL_DIR
 
 
 def serving_threads() -> int:
     """Threads for one encoder when serving. ONNX Runtime sizes its pool from the host's cores,
     not the container's CPU limit, and its idle threads spin, which used up a 2-CPU quota."""
-    return int(os.environ.get(THREADS_ENV, DEFAULT_THREADS))
+    return get_settings().arabic_encoder_threads
 
 
 class OnnxEncoder:

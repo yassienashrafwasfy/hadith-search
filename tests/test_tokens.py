@@ -2,6 +2,7 @@ import logging
 
 import jwt
 import pytest
+from pydantic import ValidationError
 
 from tokens import DEFAULT_TTL_MINUTES, AuthSettings, auth_settings, issue_token, read_token
 
@@ -62,5 +63,5 @@ def test_default_ttl_and_random_secret_warns(monkeypatch, caplog):
 
 def test_short_secret_is_refused(monkeypatch):
     monkeypatch.setenv("AUTH_SECRET", "short")
-    with pytest.raises(RuntimeError, match="at least 32"):
+    with pytest.raises(ValidationError, match="at least 32"):
         auth_settings()

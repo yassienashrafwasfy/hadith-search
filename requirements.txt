@@ -66,6 +66,7 @@ PyArabic==0.6.15
 pyarrow==23.0.1
 pydantic==2.12.5
 pydantic_core==2.41.5
+pydantic-settings==2.15.0
 Pygments==2.19.2
 pyjwt==2.15.1
 pyrsistent==0.20.0

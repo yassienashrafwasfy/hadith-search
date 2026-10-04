@@ -6,14 +6,21 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from database import dispose_engines
 from features import Features, load_features
 from rest import API_PREFIX, EXPOSED_HEADERS, install_error_handlers
+from settings import Settings, get_settings
 from startup import init_database, preload_resources
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")
 
-DEFAULT_CORS_ORIGINS = "http://localhost:5173,http://192.168.1.6:5173,http://192.168.1.5:5173"
+
+def _docs_kwargs(settings: Settings) -> dict:
+    """Prod serves no interactive docs and no OpenAPI schema."""
+    if settings.is_prod:
+        return {"docs_url": None, "redoc_url": None, "openapi_url": None}
+    return {}
 
 
 def cors_settings(raw: str) -> dict:
@@ -106,32 +113,46 @@ def _mount_frontend(app: FastAPI, static_dir: str) -> None:
         return FileResponse(os.path.join(static_dir, "index.html"))
 
 
-def create_app(features: Features | None = None, static_dir: str | None = None) -> FastAPI:
-    """Build the app; dependencies (feature flags, static dir) are injected, env is the default."""
+def create_app(
+    features: Features | None = None,
+    static_dir: str | None = None,
+    settings: Settings | None = None,
+) -> FastAPI:
+    """Build the app; dependencies (feature flags, static dir, settings) are injected, env is the default."""
     features = features or load_features()
-    static_dir = static_dir or resolve_static_dir(os.environ.get("STATIC_DIR"))
+    settings = settings or get_settings()
+    static_dir = static_dir or resolve_static_dir(settings.static_dir)
     os.makedirs(DATA_DIR, exist_ok=True)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        await init_database()
-        preload_resources(features)
-        print(
-            f"Serving frontend from: {static_dir}"
-            if static_dir
-            else "No frontend build found (STATIC_DIR not configured)"
-        )
-        yield
-        print("Shutting down...")
+        try:
+            try:
+                await init_database()
+            except Exception as exc:
+                raise RuntimeError(
+                    f"Cannot reach the database ({type(exc).__name__}); "
+                    "check DATABASE_URL and that PostgreSQL is running."
+                ) from exc
+            preload_resources(features)
+            print(
+                f"Serving frontend from: {static_dir}"
+                if static_dir
+                else "No frontend build found (STATIC_DIR not configured)"
+            )
+            yield
+        finally:
+            print("Shutting down...")
+            await dispose_engines()
 
-    app = FastAPI(lifespan=lifespan)
+    app = FastAPI(lifespan=lifespan, **_docs_kwargs(settings))
     app.state.features = features
     app.add_middleware(
         CORSMiddleware,
         allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
         allow_headers=["Authorization", "Content-Type", "If-None-Match"],
         expose_headers=EXPOSED_HEADERS,
-        **cors_settings(os.environ.get("CORS_ORIGINS", DEFAULT_CORS_ORIGINS)),
+        **cors_settings(settings.effective_cors_origins),
     )
     add_security_headers(app)
     install_error_handlers(app)

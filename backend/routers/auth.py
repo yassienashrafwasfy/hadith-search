@@ -6,8 +6,10 @@ import secrets
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 
-from database import get_session, now_iso
+from database import ASSIGNMENT_LOCK, get_session, now_iso
+from inputs import Text
 from models import Annotator, Assignment
 from rest import API_PREFIX, href, json_response, link
 from tokens import AuthSettings, auth_settings, issue_token, read_token
@@ -24,12 +26,12 @@ ANNOTATORS_PER_QUERY = 3
 
 # Upper bounds keep a huge body from turning every sign-in into an expensive hash.
 class Credentials(BaseModel):
-    username: str = Field(max_length=64)
+    username: Text = Field(max_length=64)
     password: str = Field(max_length=128)
 
 
 class NewAnnotator(Credentials):
-    username: str = Field(min_length=3, max_length=64)
+    username: Text = Field(min_length=3, max_length=64)
     password: str = Field(min_length=8, max_length=128)
 
 
@@ -71,6 +73,9 @@ def load_queries() -> dict:
 
 
 async def auto_assign_queries(annotator_id: int, session) -> list[str]:
+    # Counting then inserting races: two sign-ups could both see a query at 2 of 3 and take it.
+    # The lock is released at commit/rollback, so the next sign-up counts the committed rows.
+    await session.execute(select(func.pg_advisory_xact_lock(ASSIGNMENT_LOCK)))
     result = await session.execute(
         select(Assignment.query_id, func.count()).group_by(Assignment.query_id)
     )
@@ -165,7 +170,10 @@ async def create_annotator(
             created_at=now_iso(),
         )
         session.add(annotator)
-        await session.flush()
+        try:
+            await session.flush()  # the UNIQUE constraint is the real check; the select above
+        except IntegrityError:  # only saves a hash. A concurrent twin lands here.
+            raise HTTPException(status_code=409, detail="Username already taken") from None
         identity = {"id": annotator.id, "username": annotator.username}
         assigned = await auto_assign_queries(annotator.id, session)
         await session.commit()

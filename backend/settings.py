@@ -8,24 +8,39 @@ that. Tests that change the environment call `get_settings.cache_clear()`.
 
 - `dev` (default) and `test`: forgiving. A missing `AUTH_SECRET` gets a random one, and CORS
   falls back to the local Vite origins.
-- `prod`: refuses to start without `AUTH_SECRET` and `CORS_ORIGINS`, and hides the interactive
-  API docs and `/openapi.json`.
+- `prod`: refuses to start without `AUTH_SECRET` and `CORS_ORIGINS` (and `CORS_ORIGINS=*`), and
+  hides the interactive API docs and `/openapi.json`.
 
 Feature flags (`APP_MODE`, `FEATURE_*`) are not here; see `features.py`.
 """
 
+import re
 from enum import StrEnum
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field, SecretStr, model_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 DEFAULT_TTL_MINUTES = 720
 MIN_SECRET_LENGTH = 32  # HS256 wants a key as long as its 256-bit hash
-DEFAULT_CORS_ORIGINS = "http://localhost:5173,http://192.168.1.6:5173,http://192.168.1.5:5173"
+DEFAULT_CORS_ORIGINS = "http://localhost:5173,http://127.0.0.1:5173"
+DEFAULT_SEARCH_RUNNING = 8
+DEFAULT_SEARCH_WAITING = 64
+DEFAULT_SEARCH_TIMEOUT_SECONDS = 5.0
 DEFAULT_ENCODER_THREADS = 1  # a query is one short text; see handoff item 24 for why not more
+RELEASE_PATTERN = re.compile(r"^[a-z][a-z0-9_]{0,39}$")
 ENV_FILE = Path(__file__).resolve().parent.parent / ".env"
+
+
+def check_release(release: str) -> str:
+    """A model release name is part of a table name, so it is restricted."""
+    if not RELEASE_PATTERN.match(release):
+        raise ValueError(
+            f"Embeddings release {release!r} must start with a letter and use only lowercase "
+            "letters, digits and _ (40 characters at most)"
+        )
+    return release
 
 
 class Environment(StrEnum):
@@ -45,6 +60,19 @@ class Settings(BaseSettings):
     static_dir: str | None = None
     arabic_model_dir: str | None = None
     arabic_encoder_threads: int = Field(default=DEFAULT_ENCODER_THREADS, ge=0)
+    # Which `hadith_embeddings_<release>` table dense search reads (unset: `hadith_embeddings`)
+    embeddings_release: str | None = None
+    # The queue in front of /api/v1/searches (backend/limiter.py)
+    search_max_concurrent: int = Field(default=DEFAULT_SEARCH_RUNNING, gt=0)
+    search_queue_size: int = Field(default=DEFAULT_SEARCH_WAITING, ge=0)
+    search_queue_timeout_seconds: float = Field(default=DEFAULT_SEARCH_TIMEOUT_SECONDS, gt=0)
+
+    @field_validator("embeddings_release")
+    @classmethod
+    def _release_name(_cls, value: str | None) -> str | None:
+        if not value:
+            return None  # compose passes an empty string when no release is set
+        return check_release(value)
 
     @property
     def is_prod(self) -> bool:
@@ -67,6 +95,10 @@ class Settings(BaseSettings):
             ]
             if missing:
                 raise ValueError(f"APP_ENV=prod requires {', '.join(missing)} to be set")
+            if "*" in [origin.strip() for origin in (self.cors_origins or "").split(",")]:
+                raise ValueError(
+                    "APP_ENV=prod does not allow CORS_ORIGINS=*; list the real origins"
+                )
         return self
 
 

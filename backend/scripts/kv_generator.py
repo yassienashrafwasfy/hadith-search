@@ -8,7 +8,7 @@ import requests
 from dotenv import load_dotenv
 from sqlalchemy import select
 
-from models import KvPair
+from models import Hadith, KvPair
 
 load_dotenv()
 
@@ -167,19 +167,11 @@ def generate_pairs_for_topic(topic, total_needed, batch_size=BATCH_SIZE):
 
 
 def retrieve_hadith(session, query_text, language):
-    """(id, display text) of the best BM25 match for the text, or (None, None)."""
-    from models import Hadith
+    """Id of the best BM25 match for the text, or None."""
     from services import ranking
 
     scores = ranking.bm25(session, query_text, language, limit=1)
-    if not scores:
-        return None, None
-    top_id = next(iter(scores))
-    col = Hadith.Arabic_Text if language == "AR" else Hadith.English_Text
-    row = session.execute(select(Hadith.id, col).where(Hadith.id == top_id)).first()
-    if row and row[1]:
-        return row[0], row[1]
-    return top_id, None
+    return next(iter(scores), None)
 
 
 def store_pairs(pairs, topic):
@@ -188,10 +180,9 @@ def store_pairs(pairs, topic):
     stored = 0
     with get_sync_session() as session:
         for pair in pairs:
-            en_hadith_id, en_hadith_text = retrieve_hadith(session, pair["entity_en"], "EN")
-            ar_hadith_id, ar_hadith_text = retrieve_hadith(session, pair["entity_ar"], "AR")
-
-            hadith_id = en_hadith_id or ar_hadith_id
+            hadith_id = retrieve_hadith(session, pair["entity_en"], "EN") or retrieve_hadith(
+                session, pair["entity_ar"], "AR"
+            )
             if hadith_id is None:
                 continue
 
@@ -204,8 +195,6 @@ def store_pairs(pairs, topic):
                     entity_en=pair["entity_en"],
                     entity_ar=pair["entity_ar"],
                     hadith_id=hadith_id,
-                    hadith_en=en_hadith_text,
-                    hadith_ar=ar_hadith_text,
                     status="pending",
                     created_at=now_iso(),
                 )
@@ -266,9 +255,10 @@ async def _fetch_verified():
                 KvPair.entity_en,
                 KvPair.entity_ar,
                 KvPair.hadith_id,
-                KvPair.hadith_en,
-                KvPair.hadith_ar,
+                Hadith.English_Text,
+                Hadith.Arabic_Text,
             )
+            .join(Hadith, Hadith.id == KvPair.hadith_id)
             .where(KvPair.status == "verified")
             .order_by(KvPair.id)
         )

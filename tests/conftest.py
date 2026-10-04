@@ -33,7 +33,6 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.pool import NullPool
 
-from models import Hadith
 from settings import Settings, get_settings
 
 # pg_stat_activity as a table, so the rollback helper needs no raw SQL
@@ -69,7 +68,6 @@ _HADITHS = {
         Normalized_Grade="Sahih",
         Chapter_Title_English="Prayer",
         Chapter_Title_Arabic="الصلاة",
-        Grade="Sahih",
         Reference="1",
         **{"In-book reference": "1:1"},
         Hadith_Number=1,
@@ -86,7 +84,6 @@ _HADITHS = {
         Normalized_Grade="Hasan",
         Chapter_Title_English="Fasting",
         Chapter_Title_Arabic="الصيام",
-        Grade="Hasan",
         Reference="2",
         **{"In-book reference": "2:1"},
         Hadith_Number=2,
@@ -103,7 +100,6 @@ _HADITHS = {
         Normalized_Grade="Sahih",
         Chapter_Title_English="Reward",
         Chapter_Title_Arabic="الأجر",
-        Grade="Sahih",
         Reference="3",
         **{"In-book reference": "3:1"},
         Hadith_Number=3,
@@ -296,13 +292,8 @@ async def _patched_paths(monkeypatch, _data_dir, _pg_schema, _hadiths_df):
         benchmark, "FINETUNED_STATS_TEMPLATE", str(_data_dir / "finetuned_stats_{mode}.json")
     )
     await database.init_schema()
-    columns = {c.name for c in Hadith.__table__.c}
-    rows = [
-        {k: v for k, v in row.items() if k in columns}
-        for row in _hadiths_df.reset_index().to_dict("records")
-    ]
     with database.get_sync_session() as session:
-        session.execute(insert(Hadith), rows)
+        database.insert_hadith_rows(session, _hadiths_df.reset_index().to_dict("records"))
         session.commit()
     return _data_dir
 
@@ -382,13 +373,13 @@ async def _search_index(_patched_paths, _hadiths_df, _embeddings):
         "Preprocessed_Arabic_Matn": "x y z",
     }
     with database.get_sync_session() as session:
-        session.execute(insert(Hadith), [{**filler, "id": i} for i in range(100, 110)])
+        database.insert_hadith_rows(session, [{**filler, "id": i} for i in range(100, 110)])
         session.commit()
         write_index(session, database.read_hadiths_df())
         session.execute(
             insert(HadithEmbedding),
             [
-                {"hadith_id": hid, "english": vec.tolist(), "arabic": vec.tolist()}
+                {"hadith_id": hid, "arabic": vec.tolist()}
                 for hid, vec in zip((1, 2, 3), _embeddings)
             ],
         )

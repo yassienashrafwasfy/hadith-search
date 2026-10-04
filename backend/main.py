@@ -8,9 +8,10 @@ from fastapi.staticfiles import StaticFiles
 
 from database import dispose_engines
 from features import Features, load_features
+from limiter import SearchLimiter
 from rest import API_PREFIX, EXPOSED_HEADERS, install_error_handlers
 from settings import Settings, get_settings
-from startup import init_database, preload_resources
+from startup import check_embeddings_release, init_database, preload_resources
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")
@@ -134,6 +135,7 @@ def create_app(
                     f"Cannot reach the database ({type(exc).__name__}); "
                     "check DATABASE_URL and that PostgreSQL is running."
                 ) from exc
+            await check_embeddings_release()
             preload_resources(features)
             print(
                 f"Serving frontend from: {static_dir}"
@@ -147,6 +149,11 @@ def create_app(
 
     app = FastAPI(lifespan=lifespan, **_docs_kwargs(settings))
     app.state.features = features
+    app.state.search_limiter = SearchLimiter(
+        settings.search_max_concurrent,
+        settings.search_queue_size,
+        settings.search_queue_timeout_seconds,
+    )
     app.add_middleware(
         CORSMiddleware,
         allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],

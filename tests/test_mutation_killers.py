@@ -7,12 +7,18 @@ import pytest
 
 import lazy_exports
 from features import load_features
-from models import Hadith
 from services import agreement, results
 
 
+def _row(**values):
+    """A result row as the query returns it: every selected column, None when unset."""
+    names = results._COLUMNS
+    columns = dict.fromkeys((getattr(c, "key", None) or c.name for c in names))
+    return types.SimpleNamespace(**(columns | values))
+
+
 def test_to_hadith_maps_every_column():
-    row = Hadith(
+    row = _row(
         id=5,
         Book="B",
         English_Text="en",
@@ -20,7 +26,7 @@ def test_to_hadith_maps_every_column():
         Chapter_Title_English="cen",
         Chapter_Title_Arabic="car",
         Normalized_Grade="Sahih",
-        Grade="raw",
+        English_Grade="raw",
     )
     assert results._to_hadith(row).model_dump() == {
         "hadith_id": 5,
@@ -37,7 +43,7 @@ def test_to_hadith_maps_every_column():
 
 
 def test_to_hadith_defaults():
-    h = results._to_hadith(Hadith(id=1))
+    h = results._to_hadith(_row(id=1))
     assert (h.book, h.hadith_en_text, h.hadith_ar_text) == ("", "", "")
     assert (h.chapter_title_en, h.chapter_title_ar) == ("", "")
     assert (h.grade, h.raw_grade) == ("Unknown", "Unknown")

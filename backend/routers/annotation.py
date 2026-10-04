@@ -4,11 +4,12 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import literal_column, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from database import get_session, now_iso
-from models import Annotation, AnnotationProgress, Assignment, Hadith
+from inputs import DbId, Text
+from models import HADITH_CHAPTER, Annotation, AnnotationProgress, Assignment, Chapter, Hadith
 from rest import API_PREFIX, href, json_response, link
 from routers.auth import get_current_annotator
 from services import overall_summary, summarize_query
@@ -37,8 +38,8 @@ _TEXT_COLUMNS = (
     Hadith.Normalized_Grade,
     Hadith.Hadith_Number,
     Hadith.Chapter_Number,
-    Hadith.Chapter_Title_English,
-    Hadith.Chapter_Title_Arabic,
+    Chapter.title_english.label("Chapter_Title_English"),
+    Chapter.title_arabic.label("Chapter_Title_Arabic"),
 )
 
 _EMPTY_HADITH_TEXT = {
@@ -66,7 +67,12 @@ def _hadith_text_entry(row) -> dict:
 
 async def get_hadith_texts(hadith_ids: list[int]) -> dict[int, dict]:
     async with get_session() as session:
-        result = await session.execute(select(*_TEXT_COLUMNS).where(Hadith.id.in_(hadith_ids)))
+        result = await session.execute(
+            select(*_TEXT_COLUMNS)
+            .select_from(Hadith)
+            .outerjoin(Chapter, HADITH_CHAPTER)
+            .where(Hadith.id.in_(hadith_ids))
+        )
         rows = {row.id: row for row in result}
     return {
         hid: _hadith_text_entry(rows[hid]) if hid in rows else dict(_EMPTY_HADITH_TEXT)
@@ -185,7 +191,7 @@ async def list_assignments(
 
 @router.get("/assignments/{query_id}")
 async def get_assignment(
-    query_id: str,
+    query_id: Text,
     request: Request,
     annotator: dict = Depends(get_current_annotator),
     session=Depends(get_db_session),
@@ -212,14 +218,6 @@ async def get_assignment(
 
 async def _upsert_label(session, annotator_id: int, query_id: str, hadith_id: int, label: int):
     """Returns True when the label is new (created), False when it replaced an earlier one."""
-    existing = await session.execute(
-        select(Annotation.label).where(
-            Annotation.annotator_id == annotator_id,
-            Annotation.query_id == query_id,
-            Annotation.hadith_id == hadith_id,
-        )
-    )
-    created = existing.first() is None
     ts = now_iso()
     stmt = pg_insert(Annotation).values(
         annotator_id=annotator_id,
@@ -229,19 +227,21 @@ async def _upsert_label(session, annotator_id: int, query_id: str, hadith_id: in
         created_at=ts,
         updated_at=ts,
     )
-    await session.execute(
+    # xmax is 0 on a freshly inserted row and set on one the conflict branch updated, so the
+    # created/replaced answer comes from the same atomic statement (no read-then-write race).
+    result = await session.execute(
         stmt.on_conflict_do_update(
             index_elements=["annotator_id", "query_id", "hadith_id"],
             set_={"label": label, "updated_at": ts},
-        )
+        ).returning(literal_column("xmax = 0"))
     )
-    return created
+    return bool(result.scalar_one())
 
 
 @router.put("/assignments/{query_id}/labels/{hadith_id}")
 async def put_label(
-    query_id: str,
-    hadith_id: int,
+    query_id: Text,
+    hadith_id: DbId,
     payload: LabelPayload,
     response: Response,
     annotator: dict = Depends(get_current_annotator),
@@ -268,7 +268,7 @@ async def put_label(
 
 @router.put("/assignments/{query_id}/progress")
 async def put_progress(
-    query_id: str,
+    query_id: Text,
     payload: ProgressPayload,
     annotator: dict = Depends(get_current_annotator),
     session=Depends(get_db_session),

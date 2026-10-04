@@ -304,9 +304,10 @@ def _drop_empty_matn(session, df, results, data_dir):
     return set(drop_ids)
 
 
-def _build_updates(df, results, dropped):
+def _build_rows(df, results, dropped):
+    """`hadith_preprocessed` rows for the hadiths that were kept."""
     return [
-        {"id": int(hid), **{column: values[i] for column, values in results.items()}}
+        {"hadith_id": int(hid), **{column: values[i] for column, values in results.items()}}
         for i, hid in enumerate(df["id"])
         if int(hid) not in dropped
     ]
@@ -315,10 +316,10 @@ def _build_updates(df, results, dropped):
 def run():
     import time
 
-    from sqlalchemy import update
+    from sqlalchemy import delete, insert
 
     from database import get_sync_session, init_schema_sync, read_hadiths_df
-    from models import Hadith
+    from models import HadithPreprocessed
 
     start = time.perf_counter()
     init_schema_sync()
@@ -330,7 +331,8 @@ def run():
     }
     with get_sync_session() as session:
         dropped = _drop_empty_matn(session, df, results, DATA_DIR)
-        session.execute(update(Hadith), _build_updates(df, results, dropped))
+        session.execute(delete(HadithPreprocessed))  # a re-run replaces the old texts
+        session.execute(insert(HadithPreprocessed), _build_rows(df, results, dropped))
         session.commit()
 
     print(f"\nPreprocessing Successful. Total time: {time.perf_counter() - start:.2f}s")

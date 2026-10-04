@@ -20,6 +20,18 @@ case "$args" in
     colour=${args##*id-}
     cat "$FAKE/health-$colour" 2>/dev/null || echo healthy ;;
   *"nginx -t"*) [ ! -e "$FAKE/reject" ] || exit 1 ;;
+  *"exec -T nginx sh -c"*awk*)
+    case "${args##* }" in
+      */api/v1/health) cat "$FAKE/code-health" 2>/dev/null || echo 200 ;;
+      */api/v1/searches*) cat "$FAKE/code-search" 2>/dev/null || echo 200 ;;
+      *) echo 200 ;;
+    esac ;;
+  *"exec -T nginx sh -c"*"-O -"*)
+    if [ -e "$FAKE/no-search" ]; then echo '{"_links":{"self":{}}}'; else echo '{"_links":{"searches":{}}}'; fi ;;
+  "images --format"*) cut -d' ' -f1 "$FAKE/images" | grep "^${args##* }:" ;;
+  "image inspect"*) grep "^${args##* } " "$FAKE/images" | cut -d' ' -f2 ;;
+  "ps --format"*) cat "$FAKE/running-images" 2>/dev/null ;;
+  "rmi "*) sed -i "\\|^${args#rmi } |d" "$FAKE/images" ;;
   *"up -d"*)
     for word in $args; do case "$word" in app-*) touch "$FAKE/running-${word#app-}" ;; esac; done ;;
   *" stop app-"*) rm -f "$FAKE/running-${args##*app-}" ;;
@@ -181,3 +193,144 @@ def test_deploy_passes_the_image_to_the_idle_colour(_live):
 def test_status_reports_both_colours(_live):
     out = _run(_live, "status").stdout
     assert "live:     blue" in out and "idle:     green" in out
+
+
+def _fake(sandbox, name, value=""):
+    (sandbox / "fake" / name).write_text(value)
+
+
+def _promote_with(_live, monkeypatch, **env):
+    monkeypatch.setenv("SMOKE_RETRY_WAIT", "0")
+    monkeypatch.setenv("PROMOTE_WATCH", "0")
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    assert _run(_live, "deploy", "app:2").returncode == 0
+    return _run(_live, "promote")
+
+
+def test_smoke_uses_the_health_route_and_refuses_a_bad_answer(_live, monkeypatch):
+    _fake(_live, "code-health", "500")
+    result = _promote_with(_live, monkeypatch)
+    assert result.returncode != 0
+    assert "GET /api/v1/health on green answered 500" in result.stderr
+    assert _state(_live)["ACTIVE"] == "blue"
+
+
+def test_smoke_refuses_a_search_that_errors(_live, monkeypatch):
+    _fake(_live, "code-search", "500")
+    result = _promote_with(_live, monkeypatch)
+    assert result.returncode != 0 and "term-overlap" in result.stderr
+    assert "answered 500" in result.stderr and _state(_live)["ACTIVE"] == "blue"
+
+
+def test_smoke_search_needs_no_results_only_a_200(_live, monkeypatch):
+    result = _promote_with(_live, monkeypatch)
+    assert result.returncode == 0 and _state(_live)["ACTIVE"] == "green"
+
+
+def test_smoke_search_busy_is_only_a_warning(_live, monkeypatch):
+    _fake(_live, "code-search", "503")
+    result = _promote_with(_live, monkeypatch)
+    assert result.returncode == 0 and "answered 503 (busy) twice" in result.stderr
+    assert _state(_live)["ACTIVE"] == "green"
+
+
+def test_smoke_skips_search_when_the_app_has_none(_live, monkeypatch):
+    _fake(_live, "no-search")
+    _fake(_live, "code-search", "500")
+    result = _promote_with(_live, monkeypatch)
+    assert result.returncode == 0 and "search check skipped" in result.stdout
+
+
+def test_smoke_search_can_be_switched_off_or_pointed_elsewhere(_live, monkeypatch):
+    _fake(_live, "code-search", "500")
+    assert _promote_with(_live, monkeypatch, SMOKE_SEARCH="0").returncode == 0
+
+
+def test_smoke_search_path_override_is_used(_live, monkeypatch):
+    result = _promote_with(
+        _live, monkeypatch, SMOKE_SEARCH_PATH="/api/v1/searches?q=x&method=tfidf"
+    )
+    assert result.returncode == 0
+    assert "method=tfidf" in (_live / "fake" / "log").read_text()
+
+
+def _images(sandbox, *refs):
+    """Fake local images of the hadith-search repo, oldest first."""
+    lines = [f"{ref} 2026-10-0{n + 1}T10:00:00.123456789Z" for n, ref in enumerate(refs)]
+    (sandbox / "fake" / "images").write_text("\n".join(lines) + "\n")
+
+
+def _left(sandbox):
+    return [line.split()[0] for line in (sandbox / "fake" / "images").read_text().splitlines()]
+
+
+def test_prune_keeps_the_newest_three_release_images(_live):
+    _images(_live, *(f"hadith-search:r{n}" for n in range(1, 7)), "hadith-search:blue", "other:r0")
+    result = _run(_live, "prune-images")
+    assert result.returncode == 0, result.stderr
+    assert _left(_live) == [
+        "hadith-search:r4",
+        "hadith-search:r5",
+        "hadith-search:r6",
+        "hadith-search:blue",
+        "other:r0",
+    ]
+
+
+def test_prune_dry_run_changes_nothing(_live):
+    _images(_live, *(f"hadith-search:r{n}" for n in range(1, 6)))
+    result = _run(_live, "prune-images", "--dry-run")
+    assert result.returncode == 0 and "dry run: would remove hadith-search:r1" in result.stdout
+    assert len(_left(_live)) == 5
+    assert "rmi" not in (_live / "fake" / "log").read_text()
+
+
+def test_prune_protects_running_and_recorded_images(_live):
+    _images(_live, *(f"hadith-search:r{n}" for n in range(1, 7)))
+    _fake(_live, "running-images", "hadith-search:r1\nnginx:stable\n")
+    (_live / "deploy" / "state" / "releases.env").write_text("GREEN_REL_IMAGE=hadith-search:r2\n")
+    assert _run(_live, "prune-images", "--keep", "2").returncode == 0
+    assert _left(_live) == [f"hadith-search:r{n}" for n in (1, 2, 5, 6)]
+
+
+def test_prune_does_nothing_with_too_few_images(_live):
+    _images(_live, "hadith-search:r1", "hadith-search:r2", "hadith-search:r3")
+    result = _run(_live, "prune-images")
+    assert result.returncode == 0 and "nothing to remove" in result.stdout
+    assert len(_left(_live)) == 3
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "x", ""])
+def test_prune_keep_must_be_a_positive_number(_live, value):
+    _images(_live, *(f"hadith-search:r{n}" for n in range(1, 6)))
+    assert _run(_live, "prune-images", "--keep", value).returncode != 0
+    assert len(_left(_live)) == 5
+
+
+def test_prune_never_uses_force_or_image_prune(_live):
+    _images(_live, *(f"hadith-search:r{n}" for n in range(1, 6)))
+    _run(_live, "prune-images")
+    log = (_live / "fake" / "log").read_text()
+    assert "rmi" in log and "rmi -f" not in log and "image prune" not in log
+
+
+def test_prune_after_promote_is_off_unless_asked(_live, monkeypatch):
+    _images(_live, *(f"hadith-search:r{n}" for n in range(1, 6)))
+    _promote_with(_live, monkeypatch)
+    assert len(_left(_live)) == 5
+    assert _run(_live, "rollback").returncode == 0
+    monkeypatch.setenv("PRUNE_AFTER_PROMOTE", "1")
+    assert _run(_live, "promote", "--force").returncode == 0
+    assert len(_left(_live)) == 3
+
+
+def test_deploy_reads_the_staged_model_settings(_live):
+    out = _run(_live, "deploy", "registry/app:3").stdout
+    assert "model settings" not in out
+    state = _live / "deploy" / "state"
+    (state / "model.env").write_text("ARABIC_MODEL_DIR=/m/mv2\nEMBEDDINGS_RELEASE=mv2\n")
+    out = _run(_live, "deploy", "registry/app:4").stdout
+    assert "ARABIC_MODEL_DIR=/m/mv2 EMBEDDINGS_RELEASE=mv2" in out
+    dry = _run(_live, "--dry-run", "deploy", "registry/app:5").stdout
+    assert "model settings" not in dry

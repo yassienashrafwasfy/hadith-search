@@ -15,16 +15,16 @@ if hasattr(sys.stdout, "reconfigure"):
 from sqlalchemy import func, inspect, or_, select
 
 from database import get_sync_engine, get_sync_session
-from models import Hadith, HadithEmbedding, Posting
+from models import Hadith, HadithEmbedding, HadithPreprocessed, Posting
 from scripts import data_creation
 
 DATA_DIR = os.path.join(SCRIPTS_DIR, "..", "data")
 MANIFEST_PATH = os.path.join(DATA_DIR, "build_manifest.json")
 
 
-def _has_columns(required_columns):
+def _has_columns(required_columns, table="hadiths"):
     try:
-        cols = {c["name"] for c in inspect(get_sync_engine()).get_columns("hadiths")}
+        cols = {c["name"] for c in inspect(get_sync_engine()).get_columns(table)}
         return set(required_columns).issubset(cols)
     except Exception:
         return False
@@ -39,7 +39,7 @@ def _has_preprocessed_data():
         "Preprocessed_English_Matn",
         "Preprocessed_Arabic_Matn",
     ]
-    if not _has_columns(required_columns):
+    if not _has_columns(required_columns, "hadith_preprocessed"):
         return False
     try:
 
@@ -49,11 +49,11 @@ def _has_preprocessed_data():
         with get_sync_session() as session:
             count = session.execute(
                 select(func.count())
-                .select_from(Hadith)
+                .select_from(HadithPreprocessed)
                 .where(
                     or_(
-                        _non_blank(Hadith.Preprocessed_English_Matn),
-                        _non_blank(Hadith.Preprocessed_Arabic_Matn),
+                        _non_blank(HadithPreprocessed.Preprocessed_English_Matn),
+                        _non_blank(HadithPreprocessed.Preprocessed_Arabic_Matn),
                     )
                 )
             ).scalar_one()

@@ -1,0 +1,11 @@
+const {chromium}=require('playwright-core');const fs=require('fs');
+const [mmd,outScene,outSvg]=process.argv.slice(2);
+(async()=>{const b=await chromium.launch({executablePath:process.env.CHROME});const p=await b.newPage();
+p.on('console',m=>console.log('console:',m.text().slice(0,200)));p.on('pageerror',e=>console.log('pageerror:',String(e).slice(0,300)));
+fs.writeFileSync('/tmp/_ex.html','<!doctype html><html><body><div id="r"></div></body></html>');
+await p.goto('file:///tmp/_ex.html');
+await p.addScriptTag({path:process.env.BUNDLE});
+const r=await p.evaluate(src=>window.convert(src),fs.readFileSync(mmd,'utf8'));
+fs.writeFileSync(outScene,JSON.stringify(r.scene,null,2));
+fs.writeFileSync(outSvg,'<?xml version="1.0" encoding="UTF-8"?>\n'+r.svg);
+console.log('elements',r.scene.elements.length);await b.close()})();

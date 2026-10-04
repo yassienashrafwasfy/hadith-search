@@ -40,7 +40,7 @@ repos:
         types: [python]
       - id: vulture
         name: vulture (dead code)
-        entry: .venv/bin/vulture
+        entry: tools/dead-code.sh check
         language: system
         types: [python]
         pass_filenames: false

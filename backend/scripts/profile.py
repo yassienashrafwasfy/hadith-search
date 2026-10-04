@@ -430,9 +430,11 @@ def _print_overview(df):
 
 def _print_grade_distribution(df):
     _print_section("Grade Distribution")
-    if "Grade" in df.columns:
-        print("Raw Grade:")
-        print(df["Grade"].replace("", pd.NA).value_counts(dropna=False).head(40).to_string())
+    if "English_Grade" in df.columns:
+        print("Raw English grade:")
+        print(
+            df["English_Grade"].replace("", pd.NA).value_counts(dropna=False).head(40).to_string()
+        )
     if "Normalized_Grade" in df.columns:
         print("\nNormalized Grade:")
         print(df["Normalized_Grade"].replace("", pd.NA).value_counts(dropna=False).to_string())

@@ -73,11 +73,11 @@ def test_write_drop_audit_records_counts(tmp_path):
     assert [r["id_before_drop"] for r in stage["rows"]] == [1, 2]
 
 
-def test_build_updates_skips_dropped():
+def test_build_rows_skips_dropped():
     df = pd.DataFrame({"id": [1, 2]})
     results = {"Preprocessed_English": ["a", "b"], "Preprocessed_Arabic": ["c", "d"]}
-    assert p._build_updates(df, results, {1}) == [
-        {"id": 2, "Preprocessed_English": "b", "Preprocessed_Arabic": "d"}
+    assert p._build_rows(df, results, {1}) == [
+        {"hadith_id": 2, "Preprocessed_English": "b", "Preprocessed_Arabic": "d"}
     ]
 
 

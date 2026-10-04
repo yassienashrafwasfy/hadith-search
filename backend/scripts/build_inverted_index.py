@@ -63,15 +63,20 @@ def _insert_in_batches(session: Session, model, rows):
         session.execute(insert(model), rows[start : start + INSERT_BATCH])
 
 
-def write_index(session: Session, df) -> tuple[int, int]:
-    """Replace the stored index with one built from `df`; returns (English, Arabic) term counts."""
+def write_index(session: Session, df, commit: bool = True) -> tuple[int, int]:
+    """Replace the stored index with one built from `df`; returns (English, Arabic) term counts.
+
+    Delete and insert are one transaction: an error leaves the old index untouched. Pass
+    `commit=False` to make it part of a larger transaction the caller commits.
+    """
     lengths, terms, postings = build_index_rows(df)
     for model in (Posting, Term, HadithLength):
         session.execute(delete(model))
     _insert_in_batches(session, HadithLength, lengths)
     _insert_in_batches(session, Term, terms)
     _insert_in_batches(session, Posting, postings)
-    session.commit()
+    if commit:
+        session.commit()
     return tuple(sum(1 for t in terms if t["language"] == language) for language in LANGUAGES)
 
 

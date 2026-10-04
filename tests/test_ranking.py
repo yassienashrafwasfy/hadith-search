@@ -12,7 +12,7 @@ import pytest
 from sqlalchemy import insert
 
 import database
-from models import Hadith, HadithEmbedding, HadithLength, Posting
+from models import HadithEmbedding, HadithLength, Posting
 from scripts.build_inverted_index import write_index
 from services import ranking
 
@@ -43,17 +43,14 @@ def _session(_pg_schema):
     database.init_schema_sync()
     docs = _corpus()
     with database.get_sync_session() as session:
-        session.execute(insert(Hadith), docs)
+        database.insert_hadith_rows(session, docs)
         session.commit()
         write_index(session, database.read_hadiths_df())
         rng = np.random.default_rng(3)
         vectors = rng.normal(size=(len(docs), DIM)).astype(np.float32)
         session.execute(
             insert(HadithEmbedding),
-            [
-                {"hadith_id": d["id"], "english": v.tolist(), "arabic": (-v).tolist()}
-                for d, v in zip(docs, vectors)
-            ],
+            [{"hadith_id": d["id"], "arabic": (-v).tolist()} for d, v in zip(docs, vectors)],
         )
         session.commit()
         yield session

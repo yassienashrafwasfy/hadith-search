@@ -1,12 +1,15 @@
 import json
 import time
 from collections.abc import Iterator
+from typing import Annotated
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from database import get_sync_session
 from features import Features
+from inputs import Text
+from limiter import search_slot
 from models import Lang, SearchRequest
 from rest import API_PREFIX, EncodedJson, href, json_response, link, server_timing
 from services.retrieval import SearchContext, enabled_systems, run_search
@@ -42,14 +45,14 @@ def make_search_router(features: Features) -> APIRouter:
         body = {"methods": methods, "_links": {"self": link(href("search-methods"))}}
         return json_response(request, body, max_age=CACHE_SECONDS)
 
-    @router.get("/searches")
+    @router.get("/searches", dependencies=[Depends(search_slot)])
     def search(
         request: Request,
-        q: str = Query(min_length=1, max_length=500),
-        method: str = Query(),
+        q: Annotated[Text, Query(min_length=1, max_length=500)],
+        method: str,
         lang: Lang = Lang.en,
-        grade_filter: str | None = None,
-        book_filter: str | None = None,
+        grade_filter: Text | None = None,
+        book_filter: Text | None = None,
         ctx: SearchContext = Depends(get_search_context),
     ):
         system = systems.get(method)

@@ -38,7 +38,7 @@ def test_encode_and_save_stores_arabic_vectors(_patched_paths):
     with database.get_sync_session() as session:
         rows = {r.hadith_id: r for r in session.query(HadithEmbedding)}
     assert sorted(rows) == [1, 3]
-    assert list(rows[1].arabic) == [1.0, 1.0] and rows[1].english is None
+    assert list(rows[1].arabic) == [1.0, 1.0]
 
 
 def test_rerunning_replaces_rather_than_duplicates(_patched_paths):
@@ -77,4 +77,4 @@ def test_run_end_to_end_with_fake_model(_patched_paths, monkeypatch):
     with database.get_sync_session() as session:
         rows = session.query(HadithEmbedding).order_by(HadithEmbedding.hadith_id).all()
     assert [r.hadith_id for r in rows] == [1, 2, 3]
-    assert all(r.arabic is not None and r.english is None for r in rows)
+    assert all(r.arabic is not None for r in rows)

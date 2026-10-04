@@ -39,3 +39,16 @@ mutants/
 .ruff_cache/
 .pytest_cache/
 deploy/state/
+
+# self-hosted runner secrets
+tools/runner/.env.runner
+
+# generated reports and local tool settings
+coverage.xml
+htmlcov/
+.claude/settings.local.json
+*.pem
+*.key
+.env.*
+!.env.example
+!tools/runner/.env.runner.example

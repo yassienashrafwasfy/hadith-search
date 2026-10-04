@@ -13,10 +13,12 @@ from math import log
 from sqlalchemy import Float, Numeric, String, and_, cast, column, func, select, values
 from sqlalchemy.orm import Session
 
-from models import Hadith, HadithEmbedding, HadithLength, Posting, Term
+from models import HadithEmbedding, HadithLength, HadithPreprocessed, Posting, Term
+from models.embedding_sets import embedding_table
 from scripts.arabic_encoder import encoding_text
 from scripts.preprocess import preprocess_arabic, preprocess_english
 from scripts.search import rrf_fusion
+from settings import get_settings
 
 K1 = 1.2
 B = 0.75
@@ -148,7 +150,8 @@ def _document_frequencies(session: Session, lang: str, terms: Collection[str]) -
 
 
 def _matn_column(lang: str):
-    return Hadith.Preprocessed_Arabic_Matn if lang == "AR" else Hadith.Preprocessed_English_Matn
+    pre = HadithPreprocessed
+    return pre.Preprocessed_Arabic_Matn if lang == "AR" else pre.Preprocessed_English_Matn
 
 
 def _expansion_weights(
@@ -156,7 +159,11 @@ def _expansion_weights(
 ) -> dict[str, float]:
     """Rocchio-style pseudo relevance feedback: original terms plus the best new terms."""
     n_docs, _ = _corpus_stats(session, lang)
-    rows = session.execute(select(Hadith.id, _matn_column(lang)).where(Hadith.id.in_(top_ids)))
+    rows = session.execute(
+        select(HadithPreprocessed.hadith_id, _matn_column(lang)).where(
+            HadithPreprocessed.hadith_id.in_(top_ids)
+        )
+    )
     by_id = dict(rows.all())
     top_texts = [by_id[hadith_id] or "" for hadith_id in top_ids if hadith_id in by_id]
     weights = {term: PRF_ALPHA for term in preprocess_query(query, lang).split()}
@@ -200,10 +207,16 @@ def bm25_tfidf_hybrid(session: Session, query: str, lang: str) -> Scores:
     return dict(sorted(combined.items(), key=lambda item: (-round(item[1], 9), item[0])))
 
 
+def _embedding_table():
+    """The table dense search reads: `hadith_embeddings`, or the release EMBEDDINGS_RELEASE names."""
+    release = get_settings().embeddings_release
+    return HadithEmbedding.__table__ if release is None else embedding_table(release)
+
+
 def _embedding_column(lang: str):
     if lang != "AR":
         raise ValueError("Dense search supports Arabic only (the sentence encoder is Arabic)")
-    return HadithEmbedding.arabic
+    return _embedding_table().c.arabic
 
 
 def dense_search(
@@ -216,10 +229,11 @@ def dense_search(
     """Exact cosine search (no vector index): score is 1 - cosine distance, best first."""
     vector = _embedding_column(lang)
     distance = vector.cosine_distance([float(x) for x in query_embedding])
-    stmt = select(HadithEmbedding.hadith_id, 1 - distance).where(vector.is_not(None))
+    hadith_id = vector.table.c.hadith_id
+    stmt = select(hadith_id, 1 - distance).where(vector.is_not(None))
     if restrict is not None:
-        stmt = stmt.where(HadithEmbedding.hadith_id.in_(list(restrict)))
-    stmt = stmt.order_by(distance, HadithEmbedding.hadith_id).limit(top_k)
+        stmt = stmt.where(hadith_id.in_(list(restrict)))
+    stmt = stmt.order_by(distance, hadith_id).limit(top_k)
     return _scores(session, stmt)
 
 

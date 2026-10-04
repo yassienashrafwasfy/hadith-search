@@ -6,9 +6,17 @@ import subprocess
 from pathlib import Path
 
 import pandas as pd
-from sqlalchemy import Integer, insert
+from sqlalchemy import Integer
 
-from database import drop_corpus_tables, get_sync_session, init_schema_sync
+from database import (
+    CORPUS_TABLES,
+    Base,
+    drop_corpus_tables,
+    get_sync_engine,
+    init_schema_sync,
+    insert_hadith_rows,
+    restore_hadith_references,
+)
 from models import Hadith
 
 LK_REPO_URL = "https://github.com/ShathaTm/LK-Hadith-Corpus.git"
@@ -46,15 +54,6 @@ REQUIRED_COLUMNS = {
     "English_Grade",
     "Arabic_Grade",
 }
-
-PREPROCESSING_COLUMNS = [
-    "Preprocessed_English",
-    "Preprocessed_Arabic",
-    "Preprocessed_English_Isnad",
-    "Preprocessed_Arabic_Isnad",
-    "Preprocessed_English_Matn",
-    "Preprocessed_Arabic_Matn",
-]
 
 
 def _clean_text(value):
@@ -216,24 +215,20 @@ def transform_lk_dataframe(df):
     output["Chapter_Number"] = df["Chapter_Number"]
     output["Chapter_Title_English"] = df["Chapter_English"].map(_clean_text)
     output["Chapter_Title_Arabic"] = df["Chapter_Arabic"].map(_clean_text)
-    output["Chapter_English"] = output["Chapter_Title_English"]
-    output["Chapter_Arabic"] = output["Chapter_Title_Arabic"]
 
     output["Section_Number"] = df["Section_Number"]
     output["Section_English"] = df["Section_English"].map(_clean_text)
     output["Section_Arabic"] = df["Section_Arabic"].map(_clean_text)
     output["Hadith_Number"] = df["Hadith_number"]
 
-    output["English_Hadith"] = df["English_Hadith"].map(_clean_text)
-    output["English_Text"] = output["English_Hadith"]
+    output["English_Text"] = df["English_Hadith"].map(_clean_text)
     output["English_Isnad"] = df["English_Isnad"].map(_clean_text)
     output["English_Matn"] = df["English_Matn"].map(_clean_text)
     output["English_Text_Source"] = output["English_Text"].map(_source_for)
     output["English_Isnad_Source"] = output["English_Isnad"].map(_source_for)
     output["English_Matn_Source"] = output["English_Matn"].map(_source_for)
 
-    output["Arabic_Hadith"] = df["Arabic_Hadith"].map(_clean_text)
-    output["Arabic_Text"] = output["Arabic_Hadith"]
+    output["Arabic_Text"] = df["Arabic_Hadith"].map(_clean_text)
     output["Arabic_Isnad"] = df["Arabic_Isnad"].map(_clean_text)
     output["Arabic_Matn"] = df["Arabic_Matn"].map(_clean_text)
     output["Arabic_Text_Source"] = output["Arabic_Text"].map(_source_for)
@@ -245,7 +240,6 @@ def transform_lk_dataframe(df):
 
     output["English_Grade"] = df["English_Grade"].map(_clean_text)
     output["Arabic_Grade"] = df["Arabic_Grade"].map(_clean_text)
-    output["Grade"] = output["English_Grade"]
     output["Normalized_Grade"] = [
         normalize_grade(en_grade, ar_grade)
         for en_grade, ar_grade in zip(output["English_Grade"], output["Arabic_Grade"])
@@ -273,9 +267,6 @@ def transform_lk_dataframe(df):
     output.insert(0, "id_before_drop", range(1, len(output) + 1))
     output, dropped_rows = drop_rows_missing_bilingual_matn(output)
     output.insert(0, "id", range(1, len(output) + 1))
-
-    for column in PREPROCESSING_COLUMNS:
-        output[column] = ""
 
     output.attrs["reconstruction_summary"] = reconstruction_summary
     output.attrs["dropped_rows"] = dropped_rows
@@ -311,7 +302,7 @@ def _reconstruct_isnad(fields):
 
 # (field, rebuild function, extra columns to fill, source label)
 _RECONSTRUCTION_STEPS = (
-    ("Text", _reconstruct_text, ("Hadith",), "reconstructed_from_isnad_matn"),
+    ("Text", _reconstruct_text, (), "reconstructed_from_isnad_matn"),
     ("Matn", _reconstruct_matn, (), "reconstructed_from_full_minus_isnad"),
     ("Isnad", _reconstruct_isnad, (), "reconstructed_from_full_minus_matn"),
 )
@@ -365,7 +356,12 @@ def drop_rows_missing_bilingual_matn(df):
 
 
 _INT_COLUMNS = [c.name for c in Hadith.__table__.c if isinstance(c.type, Integer)]
-_MODEL_COLUMNS = [c.name for c in Hadith.__table__.c]
+# The frame also carries LK_Book and the chapter titles; insert_hadith_rows splits them off.
+_MODEL_COLUMNS = [c.name for c in Hadith.__table__.c] + [
+    "LK_Book",
+    "Chapter_Title_English",
+    "Chapter_Title_Arabic",
+]
 
 
 _NUMBER_LABEL_COLUMNS = ["Section_Number", "Hadith_Number"]
@@ -394,11 +390,14 @@ def _hadith_records(df):
 
 def create_database(df):
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    drop_corpus_tables()
-    init_schema_sync()
-    with get_sync_session() as session:
-        session.execute(insert(Hadith), _hadith_records(df))
-        session.commit()
+    init_schema_sync()  # extension and the annotation tables; the corpus tables are swapped below
+    records = _hadith_records(df)
+    # One transaction: drop, recreate and fill. A failed insert restores the old corpus.
+    with get_sync_engine().begin() as conn:
+        drop_corpus_tables(conn)
+        Base.metadata.create_all(conn, tables=CORPUS_TABLES)
+        insert_hadith_rows(conn, records)
+        restore_hadith_references(conn)
 
 
 def write_dropped_rows_audit(dropped_rows):

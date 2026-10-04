@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Checks nginx/default.conf against a stub app: syntax, the sign-in limit (5 quick tries, then
-# 429 as problem+json with Retry-After), that sign-up shares it, that other routes are not
-# limited, and the blue/green routing file written by tools/deploy.sh (live colour, canary
+# 429 as problem+json with Retry-After), that sign-up shares it, that other routes (and the health route) are not
+# limited, search spikes (smoothed, then 503 as problem+json), and the blue/green routing file written by tools/deploy.sh (live colour, canary
 # stickiness, reload). Needs Docker; does not build the real app image.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -47,7 +47,7 @@ codes=$(for _ in 1 2 3 4 5 6 7; do code -X POST "$URL/api/v1/tokens"; echo -n " 
 check "sign-in: 5 through to the app, then 429" "401 401 401 401 401 429 429 " "$codes"
 
 body=$(curl -s -i -X POST "$URL/api/v1/tokens")
-check "429 is problem+json" 1 "$(echo "$body" | grep -ci '^content-type: application/problem+json')"
+check "429 is problem+json" 1 "$(echo "$body" | grep -ci "content-type: application/problem+json")"
 check "429 has Retry-After" 1 "$(echo "$body" | grep -ci '^retry-after: 60')"
 check "429 body is the API error shape" 1 "$(echo "$body" | grep -c '"status":429')"
 
@@ -56,6 +56,23 @@ check "sign-up shares the same counter" 429 "$(code -X POST "$URL/api/v1/annotat
 others=$(for _ in $(seq 1 30); do code "$URL/api/v1"; echo; done | sort -u | tr -d '\n')
 check "other routes are not limited" 200 "$others"
 check "profile route is not limited" 200 "$(code "$URL/api/v1/annotators/me")"
+health=$(for _ in $(seq 1 60); do code "$URL/api/v1/health"; echo; done | sort -u | tr -d '\n')
+check "health route is not limited (60 quick checks)" 200 "$health"
+# A spike of 60 searches from one address: some pass, the excess is 503 with the API error shape.
+spike=$(seq 60 | xargs -P 60 -I{} curl -s -o /dev/null -w '%{http_code}\n' "$URL/api/v1/searches?q=a&method=bm25")
+check "search spike: some requests served" 1 "$(echo "$spike" | grep -c '^200$' | awk '{print ($1>0)}')"
+check "search spike: the excess gets 503" 1 "$(echo "$spike" | grep -c '^503$' | awk '{print ($1>0)}')"
+check "search spike: nothing else" "" "$(echo "$spike" | grep -v '^200$' | grep -v '^503$' | sort -u | tr -d '\n')"
+sleep 3
+check "search works again after the spike" 200 "$(code "$URL/api/v1/searches?q=a&method=bm25")"
+full=$(seq 60 | xargs -P 60 -I{} curl -s -i "$URL/api/v1/searches?q=a&method=bm25")
+refused=$(echo "$full" | grep -o "HTTP/1.1 503" | wc -l || true)
+check "search 503 is problem+json" "$refused" "$(echo "$full" | grep -ci "content-type: application/problem+json" || true)"
+check "search 503 has Retry-After 5" "$refused" "$(echo "$full" | grep -ci "retry-after: 5" || true)"
+check "search 503 body is the API error shape" "$refused" "$(echo "$full" | grep -c '"status":503' || true)"
+check "some of the spike was refused" 1 "$((refused > 0))"
+sleep 3
+
 check "server version hidden" 0 "$(curl -sI "$URL/api/v1" | grep -ci '^server: nginx/')"
 big=$(head -c 2000000 /dev/zero | tr '\0' a)
 check "bodies over 1 MB rejected" 413 "$(echo "$big" | curl -s -o /dev/null -w '%{http_code}' -X POST --data-binary @- "$URL/api/v1")"

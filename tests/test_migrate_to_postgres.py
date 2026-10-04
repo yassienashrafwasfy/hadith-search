@@ -1,11 +1,46 @@
 import pytest
-from sqlalchemy import create_engine, insert, select
+from sqlalchemy import Column, Integer, MetaData, Table, Text, create_engine, insert, select
 
 import database
-from models import Annotation, Annotator, Base, Hadith, HadithEmbedding, KvPair, Posting
+from models import (
+    Annotation,
+    Annotator,
+    Base,
+    Chapter,
+    Hadith,
+    HadithEmbedding,
+    HadithPreprocessed,
+    KvPair,
+    Posting,
+)
 from scripts import migrate_to_postgres as mig
 
 OLD_TABLES = [m.__table__ for m in mig.TABLES]
+
+# The flat `hadiths` table an old install had: chapter titles, book and grade copied on each row.
+_OLD_HADITHS = Table(
+    "hadiths",
+    MetaData(),
+    Column("id", Integer, primary_key=True),
+    *(
+        Column(name, Text)
+        for name in (
+            "Book",
+            "LK_Book",
+            "Chapter_English",
+            "Chapter_Arabic",
+            "Chapter_Title_English",
+            "Chapter_Title_Arabic",
+            "English_Text",
+            "English_Hadith",
+            "Grade",
+            "English_Grade",
+            "Preprocessed_English_Matn",
+            "Preprocessed_Arabic_Matn",
+        )
+    ),
+    Column("Chapter_Number", Integer),
+)
 
 
 def _old_install(tmp_path):
@@ -13,13 +48,20 @@ def _old_install(tmp_path):
     path = tmp_path / "hadiths.db"
     engine = create_engine(f"sqlite:///{path}")
     Base.metadata.create_all(engine, tables=OLD_TABLES)
+    _OLD_HADITHS.create(engine)
     with engine.begin() as conn:
         conn.execute(
-            insert(Hadith),
+            insert(_OLD_HADITHS),
             [
                 {
                     "id": i,
                     "Book": "Bukhari",
+                    "LK_Book": "Bukhari",
+                    "Chapter_Number": 1,
+                    "Chapter_English": "Prayer",
+                    "Chapter_Title_Arabic": "الصلاة",
+                    "English_Hadith": f"text {i}",
+                    "Grade": "Sahih",
                     "Preprocessed_English_Matn": f"prayer word{i}",
                     "Preprocessed_Arabic_Matn": "صلاه كلمه",
                 }
@@ -79,6 +121,15 @@ def test_copies_every_table(_migrated):
     with database.get_sync_session() as session:
         assert session.get(Annotator, 7).username == "alice"
         assert session.get(Hadith, 9).Book == "Bukhari"
+
+
+def test_old_flat_hadiths_are_split_into_the_new_tables(_migrated):
+    with database.get_sync_session() as session:
+        hadith = session.get(Hadith, 9)
+        assert (hadith.English_Text, hadith.English_Grade) == ("text 9", "Sahih")
+        chapter = session.get(Chapter, ("Bukhari", 1))
+        assert (chapter.title_english, chapter.title_arabic) == ("Prayer", "الصلاة")
+        assert session.get(HadithPreprocessed, 4).Preprocessed_Arabic_Matn == "صلاه كلمه"
 
 
 def test_embeddings_and_index_are_built(_migrated):

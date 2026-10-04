@@ -138,7 +138,7 @@ python scripts\build_all.py --force --skip-embeddings
 |------|--------|-------|--------|
 | 1 | `data_creation.py` | LK-Hadith-Corpus CSVs | `hadiths` table, `dropped_lk_rows.json` |
 | 2 | `profile.py` | `hadiths` table | Console audit report (read-only) |
-| 3 | `preprocess.py` | `hadiths` table | 6 `Preprocessed_*` columns added to DB |
+| 3 | `preprocess.py` | `hadiths` table | 6 `Preprocessed_*` columns in the `hadith_preprocessed` table |
 | 4 | `build_inverted_index.py` | `hadiths` table | `terms`, `postings`, `hadith_lengths` tables |
 | 5 | `build_embeddings.py` | `hadiths` table | `hadith_embeddings` table |
 | 6 | `pooling.py` | All of the above | `qrels_ungraded.json` |
@@ -150,7 +150,7 @@ python scripts\build_all.py --force --skip-embeddings
 ## 5. Corpus
 
 **Source**: LK Hadith Corpus (6 canonical Sunni collections)  
-**Canonical size**: ~33,064 rows (exact count pending current pipeline rerun)  
+**Canonical size**: 33,064 rows (the loaded `hadiths` table; 33,491 is the size after the first-stage drop, before the second)  
 **Schema**: See the `hadiths` table (`backend/models/orm.py`) — key columns:
 
 | Column | Description |
@@ -158,15 +158,15 @@ python scripts\build_all.py --force --skip-embeddings
 | `id` | Auto-increment primary key |
 | `Book` | One of: Bukhari, Muslim, AbuDaud, Nesai, IbnMaja, Tirmizi |
 | `Hadith_Number` | LK-native hadith number within book |
-| `Chapter_Number`, `Chapter_Title_English`, `Chapter_Title_Arabic` | Chapter metadata |
+| `Chapter_Number` (titles in the `chapters` table) | Chapter metadata |
 | `English_Text`, `Arabic_Text` | Full hadith text (isnad + matn) |
 | `English_Isnad`, `Arabic_Isnad` | Narrator chain |
 | `English_Matn`, `Arabic_Matn` | Hadith body text |
 | `English_Grade`, `Arabic_Grade` | Raw grade strings from LK |
-| `Grade` | Normalized grade: Sahih / Hasan / Da'if / Mawdu / Unknown |
+| `Normalized_Grade` | Normalized grade: Sahih / Hasan / Da'if / Mawdu / Unknown |
 | `English_Matn_Source`, `Arabic_Matn_Source` | `lk_original` or `reconstructed` |
 | `Has_English_Matn`, `Has_Arabic_Matn` | Boolean content flags |
-| `Preprocessed_English`, `Preprocessed_Arabic` | Full text, preprocessed |
+| `Preprocessed_English`, `Preprocessed_Arabic` | Full text, preprocessed (table `hadith_preprocessed`) |
 | `Preprocessed_English_Isnad`, `Preprocessed_Arabic_Isnad` | Isnad, preprocessed |
 | `Preprocessed_English_Matn`, `Preprocessed_Arabic_Matn` | Matn, preprocessed — **primary retrieval field** |
 
@@ -218,7 +218,7 @@ Both pipelines are run over three text fields (full text, isnad, matn) independe
 | Semantic RRF | Dense+Sparse | Reciprocal Rank Fusion of BM25 and cosine |
 
 **Dense retrieval details**:
-- Model: `masterofaudio2077/Fada_ar_embedding`, exported to ONNX, vectors cut to 256 dimensions
+- Model: `masterofaudio2077/Fada_ar_embedding`, exported to ONNX, vectors cut to 64 dimensions
 - No query or passage prefix
 - Passages are the Arabic matn with diacritics removed. Queries are cleaned the same way.
 

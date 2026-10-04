@@ -69,6 +69,19 @@ def test_prod_with_everything_set_is_valid(monkeypatch):
     assert settings.is_prod and settings.effective_cors_origins == "https://hadith.example"
 
 
+@pytest.mark.parametrize("origins", ["*", "https://hadith.example, *", " * "])
+def test_prod_refuses_a_wildcard_cors_origin(monkeypatch, origins):
+    _prod_env(monkeypatch, CORS_ORIGINS=origins)
+    with pytest.raises(ValidationError, match="CORS_ORIGINS=\\*"):
+        Settings()
+
+
+def test_dev_and_test_still_accept_a_wildcard_cors_origin(monkeypatch):
+    for env in ("dev", "test"):
+        _prod_env(monkeypatch, APP_ENV=env, CORS_ORIGINS="*")
+        assert Settings().effective_cors_origins == "*"
+
+
 def test_prod_still_checks_secret_length(monkeypatch):
     _prod_env(monkeypatch, AUTH_SECRET="short")
     with pytest.raises(ValidationError, match="at least 32"):

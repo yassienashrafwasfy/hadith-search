@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # One load-test run against a running app container, with CPU and memory sampled from docker.
 #   tools/loadtest/run.sh LABEL USERS SECONDS [CONTAINER]
+# LOADTEST_FILE picks another locustfile (tools/loadtest/locustfile_methods.py: all 8 methods, equal weight).
 # Results go to $LOADTEST_OUT/LABEL (default /tmp/loadtest). The container is warmed first so the
 # numbers describe steady state, not the first-request loading of the models.
 set -euo pipefail
@@ -16,7 +17,7 @@ for spec in "bm25 en prayer" "bm25-prf ar الصلاة" "cosine-similarity ar ا
 done
 (while true; do docker stats --no-stream --format '{{.CPUPerc}} {{.MemUsage}}' "$container" | sed "s/^/$(date +%s) /"; sleep 2; done >"$out/stats.txt") &
 sampler=$!
-.venv/bin/locust -f tools/loadtest/locustfile.py --headless --host "$host" -u "$users" -r 5 -t "${secs}s" \
+.venv/bin/locust -f "${LOADTEST_FILE:-tools/loadtest/locustfile.py}" --headless --host "$host" -u "$users" -r 5 -t "${secs}s" \
   --csv "$out/run" --only-summary >"$out/summary.txt" 2>&1 || true
 kill "$sampler" 2>/dev/null || true
 docker inspect "$container" --format 'oom_killed={{.State.OOMKilled}} restarts={{.RestartCount}}' >>"$out/summary.txt"

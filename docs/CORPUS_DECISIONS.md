@@ -93,7 +93,7 @@ These rows have English matn fields containing only cross-reference phrases such
 
 **Result**: Approximately **427 additional rows** to be dropped (410 Arabic + 17 English; overlap between categories is not confirmed as zero, so final count may differ slightly). These rows will be recorded in the existing `dropped_lk_rows.json` audit with an extended reason field.
 
-**Expected canonical corpus size after this step**: approximately **33,064 rows** (exact count pending pipeline rerun).
+**Canonical corpus size after this step**: **33,064 rows** (33,491 minus 427). Checked on 2026-10-04: the `hadiths` table in the shared database has 33,064 rows. The 33,491 above is the size after the first-stage drop only, before this step.
 
 **Implementation**: `backend/scripts/preprocess.py` — remove hard `ValueError`, replace with detection and drop. `backend/scripts/data_creation.py` — optionally extend drop audit. Alternatively, the drop is enforced at build time by excluding empty-preprocessed rows from index and embedding construction.
 
@@ -129,7 +129,7 @@ These rows have English matn fields containing only cross-reference phrases such
 ## Decision 6: Preprocessing Pipeline — Matn, Isnad, and Full Text as Separate Columns
 
 **Date**: Phase 9 (July 2026)  
-**Decision**: Preprocess all three text fields (full text, isnad, matn) independently for both languages, storing results in six separate columns: `Preprocessed_English`, `Preprocessed_Arabic`, `Preprocessed_English_Isnad`, `Preprocessed_Arabic_Isnad`, `Preprocessed_English_Matn`, `Preprocessed_Arabic_Matn`.
+**Decision**: Preprocess all three text fields (full text, isnad, matn) independently for both languages, storing results in six separate columns of the `hadith_preprocessed` table (moved out of `hadiths` for 3NF, HANDOFF item 28): `Preprocessed_English`, `Preprocessed_Arabic`, `Preprocessed_English_Isnad`, `Preprocessed_Arabic_Isnad`, `Preprocessed_English_Matn`, `Preprocessed_Arabic_Matn`.
 
 **Rationale**: Preprocessing all three fields separately preserves optionality for future experiments (e.g., isnad-based retrieval, full-text fallback, isnad fusion). The retrieval pipeline currently uses only the matn columns; the full-text and isnad columns are available for ablation studies without rerunning preprocessing.
 
@@ -152,7 +152,7 @@ These rows have English matn fields containing only cross-reference phrases such
 | LK raw load | ~34,088 | 6 books, all CSVs concatenated |
 | After reconstruction | ~34,088 | No rows added or removed; fields filled in |
 | After first-stage drop (missing bilingual matn) | 33,491 | 597 rows dropped; audit in `dropped_lk_rows.json` |
-| After second-stage drop (preprocessing collapses to empty) | ~33,064 | ~427 rows dropped; pending pipeline rerun |
+| After second-stage drop (preprocessing collapses to empty) | 33,064 | 427 rows dropped; this is the loaded `hadiths` table (checked 2026-10-04) |
 
 The final canonical corpus for all retrieval and evaluation experiments is the result of the second-stage drop.
 

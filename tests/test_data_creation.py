@@ -26,7 +26,6 @@ def test_text_rebuilt_from_isnad_and_matn():
     df = _frame(English_Isnad="A told B", English_Matn="prayer is key")
     summary = dc.apply_deterministic_reconstruction(df)
     assert df.at[0, "English_Text"] == "A told B prayer is key"
-    assert df.at[0, "English_Hadith"] == "A told B prayer is key"
     assert df.at[0, "English_Text_Source"] == "reconstructed_from_isnad_matn"
     assert summary["English_Text_reconstructed_from_isnad_matn"] == 1
     assert summary["Arabic_Text_reconstructed_from_isnad_matn"] == 0

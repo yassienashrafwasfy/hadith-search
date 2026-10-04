@@ -1,0 +1,47 @@
+flowchart TD
+  Browser["Browser: React SPA"]
+  Nginx["nginx"]
+  App["FastAPI app (main.py)"]
+  Settings["Settings and Features"]
+  Limiter["SearchLimiter (limiter.py)"]
+  SearchR["search router"]
+  AuthR["auth router"]
+  AnnR["annotation router"]
+  KvR["kv_pairs router"]
+  OtherR["hadiths, benchmark, root routers"]
+  Tokens["tokens.py (JWT)"]
+  Retrieval["retrieval.py (SYSTEMS)"]
+  Ranking["ranking.py"]
+  Results["results.py"]
+  Encoder["ONNX encoder"]
+  DB[("PostgreSQL + pgvector")]
+  Json["backend/data JSON files"]
+  Scripts["build scripts"]
+
+  Browser -->|"HTTP /api/v1, Bearer token"| Nginx
+  Nginx -->|"proxied request"| App
+  Settings -->|"flags, limits, secret, CORS"| App
+  App -->|"GET /searches"| Limiter
+  Limiter -->|"slot held, or 503 + Retry-After"| SearchR
+  App -->|"POST /annotators, /tokens"| AuthR
+  App -->|"assignments, labels, progress"| AnnR
+  App -->|"kv-pairs reads and PATCH"| KvR
+  App -->|"hadith id, benchmark"| OtherR
+  AuthR -->|"id, username"| Tokens
+  AnnR -->|"Bearer token"| Tokens
+  KvR -->|"Bearer token"| Tokens
+  SearchR -->|"SearchContext, query, lang"| Retrieval
+  Retrieval -->|"query, lang, session"| Ranking
+  Retrieval -->|"scores, filters"| Results
+  Ranking -->|"SQL over index tables"| DB
+  Ranking -->|"Arabic query text"| Encoder
+  Encoder -->|"query vector"| Ranking
+  Results -->|"rows by id"| DB
+  AuthR -->|"annotators, assignments"| DB
+  AnnR -->|"annotations, progress"| DB
+  AnnR -->|"queries, qrels"| Json
+  OtherR -->|"benchmark files"| Json
+  KvR -->|"kv_pairs join hadiths"| DB
+  OtherR -->|"hadith row"| DB
+  Scripts -->|"corpus, index, embeddings"| DB
+  Scripts -->|"qrels, manifest"| Json

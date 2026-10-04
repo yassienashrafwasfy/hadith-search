@@ -24,7 +24,7 @@ import time
 from sqlalchemy import select
 
 from database import get_sync_session
-from models import Hadith
+from models import HADITH_CHAPTER, Chapter, Hadith
 from scripts.arabic_encoder import encoding_text
 from scripts.loading import get_model
 from services.retrieval import SYSTEMS, SearchContext
@@ -75,7 +75,9 @@ def evaluate(system, ctx, queries, ks, capped: bool) -> dict:
 def run(ks: list[int], n: int, seed: int, out: str) -> dict:
     with get_sync_session() as session:
         rows = session.execute(
-            select(Hadith.id, Hadith.Arabic_Matn, Hadith.Chapter_Title_Arabic)
+            select(Hadith.id, Hadith.Arabic_Matn, Chapter.title_arabic)
+            .select_from(Hadith)
+            .outerjoin(Chapter, HADITH_CHAPTER)
         ).all()
         texts = {hid: encoding_text(matn) for hid, matn, _ in rows if matn}
         known = known_item_queries(texts, n, seed)

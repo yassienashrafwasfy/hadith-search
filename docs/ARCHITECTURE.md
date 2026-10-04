@@ -20,13 +20,13 @@
 │  └────┬─────┘  └─────┬──────┘  └─────┬──────┘  └────────┘  │
 │       │              │               │                       │
 │  ┌────▼──────────────▼───────────────▼──────────────────┐   │
-│  │                  scripts/search.py                    │   │
+│  │       services/retrieval.py + services/ranking.py      │   │
 │  │           8 retrieval systems                         │   │
 │  └───────────┬──────────────────────┬────────────────────┘   │
 │              │                      │                        │
 │  ┌───────────▼──────┐  ┌────────────▼────────────────────┐  │
 │  │  Sparse Index    │  │  Dense Index                    │  │
-│  │  BM25 / TF-IDF   │  │  Arabic embeddings (pgvector)       │  │
+│  │  BM25 / TF-IDF   │  │  Arabic embeddings (pgvector)   │  │
 │  │  (postings SQL)  │  │                                 │  │
 │  └───────────┬──────┘  └────────────┬────────────────────┘  │
 │              │                      │                        │
@@ -51,7 +51,7 @@ data_creation.py
   ├── Drop rows missing bilingual matn (first-stage drop)
   │     └── 597 rows dropped → dropped_lk_rows.json
   ├── Normalize grades
-  └── Write → hadiths table (33,491 rows)
+  └── Write → books, chapters, hadiths tables (33,491 hadiths at this step)
         │
         ▼
 profile.py (read-only audit, no modifications)
@@ -61,7 +61,7 @@ preprocess.py
   ├── Preprocess English text, isnad, matn (3 columns)
   ├── Preprocess Arabic text, isnad, matn (3 columns)
   ├── Detect rows where preprocessed matn is empty (second-stage drop candidates)
-  └── Write 6 Preprocessed_* columns → hadiths table
+  └── Write the 6 Preprocessed_* columns → hadith_preprocessed table
         │
         ▼
 build_inverted_index.py
@@ -74,7 +74,7 @@ build_embeddings.py
   ├── Read Arabic_Matn
   ├── Remove diacritics and extra spaces (encoding_text), no prefix
   ├── Encode with the ONNX export of masterofaudio2077/Fada_ar_embedding (ONNX Runtime, CPU)
-  └── Upsert 256-dimension float32 vectors into hadith_embeddings.arabic
+  └── Upsert 64-dimension float32 vectors into hadith_embeddings.arabic
         │
         ▼
 pooling.py
@@ -93,11 +93,11 @@ User query (text string + language)
         ▼
 routers/search.py
   ├── Detect language (EN / AR)
-  ├── Route to search.py function
+  ├── Pick the system in services/retrieval.py and run it (services/ranking.py)
   │
   ├── Sparse path:
   │     ├── preprocess_english(query) or preprocess_arabic(query)
-  │     ├── Look up terms in inverted index (pkl)
+  │     ├── Look up the terms in the `terms` and `postings` tables
   │     └── Score with BM25 / TF-IDF / Overlap
   │
   └── Dense path:
@@ -127,59 +127,23 @@ Only the NLP and model objects are loaded lazily and cached with `functools.lru_
 
 ## Database Schema (PostgreSQL)
 
-Primary table: `HADITHS`
+The source of truth is `backend/models/orm.py`; the picture is [`schema.svg`](diagrams/schema.svg) (from [`schema.dbml`](diagrams/schema.dbml)).
 
-```sql
-CREATE TABLE hadiths (
-    id                        INTEGER PRIMARY KEY AUTOINCREMENT,
-    Book                      TEXT,
-    Hadith_Number             TEXT,
-    Chapter_Number            TEXT,
-    Chapter_Title_English     TEXT,
-    Chapter_Title_Arabic      TEXT,
-    Section_Number            TEXT,
-    Section_Title_English     TEXT,
-    Section_Title_Arabic      TEXT,
-    English_Text              TEXT,
-    Arabic_Text               TEXT,
-    English_Isnad             TEXT,
-    Arabic_Isnad              TEXT,
-    English_Matn              TEXT,
-    Arabic_Matn               TEXT,
-    English_Grade             TEXT,
-    Arabic_Grade              TEXT,
-    Grade                     TEXT,
-    English_Text_Source       TEXT,
-    Arabic_Text_Source        TEXT,
-    English_Isnad_Source      TEXT,
-    Arabic_Isnad_Source       TEXT,
-    English_Matn_Source       TEXT,
-    Arabic_Matn_Source        TEXT,
-    Has_English_Content       INTEGER,
-    Has_Arabic_Content        INTEGER,
-    Has_English_Matn          INTEGER,
-    Has_Arabic_Matn           INTEGER,
-    Preprocessed_English      TEXT,
-    Preprocessed_Arabic       TEXT,
-    Preprocessed_English_Isnad TEXT,
-    Preprocessed_Arabic_Isnad  TEXT,
-    Preprocessed_English_Matn  TEXT,
-    Preprocessed_Arabic_Matn   TEXT
-);
+The schema is in third normal form (HANDOFF item 28):
 
-CREATE UNIQUE INDEX idx_hadiths_id   ON hadiths(id);
-CREATE INDEX idx_hadiths_book        ON hadiths(Book);
-CREATE INDEX idx_hadiths_grade       ON hadiths(Grade);
-```
+| Table | Primary key | Holds |
+|-------|-------------|-------|
+| `books` | `book` | the six collections and their short LK names |
+| `chapters` | `(book, chapter_number)` | chapter titles in English and Arabic |
+| `hadiths` | `id` | the bilingual corpus row; `Book` and `(Book, Chapter_Number)` are foreign keys. Section columns stay here because `(Book, Section_Number)` is not a key |
+| `hadith_preprocessed` | `hadith_id` | the six `Preprocessed_*` texts, the input of the BM25 build |
+| `hadith_embeddings` | `hadith_id` | one Arabic vector per hadith (`arabic`, 64 dimensions) |
+| `hadith_lengths` | `hadith_id` | token counts of the preprocessed matn |
+| `terms`, `postings` | `(language, term)`, `(language, term, hadith_id)` | the BM25 inverted index |
+| `annotators`, `assignments`, `annotations`, `annotation_progress` | see the ORM | the annotation platform |
+| `kv_pairs` | `id` | concept and entity pairs; the hadith text is read through `hadith_id` |
 
-Annotation tables (added by `database.py`):
-
-```sql
-CREATE TABLE users (id, username, hashed_password, created_at)
-CREATE TABLE query_assignments (id, user_id, query_id, assigned_at)
-CREATE TABLE relevance_grades (id, user_id, query_id, hadith_id, grade, graded_at)
-CREATE TABLE kv_pairs (id, concept, hadith_id, verified, created_at)
-```
+Indexes on `hadiths`: `Book` and `Normalized_Grade`.
 
 ---
 

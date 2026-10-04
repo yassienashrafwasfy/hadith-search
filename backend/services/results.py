@@ -3,7 +3,7 @@
 from sqlalchemy import ARRAY, Integer, any_, bindparam, select
 from sqlalchemy.orm import Session
 
-from models import Hadith, HadithSchema, SearchResult
+from models import HADITH_CHAPTER, Chapter, Hadith, HadithSchema, SearchResult
 
 DEFAULT_TOP_K = 500
 
@@ -13,10 +13,10 @@ _COLUMNS = (
     Hadith.Book,
     Hadith.English_Text,
     Hadith.Arabic_Text,
-    Hadith.Chapter_Title_English,
-    Hadith.Chapter_Title_Arabic,
+    Chapter.title_english.label("Chapter_Title_English"),
+    Chapter.title_arabic.label("Chapter_Title_Arabic"),
     Hadith.Normalized_Grade,
-    Hadith.Grade,
+    Hadith.English_Grade,
 )
 
 
@@ -35,7 +35,7 @@ def _to_hadith(row) -> HadithSchema:
         chapter_title_en=row.Chapter_Title_English or "",
         chapter_title_ar=row.Chapter_Title_Arabic or "",
         grade=row.Normalized_Grade or "Unknown",
-        raw_grade=row.Grade or "Unknown",
+        raw_grade=row.English_Grade or "Unknown",
         reference="",  # the corpus has no reference columns
         in_book_reference="",
     )
@@ -64,7 +64,8 @@ def build_results(
         allowed = set(session.scalars(stmt))
         ids = [hadith_id for hadith_id in ids if hadith_id in allowed]
     ids = ids[:top_k]
-    rows = {row.id: row for row in session.execute(select(*_COLUMNS).where(_in(ids)))}
+    stmt = select(*_COLUMNS).select_from(Hadith).outerjoin(Chapter, HADITH_CHAPTER).where(_in(ids))
+    rows = {row.id: row for row in session.execute(stmt)}
     return [
         SearchResult.model_construct(
             hadith=_to_hadith(rows[hadith_id]), score=float(raw[hadith_id])

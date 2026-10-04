@@ -129,16 +129,28 @@ def _candidate_opsets(requested: int | None) -> list[int]:
     return list(range(onnx.defs.onnx_opset_version(), MIN_OPSET - 1, -1))
 
 
-def export(out_dir: str, requested_opset: int | None = None) -> dict:
+def export(
+    out_dir: str,
+    requested_opset: int | None = None,
+    source_dir: str | None = None,
+    source_name: str = MODEL_ID,
+    source_revision: str | None = None,
+) -> dict:
+    """Export the Hugging Face model, or the model folder `source_dir` (for example a registry
+    version downloaded by `scripts/promote_model.py`), named `source_name` in export.json."""
     import onnxruntime
     import torch
     import transformers
-    from huggingface_hub import model_info, snapshot_download
     from transformers import AutoModel, AutoTokenizer
 
     os.makedirs(out_dir, exist_ok=True)
-    revision = model_info(MODEL_ID).sha
-    local = snapshot_download(MODEL_ID, revision=revision)
+    if source_dir is None:
+        from huggingface_hub import model_info, snapshot_download
+
+        revision = model_info(MODEL_ID).sha
+        local = snapshot_download(MODEL_ID, revision=revision)
+    else:
+        revision, local = source_revision, source_dir
     tokenizer = AutoTokenizer.from_pretrained(local)
     wrapper = _wrapper(AutoModel.from_pretrained(local))
     reference = reference_vectors(local, PARITY_TEXTS)
@@ -160,7 +172,7 @@ def export(out_dir: str, requested_opset: int | None = None) -> dict:
             print(f"opset {opset}: {tried[opset]}")
             continue
         info = {
-            "model": MODEL_ID,
+            "model": source_name,
             "revision": revision,
             "opset": written_opset(onnx_path),
             "requested_opset": opset,

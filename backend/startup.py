@@ -51,3 +51,37 @@ async def init_database() -> None:
     from database import init_schema
 
     await init_schema()
+
+
+async def check_embeddings_release() -> None:
+    """Refuse to start on a release whose vectors are missing or incomplete.
+
+    `EMBEDDINGS_RELEASE` names a table made by `scripts/promote_model.py`. A colour started with
+    a name that has no table (or an empty one) would answer every dense search with an error or
+    nothing, so it must fail its health check instead and never get traffic.
+    """
+    from sqlalchemy import func, select
+
+    from database import get_session
+    from models import Hadith
+    from models.embedding_sets import embedding_table
+    from settings import get_settings
+
+    release = get_settings().embeddings_release
+    if release is None:
+        return
+    table = embedding_table(release)
+    try:
+        async with get_session() as session:
+            vectors = await session.scalar(select(func.count()).select_from(table))
+            hadiths = await session.scalar(select(func.count()).select_from(Hadith))
+    except Exception as exc:
+        raise RuntimeError(
+            f"EMBEDDINGS_RELEASE={release} but the table {table.name} cannot be read "
+            f"({type(exc).__name__}). Create it with tools/promote_model.sh."
+        ) from exc
+    if vectors != hadiths:
+        raise RuntimeError(
+            f"EMBEDDINGS_RELEASE={release} has {vectors} vectors for {hadiths} hadiths; "
+            "run tools/promote_model.sh again to finish the re-embedding."
+        )

@@ -1,11 +1,12 @@
-from typing import Literal, Optional
+from typing import Annotated, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import func, select, update
 
 from database import get_session, now_iso
-from models import KvPair
+from inputs import DbId, Text
+from models import Hadith, KvPair
 from rest import API_PREFIX, href, json_response, link, page_links
 from routers.auth import get_current_annotator
 
@@ -17,6 +18,8 @@ router = APIRouter(
 )
 
 MAX_PAGE_SIZE = 200
+MAX_OFFSET = 1_000_000  # the table holds a few thousand pairs; this only keeps absurd values out
+MAX_BATCH = 100  # one UPDATE per item in one transaction, so the list must not be unbounded
 
 
 class StatusUpdate(BaseModel):
@@ -24,10 +27,10 @@ class StatusUpdate(BaseModel):
 
 
 class BatchItem(StatusUpdate):
-    id: int
+    id: DbId
 
 
-def _pair_dict(pair: KvPair) -> dict:
+def _pair_dict(pair: KvPair, hadith_en: str | None, hadith_ar: str | None) -> dict:
     data = {
         "id": pair.id,
         "topic": pair.topic,
@@ -37,8 +40,8 @@ def _pair_dict(pair: KvPair) -> dict:
         "entity_en": pair.entity_en,
         "entity_ar": pair.entity_ar,
         "hadith_id": pair.hadith_id,
-        "hadith_en": pair.hadith_en,
-        "hadith_ar": pair.hadith_ar,
+        "hadith_en": hadith_en,
+        "hadith_ar": hadith_ar,
         "status": pair.status,
         "created_at": pair.created_at,
         "verified_at": pair.verified_at,
@@ -50,10 +53,10 @@ def _pair_dict(pair: KvPair) -> dict:
 @router.get("")
 async def list_kv_pairs(
     request: Request,
-    status: Optional[str] = None,
-    topic: Optional[str] = None,
+    status: Optional[Text] = None,
+    topic: Optional[Text] = None,
     limit: int = Query(50, ge=1, le=MAX_PAGE_SIZE),
-    offset: int = Query(0, ge=0),
+    offset: int = Query(0, ge=0, le=MAX_OFFSET),
 ):
     conditions = []
     filters = {}
@@ -68,10 +71,16 @@ async def list_kv_pairs(
         total = (
             await session.execute(select(func.count()).select_from(KvPair).where(*conditions))
         ).scalar_one()
+        # The hadith text is read from `hadiths` (one copy of it), not stored on the pair.
         result = await session.execute(
-            select(KvPair).where(*conditions).order_by(KvPair.id).limit(limit).offset(offset)
+            select(KvPair, Hadith.English_Text, Hadith.Arabic_Text)
+            .join(Hadith, Hadith.id == KvPair.hadith_id)
+            .where(*conditions)
+            .order_by(KvPair.id)
+            .limit(limit)
+            .offset(offset)
         )
-        pairs = [_pair_dict(pair) for pair in result.scalars()]
+        pairs = [_pair_dict(pair, en, ar) for pair, en, ar in result]
 
     body = {
         "pairs": pairs,
@@ -106,7 +115,7 @@ async def kv_pairs_statistics(request: Request):
 
 
 @router.patch("/{pair_id}")
-async def update_kv_pair(pair_id: int, update_request: StatusUpdate):
+async def update_kv_pair(pair_id: DbId, update_request: StatusUpdate):
     async with get_session() as session:
         result = await session.execute(
             update(KvPair)
@@ -126,11 +135,12 @@ async def update_kv_pair(pair_id: int, update_request: StatusUpdate):
 
 
 @router.patch("")
-async def update_kv_pairs(items: list[BatchItem]):
+async def update_kv_pairs(items: Annotated[list[BatchItem], Field(max_length=MAX_BATCH)]):
     """Set the status of several pairs at once; ids that do not exist are skipped."""
     updated = 0
     async with get_session() as session:
-        for item in items:
+        # Ascending id order: two overlapping batches lock rows in the same order, so no deadlock.
+        for item in sorted(items, key=lambda i: i.id):
             result = await session.execute(
                 update(KvPair)
                 .where(KvPair.id == item.id)

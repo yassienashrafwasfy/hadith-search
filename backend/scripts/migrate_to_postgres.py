@@ -17,15 +17,25 @@ from sqlalchemy import MetaData, Table, create_engine, func, insert, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
-from database import get_sync_session, init_schema_sync, read_hadiths_df
+from database import get_sync_session, init_schema_sync, insert_hadith_rows, read_hadiths_df
 from models import Annotation, AnnotationProgress, Annotator, Assignment, Hadith, KvPair
 from scripts.build_inverted_index import write_index
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data")
 BATCH = 5000
 
-# Parents before children; the copy order also keeps foreign keys satisfied.
-TABLES = [Hadith, Annotator, Assignment, Annotation, AnnotationProgress, KvPair]
+# Parents before children; the copy order also keeps foreign keys satisfied. `hadiths` is copied
+# first by `copy_hadiths`, because the old flat table is split into several new ones.
+TABLES = [Annotator, Assignment, Annotation, AnnotationProgress, KvPair]
+
+# Columns an older install had instead of the single stored column: new name <- old name.
+_OLD_NAMES = {
+    "Chapter_Title_English": "Chapter_English",
+    "Chapter_Title_Arabic": "Chapter_Arabic",
+    "English_Grade": "Grade",
+    "English_Text": "English_Hadith",
+    "Arabic_Text": "Arabic_Hadith",
+}
 # Tables whose primary key is a generated id: the copied ids need the sequence moved past them.
 SERIAL_TABLES = [Annotator, Assignment, KvPair]
 
@@ -51,6 +61,21 @@ def copy_table(source: Engine, session: Session, model) -> int:
     return copied
 
 
+def copy_hadiths(source: Engine, session: Session) -> int:
+    """Copy the old flat `hadiths` table into books, chapters, hadiths and hadith_preprocessed."""
+    table = _source_table(source, "hadiths")
+    if table is None:
+        return 0
+    with source.connect() as conn:
+        rows = [dict(row) for row in conn.execute(select(table)).mappings()]
+    for row in rows:
+        for new, old in _OLD_NAMES.items():
+            if row.get(new) is None and row.get(old) is not None:
+                row[new] = row[old]
+    insert_hadith_rows(session, rows)
+    return len(rows)
+
+
 def reset_sequences(session: Session) -> None:
     """Point each serial id at the largest copied id so new rows do not collide."""
     for model in SERIAL_TABLES:
@@ -69,11 +94,14 @@ def migrate(sqlite_path: str, data_dir: str = DATA_DIR) -> dict[str, int]:
         with get_sync_session() as session:
             if session.scalar(select(func.count()).select_from(Hadith)):
                 raise RuntimeError("The PostgreSQL hadiths table is not empty; refusing to copy.")
+            counts["hadiths"] = copy_hadiths(source, session)
             for model in TABLES:
                 counts[model.__tablename__] = copy_table(source, session, model)
             reset_sequences(session)
+            # Same transaction as the copy: the index is built from the uncommitted hadiths and
+            # everything commits together, so a failure leaves the database empty, not half-filled.
+            write_index(session, read_hadiths_df(bind=session.connection()), commit=False)
             session.commit()
-            write_index(session, read_hadiths_df())
     finally:
         source.dispose()
     return counts

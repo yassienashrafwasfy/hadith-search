@@ -1,0 +1,161 @@
+// Source of truth: backend/models/orm.py. Regenerate the picture with the commands in docs/HANDOFF.md item 32.
+Project hadith_search {
+  database_type: 'PostgreSQL'
+  Note: 'Hadith corpus, BM25 index, Arabic embeddings, annotation platform and kv-pairs. Third normal form (HANDOFF item 28).'
+}
+
+Table books {
+  book text [pk]
+  lk_book text [unique, note: 'short name used by the LK corpus files']
+  Note: 'One of the six collections.'
+}
+
+Table chapters {
+  book text [pk, ref: > books.book]
+  chapter_number integer [pk]
+  title_english text
+  title_arabic text
+  Note: 'A chapter is identified by book and number. Sections are not a table, see hadiths.'
+}
+
+Table hadiths {
+  id integer [pk]
+  Book text
+  Source_File text
+  Chapter_Number integer
+  Section_Number text [note: 'text: the corpus has ranges such as "622 -623" and "5, 6"']
+  Section_English text
+  Section_Arabic text
+  Hadith_Number text
+  English_Isnad text
+  English_Text text
+  English_Matn text
+  English_Text_Source text
+  English_Isnad_Source text
+  English_Matn_Source text
+  Arabic_Isnad text
+  Arabic_Text text
+  Arabic_Matn text
+  Arabic_Text_Source text
+  Arabic_Isnad_Source text
+  Arabic_Matn_Source text
+  Arabic_Comment text
+  English_Grade text
+  Arabic_Grade text
+  Normalized_Grade text
+  Has_English_Content integer
+  Has_Arabic_Content integer
+  Has_English_Matn integer
+  Has_Arabic_Matn integer
+
+  indexes {
+    Book [name: 'ix_hadiths_Book']
+    Normalized_Grade [name: 'ix_hadiths_Normalized_Grade']
+  }
+
+  Note: '''
+    Bilingual corpus row. Exception to 3NF on purpose: the Section_* columns stay here.
+    (Book, Section_Number) does not fix the section titles, and a chapter can span several
+    sections, so a sections table would not remove the repetition.
+  '''
+}
+
+Table hadith_preprocessed {
+  hadith_id integer [pk, ref: - hadiths.id]
+  Preprocessed_English text
+  Preprocessed_Arabic text
+  Preprocessed_English_Isnad text
+  Preprocessed_Arabic_Isnad text
+  Preprocessed_English_Matn text
+  Preprocessed_Arabic_Matn text
+  Note: 'Derived. The six preprocessed texts, rebuilt by scripts/preprocess.py. Input to the BM25 build.'
+}
+
+Table hadith_embeddings {
+  hadith_id integer [pk, ref: - hadiths.id]
+  arabic vector [note: 'pgvector, no fixed dimension; the Arabic ONNX encoder fills it (64 dims)']
+  Note: 'Derived. One Arabic vector per hadith, rebuilt by scripts/build_embeddings.py. Exact search, no vector index.'
+}
+
+Table hadith_lengths {
+  hadith_id integer [pk, ref: - hadiths.id]
+  english_len integer [not null]
+  arabic_len integer [not null]
+  Note: 'Derived. Token counts of the preprocessed matn, the document lengths BM25 normalises by.'
+}
+
+Table terms {
+  language text [pk, note: '"EN" or "AR"']
+  term text [pk]
+  df integer [not null, note: 'document frequency']
+  Note: 'Derived. Inverted index vocabulary. postings.(language, term) is not an enforced foreign key.'
+}
+
+Table postings {
+  language text [pk]
+  term text [pk]
+  hadith_id integer [pk, ref: > hadiths.id]
+  tf integer [not null, note: 'term frequency']
+
+  indexes {
+    hadith_id [name: 'ix_postings_hadith_id']
+  }
+
+  Note: 'Derived. Inverted index rows, rebuilt by scripts/build_inverted_index.py. Matn only.'
+}
+
+Table annotators {
+  id integer [pk, increment]
+  username text [unique, not null]
+  password_hash text [not null]
+  password_salt text [not null]
+  created_at text [not null]
+}
+
+Table assignments {
+  id integer [pk, increment]
+  annotator_id integer [not null, ref: > annotators.id]
+  query_id text [not null]
+  assigned_at text [not null]
+
+  indexes {
+    (annotator_id, query_id) [unique]
+  }
+}
+
+Table annotations {
+  annotator_id integer [pk, ref: > annotators.id]
+  query_id text [pk]
+  hadith_id integer [pk, ref: > hadiths.id]
+  label integer [not null, note: 'CHECK label IN (0, 1, 2)']
+  created_at text [not null]
+  updated_at text [not null]
+}
+
+Table annotation_progress {
+  annotator_id integer [pk, ref: > annotators.id]
+  query_id text [pk]
+  current_index integer [default: 0, note: 'CHECK current_index >= 0']
+}
+
+Table kv_pairs {
+  id integer [pk, increment]
+  topic text [not null]
+  language text [not null]
+  concept_en text [not null]
+  concept_ar text [not null]
+  entity_en text [not null]
+  entity_ar text [not null]
+  hadith_id integer [not null, ref: > hadiths.id]
+  status text [not null, default: 'pending', note: "CHECK status IN ('pending', 'verified', 'rejected')"]
+  created_at text [not null]
+  verified_at text
+
+  indexes {
+    status [name: 'idx_kv_pairs_status']
+    topic [name: 'idx_kv_pairs_topic']
+  }
+}
+
+Ref fk_hadiths_book: hadiths.Book > books.book
+Ref fk_hadiths_chapter: hadiths.(Book, Chapter_Number) > chapters.(book, chapter_number)

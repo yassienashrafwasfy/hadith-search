@@ -8,7 +8,7 @@ be revoked before it expires (there is no sign-out call; the client just drops i
 import logging
 import secrets
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import lru_cache
 
 import jwt
@@ -22,7 +22,7 @@ DEFAULT_TTL_MINUTES = settings_module.DEFAULT_TTL_MINUTES
 
 @dataclass(frozen=True)
 class AuthSettings:
-    secret: str
+    secret: str = field(repr=False)
     ttl_seconds: int
 
 

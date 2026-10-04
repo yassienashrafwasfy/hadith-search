@@ -19,6 +19,7 @@ export type ErrorKey =
   | 'error.notFound'
   | 'error.conflict'
   | 'error.tooMany'
+  | 'error.busy'
   | 'error.generic';
 
 export const statusToErrorKey = (status: number): ErrorKey => {
@@ -28,6 +29,7 @@ export const statusToErrorKey = (status: number): ErrorKey => {
   if (status === 404) return 'error.notFound';
   if (status === 409) return 'error.conflict';
   if (status === 429) return 'error.tooMany';
+  if (status === 503) return 'error.busy';
   return 'error.generic';
 };
 

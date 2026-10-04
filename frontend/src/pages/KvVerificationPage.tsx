@@ -148,11 +148,11 @@ const KvVerificationPage = () => {
           <div className="text-sm text-on-surface-variant dark:text-dark-on-surface-variant">Total</div>
         </div>
         <div className="bg-surface dark:bg-dark-surface p-4 rounded-lg border border-outline dark:border-dark-outline">
-          <div className="text-2xl font-bold text-yellow-600 dark:text-yellow-400">{pending}</div>
+          <div className="text-2xl font-bold text-amber-800 dark:text-amber-300">{pending}</div>
           <div className="text-sm text-on-surface-variant dark:text-dark-on-surface-variant">Pending</div>
         </div>
         <div className="bg-surface dark:bg-dark-surface p-4 rounded-lg border border-outline dark:border-dark-outline">
-          <div className="text-2xl font-bold text-green-600 dark:text-green-400">{verified}</div>
+          <div className="text-2xl font-bold text-green-800 dark:text-green-300">{verified}</div>
           <div className="text-sm text-on-surface-variant dark:text-dark-on-surface-variant">Verified</div>
         </div>
         <div className="bg-surface dark:bg-dark-surface p-4 rounded-lg border border-outline dark:border-dark-outline">
@@ -279,7 +279,7 @@ const KvVerificationPage = () => {
                   <button
                     onClick={() => handleVerify(pair.id, 'verified')}
                     disabled={verifyingId === pair.id}
-                    className="flex-1 px-4 py-2 text-sm font-medium rounded-lg bg-green-600 text-white hover:bg-green-700 dark:bg-green-700 dark:hover:bg-green-800 disabled:opacity-50 transition-colors"
+                    className="flex-1 px-4 py-2 text-sm font-medium rounded-lg bg-green-700 text-white hover:bg-green-800 dark:bg-green-700 dark:hover:bg-green-800 disabled:opacity-50 transition-colors"
                   >
                     Verify
                   </button>

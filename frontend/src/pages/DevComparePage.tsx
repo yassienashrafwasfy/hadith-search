@@ -140,8 +140,9 @@ const DevComparePage = () => {
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="flex flex-col gap-2">
-            <label className="font-ui-label text-ui-label text-primary dark:text-dark-primary font-semibold">{t('dev.algorithmA')}</label>
+            <label htmlFor="algo-a" className="font-ui-label text-ui-label text-primary dark:text-dark-primary font-semibold">{t('dev.algorithmA')}</label>
             <select
+              id="algo-a"
               value={algorithmA}
               onChange={(e) => setAlgorithmA(e.target.value)}
               className="h-12 px-4 rounded-lg border border-outline dark:border-dark-outline bg-surface dark:bg-dark-surface text-on-surface dark:text-dark-on-surface font-ui-label text-ui-label focus:ring-2 focus:ring-primary dark:focus:ring-dark-primary cursor-pointer"
@@ -152,8 +153,9 @@ const DevComparePage = () => {
             </select>
           </div>
           <div className="flex flex-col gap-2">
-            <label className="font-ui-label text-ui-label text-secondary dark:text-dark-secondary font-semibold">{t('dev.algorithmB')}</label>
+            <label htmlFor="algo-b" className="font-ui-label text-ui-label text-secondary dark:text-dark-secondary font-semibold">{t('dev.algorithmB')}</label>
             <select
+              id="algo-b"
               value={algorithmB}
               onChange={(e) => setAlgorithmB(e.target.value)}
               className="h-12 px-4 rounded-lg border border-outline dark:border-dark-outline bg-surface dark:bg-dark-surface text-on-surface dark:text-dark-on-surface font-ui-label text-ui-label focus:ring-2 focus:ring-secondary dark:focus:ring-dark-secondary cursor-pointer"
@@ -179,8 +181,9 @@ const DevComparePage = () => {
       {hasCompared && (
         <div className="flex flex-col gap-4">
           <div className="flex items-center gap-4">
-            <span className="font-ui-label text-ui-label text-on-surface-variant dark:text-dark-on-surface-variant">{t('sort.label')}</span>
+            <label htmlFor="sort-mode" className="font-ui-label text-ui-label text-on-surface-variant dark:text-dark-on-surface-variant">{t('sort.label')}</label>
             <select
+              id="sort-mode"
               value={sortMode}
               onChange={(e) => handleSortChange(e.target.value as 'grade-relevance' | 'relevance')}
               className="px-3 py-2 bg-surface dark:bg-dark-surface border border-outline dark:border-dark-outline rounded-lg text-on-surface dark:text-dark-on-surface font-ui-label text-ui-label cursor-pointer"

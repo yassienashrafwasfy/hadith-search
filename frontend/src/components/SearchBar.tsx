@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState, type FormEvent } from 'react';
 import { useLanguage } from '../i18n/useLanguage';
 import type { Lang } from '../types';
 
@@ -13,54 +13,63 @@ interface SearchBarProps {
 // The site searches Arabic text only, so every query goes out as Arabic.
 const SEARCH_LANG: Lang = 'ar';
 
+// One line of writing: a ruled underline that fills with rubric ink while the field has focus.
 const SearchBar = ({ onSearch, placeholder, compact = false, initialQuery = '', disabled = false }: SearchBarProps) => {
   const { t } = useLanguage();
   const [query, setQuery] = useState(initialQuery);
+  const inputRef = useRef<HTMLInputElement>(null);
 
-  const handleSubmit = () => {
+  const handleSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    if (disabled) return;
     if (query.trim()) {
       onSearch(query.trim(), SEARCH_LANG);
-    }
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') {
-      handleSubmit();
+    } else {
+      inputRef.current?.focus();
     }
   };
 
   return (
-    <div className="w-full">
-      <div className="flex items-center gap-3">
-        <div className="relative w-full group">
-          <div className="absolute inset-y-0 start-6 flex items-center pointer-events-none">
-            <span className="material-symbols-outlined text-secondary dark:text-dark-secondary fill group-focus-within:text-primary dark:group-focus-within:text-dark-primary transition-colors duration-300">
-              search
-            </span>
-          </div>
+    <form role="search" onSubmit={handleSubmit} className="w-full">
+      <label htmlFor={compact ? 'search-q-compact' : 'search-q'} className="sr-only">
+        {t('search.label')}
+      </label>
+      <div className="flex items-stretch gap-3 sm:gap-5">
+        <div className="ink-field flex-1 min-w-0 flex items-center gap-3 border-b-2 border-on-surface dark:border-dark-on-surface">
+          <span
+            aria-hidden="true"
+            className={`material-symbols-outlined text-on-surface-variant dark:text-dark-on-surface-variant ${compact ? 'text-[22px]' : 'text-[28px]'}`}
+          >
+            search
+          </span>
           <input
-            className={`w-full ${compact ? 'h-12 ps-14' : 'h-16 ps-16'} rounded-full border-2 border-outline-variant dark:border-dark-outline-variant bg-surface-container-lowest dark:bg-dark-surface-container-lowest text-on-surface dark:text-dark-on-surface font-ui-label text-ui-label focus:border-secondary dark:focus:border-dark-secondary focus:ring-4 focus:ring-secondary-container/30 dark:focus:ring-dark-secondary-container/30 transition-all shadow-sm placeholder:text-outline dark:placeholder:text-dark-outline`}
-            placeholder={placeholder || t('search.placeholder')}
-            type="text"
+            ref={inputRef}
+            id={compact ? 'search-q-compact' : 'search-q'}
+            name="q"
+            type="search"
+            enterKeyHint="search"
+            autoComplete="off"
+            autoCorrect="off"
+            spellCheck={false}
             lang="ar"
             dir="rtl"
-            aria-label={t('search.placeholder')}
+            className={`flex-1 min-w-0 bg-transparent border-0 outline-none focus-visible:outline-none font-body-arabic text-on-surface dark:text-dark-on-surface placeholder:text-on-surface-variant/70 dark:placeholder:text-dark-on-surface-variant/70 ${
+              compact ? 'text-[22px] py-2' : 'text-[26px] sm:text-[30px] py-3'
+            }`}
+            placeholder={placeholder || t('search.placeholder')}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={handleKeyDown}
           />
         </div>
         <button
-          type="button"
-          onClick={handleSubmit}
-          disabled={disabled || !query.trim()}
-          className={`shrink-0 ${compact ? 'h-12 px-4' : 'h-16 px-6'} bg-primary dark:bg-dark-primary text-on-primary dark:text-dark-on-primary rounded-full font-ui-label text-ui-label hover:bg-primary-container dark:hover:bg-dark-primary-container transition-all duration-200 flex items-center gap-2 hover:shadow-md active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed`}
+          type="submit"
+          disabled={disabled}
+          className="shrink-0 tap px-5 sm:px-7 bg-primary dark:bg-dark-primary text-on-primary dark:text-dark-on-primary hover:bg-primary-container dark:hover:bg-dark-primary-container active:translate-y-px transition-[background-color,transform] duration-200 font-ui-label text-ui-label rounded disabled:opacity-60 disabled:cursor-wait"
         >
-          <span className="material-symbols-outlined text-[18px]">search</span>
-          {!compact && t('search.button')}
+          {t('search.button')}
         </button>
       </div>
-    </div>
+    </form>
   );
 };
 

@@ -81,7 +81,7 @@ const DevBenchmarkPage = () => {
             </div>
             <div className="bg-surface-container-lowest dark:bg-dark-surface-container-lowest border border-outline-variant dark:border-dark-outline-variant rounded-xl p-5 sm:p-6">
 {benchmarkResults?.BM25 && (
-  <div className="overflow-x-auto rounded-lg border border-outline-variant dark:border-dark-outline-variant">
+  <div tabIndex={0} className="overflow-x-auto rounded-lg border border-outline-variant dark:border-dark-outline-variant">
     <table className="w-full border-collapse text-sm">
       <thead>
         <tr className="bg-surface-container-low dark:bg-dark-surface-container-low border-b border-outline-variant dark:border-dark-outline-variant">
@@ -149,7 +149,7 @@ const DevBenchmarkPage = () => {
                   return (
                     <div key={algo} className="flex flex-col gap-4">
                       <h3 className="font-h1-hadith text-lg text-primary dark:text-dark-primary">{algoLabel}</h3>
-                      <div className="overflow-x-auto rounded-lg border border-outline-variant dark:border-dark-outline-variant bg-surface-container-lowest dark:bg-dark-surface-container-lowest">
+                      <div tabIndex={0} className="overflow-x-auto rounded-lg border border-outline-variant dark:border-dark-outline-variant bg-surface-container-lowest dark:bg-dark-surface-container-lowest">
                         <table className="w-full text-start border-collapse min-w-[600px]">
                           <thead>
                             <tr className="bg-surface-container-low dark:bg-dark-surface-container-low font-ui-label text-ui-label text-on-surface dark:text-dark-on-surface border-b border-outline-variant dark:border-dark-outline-variant">

@@ -2,25 +2,19 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Warāqa: paper, ink and one rubric accent. Colour tokens live in tailwind.config.js;
+   the variables here are for the few places plain CSS needs them. */
 :root {
-  /* Light mode colors */
-  --color-background: #faf8f5;
-  --color-surface: #ffffff;
-  --color-surface-container: #f5f3f0;
-  --color-primary: #005129;
-  --color-primary-container: #1a6b3c;
-  --color-on-background: #1b1c1a;
-  --color-on-surface: #1b1c1a;
-  --color-on-surface-variant: #404940;
-  --color-outline: #707a70;
-  --color-outline-variant: #bfc9be;
-  --color-secondary: #745b00;
-  --color-secondary-container: #fdd977;
-  
-  font-family: 'Newsreader', 'Manrope', 'Amiri', system-ui, sans-serif;
-  line-height: 1.5;
-  color: var(--color-on-background);
-  background-color: var(--color-background);
+  --paper: #f1ede0;
+  --ink: #1d2230;
+  --rubric: #a23a2a;
+  --hairline: #cdc6b0;
+  --ease-ink: cubic-bezier(0.16, 1, 0.3, 1);
+  color-scheme: light;
+  font-family: 'IBM Plex Sans Arabic', system-ui, sans-serif;
+  line-height: 1.6;
+  color: var(--ink);
+  background-color: var(--paper);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -28,196 +22,211 @@
 }
 
 .dark {
-  /* Dark mode colors */
-  --color-background: #0a1f12;
-  --color-surface: #0d2818;
-  --color-surface-container: #12331f;
-  --color-primary: #89d89e;
-  --color-primary-container: #1a6b3c;
-  --color-on-background: #e2e3df;
-  --color-on-surface: #e2e3df;
-  --color-on-surface-variant: #c0c9c0;
-  --color-outline: #8a938a;
-  --color-outline-variant: #404940;
-  --color-secondary: #e5c363;
-  --color-secondary-container: #584400;
-}
-
-/* Smooth theme transition (150ms) */
-*,
-*::before,
-*::after {
-  transition: background-color 150ms ease, color 150ms ease, border-color 150ms ease, box-shadow 150ms ease;
-}
-
-/* Exclude elements with their own animations from theme transition */
-.animate-fade-in-up,
-.animate-fade-in,
-.animate-scale-in,
-.animate-spin-slow,
-.animate-pulse-glow,
-.animate-slide-in-left,
-.shimmer,
-.page-enter {
-  transition: none;
+  --paper: #0f1420;
+  --ink: #e8e2d0;
+  --rubric: #e8836c;
+  --hairline: #2c3548;
+  color-scheme: dark;
 }
 
 html {
   scroll-behavior: smooth;
+  background-color: var(--paper);
+  -webkit-tap-highlight-color: transparent;
 }
 
 body {
   margin: 0;
   min-height: 100vh;
-  background-color: inherit;
-  color: inherit;
+  background-color: var(--paper);
+  color: var(--ink);
+  touch-action: manipulation;
 }
 
-#root {
-  min-height: 100vh;
+#root { min-height: 100vh; }
+
+/* Paper grain: one fixed layer, never on scrolling content. */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.045;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='2'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
 }
+.dark body::before { opacity: 0.08; mix-blend-mode: screen; }
+
+html.rtl { font-family: 'IBM Plex Sans Arabic', system-ui, sans-serif; }
+
+::selection { background-color: var(--rubric); color: var(--paper); }
 
 .material-symbols-outlined {
   font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+  user-select: none;
+}
+.material-symbols-outlined.fill { font-variation-settings: 'FILL' 1; }
+
+.scrollbar-hide::-webkit-scrollbar { display: none; }
+.scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+
+/* Focus: a rubric ring on every interactive element, only for keyboard use. */
+:where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--rubric);
+  outline-offset: 3px;
+  border-radius: 2px;
+}
+:where(input, select, textarea):focus-visible { outline-offset: 2px; }
+
+/* Native controls follow the theme (Windows dark mode renders select lists itself). */
+select, option { background-color: var(--paper); color: var(--ink); }
+.dark select, .dark option { background-color: #161d2c; color: #e8e2d0; }
+
+/* Skip link */
+.skip-link {
+  position: absolute;
+  inset-inline-start: 16px;
+  top: -64px;
+  z-index: 100;
+  padding: 10px 16px;
+  background: var(--ink);
+  color: var(--paper);
+  border-radius: 2px;
+  transition: top 0.15s var(--ease-ink);
+}
+.skip-link:focus { top: 12px; }
+
+/* ruled-paper lines behind the hero, like a writing sheet */
+.ruled {
+  background-image: repeating-linear-gradient(
+    transparent 0 47px,
+    color-mix(in srgb, var(--ink) 6%, transparent) 47px 48px
+  );
 }
 
-.material-symbols-outlined.fill {
-  font-variation-settings: 'FILL' 1;
+/* Double rule under the header and around folios: a thick ink line and a hairline. */
+.double-rule {
+  border-bottom: 1px solid var(--ink);
+  box-shadow: 0 4px 0 -3px var(--paper), 0 4px 0 -2px var(--hairline);
+}
+.folio-frame {
+  border: 1px solid var(--ink);
+  outline: 1px solid var(--hairline);
+  outline-offset: 5px;
 }
 
-.scrollbar-hide::-webkit-scrollbar {
-  display: none;
-}
-
-.scrollbar-hide {
-  -ms-overflow-style: none;
-  scrollbar-width: none;
-}
-
-.girih-bg {
-  background-image: url("data:image/svg+xml,%3Csvg width='40' height='40' viewBox='0 0 40 40' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M20 0l2.5 17.5L40 20l-17.5 2.5L20 40l-2.5-17.5L0 20l17.5-2.5z' fill='%23e5c363' fill-opacity='0.05' fill-rule='evenodd'/%3E%3C/svg%3E");
-}
-
-.dark .girih-bg {
-  background-image: url("data:image/svg+xml,%3Csvg width='40' height='40' viewBox='0 0 40 40' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M20 0l2.5 17.5L40 20l-17.5 2.5L20 40l-2.5-17.5L0 20l17.5-2.5z' fill='%2389d89e' fill-opacity='0.05' fill-rule='evenodd'/%3E%3C/svg%3E");
-}
-
-/* Islamic geometric pattern for Hadith of the Day */
-.islamic-frame {
+/* Khatam: two squares, one turned 45 degrees. A plain geometric mark, no lettering. */
+.khatam {
   position: relative;
+  display: inline-block;
+  width: 1.25rem;
+  height: 1.25rem;
+  flex: none;
 }
-
-.islamic-frame::before,
-.islamic-frame::after {
+.khatam::before, .khatam::after {
   content: '';
   position: absolute;
-  width: 24px;
-  height: 24px;
-  border: 2px solid var(--color-secondary);
-  transform: rotate(45deg);
-  opacity: 0.6;
+  inset: 0.2rem;
+  border: 1.5px solid var(--rubric);
+}
+.khatam::after { transform: rotate(45deg); }
+
+.ornament {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+.ornament::before, .ornament::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--hairline);
 }
 
-.islamic-frame::before {
-  top: 12px;
-  left: 12px;
-}
-
-.islamic-frame::after {
-  bottom: 12px;
-  right: 12px;
-}
-
-/* Custom selection color */
-::selection {
-  background-color: var(--color-primary-container);
-  color: var(--color-on-surface);
-}
-
-/* Smooth page transitions */
-.page-enter {
-  animation: fadeInUp 0.5s ease-out forwards;
-}
-
-@keyframes fadeInUp {
-  0% {
-    opacity: 0;
-    transform: translateY(16px);
-  }
-  100% {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-@keyframes shimmer {
-  0% {
-    background-position: -200% 0;
-  }
-  100% {
-    background-position: 200% 0;
-  }
-}
-
-@keyframes fadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
-@keyframes scaleIn {
-  from { opacity: 0; transform: scale(0.95); }
-  to { opacity: 1; transform: scale(1); }
-}
-
-.animate-fade-in {
-  animation: fadeIn 0.2s ease-out;
-}
-
-.animate-scale-in {
-  animation: scaleIn 0.2s ease-out;
-}
-
-.shimmer {
-  background: linear-gradient(
-    90deg,
-    transparent 0%,
-    rgba(229, 195, 99, 0.08) 50%,
-    transparent 100%
-  );
-  background-size: 200% 100%;
-  animation: shimmer 3s ease-in-out infinite;
-}
-
-.dark .shimmer {
-  background: linear-gradient(
-    90deg,
-    transparent 0%,
-    rgba(137, 216, 158, 0.08) 50%,
-    transparent 100%
-  );
-  background-size: 200% 100%;
-  animation: shimmer 3s ease-in-out infinite;
-}
-
-/* ─── RTL / Arabic Language Overrides ─────────────────────────── */
-html.rtl {
-  font-family: 'Amiri', 'Newsreader', 'Manrope', system-ui, sans-serif;
-}
-
-html.rtl .islamic-frame::before {
-  left: auto;
-  right: 12px;
-}
-
-html.rtl .islamic-frame::after {
-  right: auto;
-  left: 12px;
-}
-
-/* ─── Arabic text styling ─────────────────────────────────────── */
+/* Hadith text: generous line height so stacked diacritics never collide. */
 .arabic-text {
   font-family: 'Amiri', 'Noto Naskh Arabic', serif;
   direction: rtl;
   text-align: right;
-  line-height: 1.8;
+  line-height: 2.1;
+  text-wrap: pretty;
+  word-spacing: 0.04em;
+}
+.latin-text { font-family: 'Newsreader', Georgia, serif; direction: ltr; text-align: left; line-height: 1.65; }
+
+h1, h2, h3 { text-wrap: balance; }
+
+/* Result folio: the rubric margin rule draws in on hover and focus. */
+.folio-card { position: relative; }
+.folio-card::before {
+  content: '';
+  position: absolute;
+  inset-block: -1px;
+  inset-inline-start: -1px;
+  width: 3px;
+  background: var(--rubric);
+  transform-origin: top;
+  transition: width 0.25s var(--ease-ink);
+}
+.folio-card:hover::before, .folio-card:focus-visible::before { width: 6px; }
+
+/* Loading: ruled skeleton lines in place of a spinner. */
+.skeleton-line {
+  height: 0.9rem;
+  border-radius: 1px;
+  background: var(--hairline);
+  animation: ink-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes ink-pulse { 0%, 100% { opacity: 0.45; } 50% { opacity: 1; } }
+
+/* Staggered entrance, only transform and opacity. */
+.rise { animation: rise 0.55s var(--ease-ink) both; animation-delay: calc(var(--i, 0) * 55ms); }
+@keyframes rise {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: none; }
+}
+.page-enter { animation: rise 0.5s var(--ease-ink) both; }
+
+@keyframes scaleIn {
+  from { opacity: 0; transform: translateY(12px) scale(0.985); }
+  to { opacity: 1; transform: none; }
+}
+.animate-scale-in { animation: scaleIn 0.28s var(--ease-ink) both; }
+
+/* The search underline draws in from the writing side when the field is focused. */
+.ink-field { position: relative; }
+.ink-field::after {
+  content: '';
+  position: absolute;
+  inset-inline: 0;
+  bottom: -2px;
+  height: 2px;
+  background: var(--rubric);
+  transform: scaleX(0);
+  transform-origin: right;
+  transition: transform 0.45s var(--ease-ink);
+}
+.ink-field:focus-within::after { transform: scaleX(1); }
+html:not(.rtl) .ink-field::after { transform-origin: left; }
+
+/* Touch devices: 44px targets */
+.tap { min-height: 44px; min-width: 44px; }
+
+/* Modals and drawers keep scroll inside */
+.contain-scroll { overscroll-behavior: contain; }
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+  .skeleton-line { animation: none; opacity: 0.7; }
+}
+
+@media print {
+  body::before { display: none; }
+  header, .no-print { display: none !important; }
 }

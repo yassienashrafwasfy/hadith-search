@@ -12,17 +12,22 @@ const ErrorBanner = ({ message, onDismiss }: ErrorBannerProps) => {
   if (!message) return null;
 
   return (
-    <div className="flex items-center justify-between bg-error-container dark:bg-dark-error-container text-on-error-container dark:text-dark-on-error-container rounded-lg p-4 animate-fade-in">
+    <div
+      role="alert"
+      className="flex items-center justify-between gap-3 bg-error-container dark:bg-dark-error-container text-on-error-container dark:text-dark-on-error-container border-s-4 border-error dark:border-dark-error rounded px-4 py-3 animate-fade-in"
+    >
       <div className="flex items-center gap-3">
-        <span className="material-symbols-outlined text-[20px]">error</span>
+        <span className="material-symbols-outlined text-[20px]" aria-hidden="true">error</span>
         <span className="font-ui-label text-ui-label">{t(message)}</span>
       </div>
       {onDismiss && (
         <button
+          type="button"
           onClick={onDismiss}
-          className="material-symbols-outlined text-[20px] hover:opacity-70 transition-opacity"
+          aria-label={t('error.dismiss')}
+          className="tap inline-flex items-center justify-center rounded hover:bg-black/5 dark:hover:bg-white/10 transition-colors"
         >
-          close
+          <span className="material-symbols-outlined text-[20px]" aria-hidden="true">close</span>
         </button>
       )}
     </div>

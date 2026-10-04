@@ -25,16 +25,10 @@ interface AnnotationState {
   labels: Record<string, number>;
 }
 
-const GRADE_LABELS: Record<number, string> = {
-  0: 'Not Relevant',
-  1: 'Relevant',
-  2: 'Highly Relevant',
-};
-
 const GRADE_COLORS: Record<number, string> = {
-  0: 'text-red-600 dark:text-red-400',
-  1: 'text-yellow-600 dark:text-yellow-400',
-  2: 'text-green-600 dark:text-green-400',
+  0: 'text-red-700 dark:text-red-300',
+  1: 'text-amber-800 dark:text-amber-300',
+  2: 'text-green-800 dark:text-green-300',
 };
 
 const DevAnnotationSessionPage = () => {
@@ -169,7 +163,7 @@ const DevAnnotationSessionPage = () => {
           onClick={() => navigate('/dev/annotation')}
           className="text-primary dark:text-dark-primary hover:underline"
         >
-          Back to annotation list
+          {t('annotation.backToList')}
         </button>
       </main>
     );
@@ -185,189 +179,138 @@ const DevAnnotationSessionPage = () => {
     count: Object.values(state.labels).filter(l => l === g).length,
   }));
 
-  return (
-    <main className="flex-grow w-full max-w-[90rem] mx-auto px-4 sm:px-6 lg:px-8 py-6 flex flex-col gap-6 page-enter">
-      <div className="flex items-center justify-between">
-        <button
-          onClick={() => navigate('/dev/annotation')}
-          className="flex items-center gap-2 px-3 py-1.5 text-on-surface-variant dark:text-dark-on-surface-variant hover:text-primary dark:hover:text-dark-primary transition-colors"
-        >
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-          </svg>
-          Back
-        </button>
+  const arNum = new Intl.NumberFormat('ar-EG');
+  const SCORES = [
+    { n: 0, key: 'annotation.score0', on: 'border-red-700 bg-red-700 text-white', cur: 'border-red-700 bg-red-50 dark:bg-red-900/20' },
+    { n: 1, key: 'annotation.score1', on: 'border-amber-700 bg-amber-700 text-white', cur: 'border-amber-700 bg-amber-50 dark:bg-amber-900/20' },
+    { n: 2, key: 'annotation.score2', on: 'border-green-700 bg-green-700 text-white', cur: 'border-green-700 bg-green-50 dark:bg-green-900/20' },
+  ];
+  const navBtn =
+    'tap inline-flex items-center gap-2 px-4 rounded border border-outline dark:border-dark-outline text-on-surface dark:text-dark-on-surface font-ui-label text-ui-label hover:bg-surface-container dark:hover:bg-dark-surface-container disabled:opacity-40 disabled:cursor-not-allowed transition-colors';
+  const progress = Math.min(100, ((state.current_index + 1) / state.total) * 100);
 
-        <div className="flex items-center gap-3">
-          {saving && (
-            <span className="text-sm text-on-surface-variant dark:text-dark-on-surface-variant">
-              Saving...
-            </span>
-          )}
-          <div className="text-label-lg text-on-surface-variant dark:text-dark-on-surface-variant">
-            {state.current_index + 1} / {state.total}
-          </div>
+  return (
+    <main className="flex-grow w-full max-w-[64rem] mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-10 flex flex-col gap-6 page-enter">
+      <div className="flex items-center justify-between gap-3">
+        <button type="button" onClick={() => navigate('/dev/annotation')} className={navBtn}>
+          <span className="material-symbols-outlined text-[20px] rtl:-scale-x-100" aria-hidden="true">arrow_back</span>
+          {t('annotation.backToList')}
+        </button>
+        <div className="flex items-center gap-3 font-ui-caption text-ui-caption text-on-surface-variant dark:text-dark-on-surface-variant tabular-nums">
+          <span role="status">{saving ? t('annotation.saving') : ''}</span>
+          <span>{t('annotation.position', { current: arNum.format(state.current_index + 1), total: arNum.format(state.total) })}</span>
         </div>
       </div>
 
-      <div className="w-full bg-surface-variant dark:bg-dark-surface-variant rounded-full h-2">
-        <div
-          className="bg-primary dark:bg-dark-primary h-2 rounded-full transition-all duration-300"
-          style={{ width: `${Math.min(100, ((state.current_index + 1) / state.total) * 100)}%` }}
-        />
+      <div
+        role="progressbar"
+        aria-label={t('annotation.progress')}
+        aria-valuemin={1}
+        aria-valuemax={state.total}
+        aria-valuenow={state.current_index + 1}
+        className="w-full h-1.5 bg-surface-variant dark:bg-dark-surface-variant rounded-full overflow-hidden"
+      >
+        <div className="bg-secondary dark:bg-dark-secondary h-full transition-[width] duration-300" style={{ width: `${progress}%` }} />
       </div>
+
+      <header>
+        <p className="font-ui-caption text-ui-caption text-on-surface-variant dark:text-dark-on-surface-variant">{t('annotation.query')}</p>
+        <h1 className="font-display-lg text-[28px] sm:text-[36px] leading-snug text-on-surface dark:text-dark-on-surface">{state.query}</h1>
+      </header>
 
       {Object.keys(state.labels).length > 0 && (
-        <div className="flex items-center justify-center gap-6 text-sm">
+        <ul aria-label={t('annotation.counts')} className="flex items-center gap-6 flex-wrap font-ui-caption text-ui-caption">
           {gradeCounts.map(({ grade, count }) => (
-            <span key={grade} className={GRADE_COLORS[grade]}>
-              {GRADE_LABELS[grade]}: {count}
-            </span>
+            <li key={grade} className={GRADE_COLORS[grade]}>
+              {t(`annotation.score${grade}`)}: {arNum.format(count)}
+            </li>
           ))}
-        </div>
+        </ul>
       )}
 
-      <div className="bg-surface dark:bg-dark-surface border border-outline dark:border-dark-outline rounded-lg p-6">
-        <div className="mb-4">
-          <span className="text-sm text-on-surface-variant dark:text-dark-on-surface-variant">
-            Query:
-          </span>
-          <div className="font-title-md text-on-surface dark:text-dark-on-surface mt-1">
-            {state.query}
-          </div>
-        </div>
-
+      <section className="folio-card bg-surface-container-lowest dark:bg-dark-surface-container-lowest border border-outline-variant dark:border-dark-outline-variant rounded px-4 sm:px-8 py-6">
         {currentHadith ? (
-          <div className="flex flex-col gap-6">
-            <div className="flex flex-col md:flex-row gap-6">
-              <div className="flex-1 min-w-0">
-                <div className="text-sm font-medium text-on-surface-variant dark:text-dark-on-surface-variant mb-2">
-                  Arabic (ID: {currentHadith.hadith_id})
-                </div>
-                {currentHadith.book && (
-                  <div className="text-xs text-on-surface-variant dark:text-dark-on-surface-variant mb-2">
-                    {currentHadith.book}
-                    {currentHadith.normalized_grade ? ` • ${currentHadith.normalized_grade}` : ''}
-                    {currentHadith.reference ? ` • ${currentHadith.reference}` : ''}
-                  </div>
-                )}
-                <div
-                  className="p-4 bg-surface-variant dark:bg-dark-surface-variant rounded-lg"
-                  style={{ direction: 'rtl', textAlign: 'right', fontFamily: 'Amiri, "Noto Naskh Arabic", serif' }}
-                >
-                  <p className="text-lg leading-relaxed text-on-surface dark:text-dark-on-surface whitespace-pre-wrap">
-                    {currentHadith.arabic_hadith}
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex-1 min-w-0">
-                <div className="text-sm font-medium text-on-surface-variant dark:text-dark-on-surface-variant mb-2">
-                  English
-                </div>
-                <div 
-                  className="p-4 bg-surface-variant dark:bg-dark-surface-variant rounded-lg"
-                  style={{ direction: 'ltr', textAlign: 'left' }}
-                >
-                  <p className="text-lg leading-relaxed text-on-surface dark:text-dark-on-surface whitespace-pre-wrap">
-                    {currentHadith.english_hadith}
-                  </p>
-                </div>
-              </div>
+          <div className="flex flex-col gap-5">
+            {currentHadith.book && (
+              <p className="flex flex-wrap items-center gap-x-4 gap-y-1 font-ui-caption text-ui-caption text-on-surface-variant dark:text-dark-on-surface-variant">
+                <span dir="ltr" translate="no">
+                  {[currentHadith.book, currentHadith.normalized_grade, currentHadith.reference].filter(Boolean).join(' · ')}
+                </span>
+                <span className="tabular-nums" dir="ltr">#{currentHadith.hadith_id}</span>
+              </p>
+            )}
+            <div>
+              <h2 className="font-ui-label text-ui-label text-secondary dark:text-dark-secondary mb-2">{t('annotation.arabic')}</h2>
+              <p className="arabic-text text-[24px] sm:text-[28px] text-on-surface dark:text-dark-on-surface whitespace-pre-wrap" lang="ar">
+                {currentHadith.arabic_hadith}
+              </p>
             </div>
-
+            <div className="ornament" aria-hidden="true"><span className="khatam" /></div>
+            <div>
+              <h2 className="font-ui-label text-ui-label text-secondary dark:text-dark-secondary mb-2">{t('annotation.english')}</h2>
+              <p className="latin-text text-[18px] sm:text-[20px] text-on-surface dark:text-dark-on-surface whitespace-pre-wrap" lang="en">
+                {currentHadith.english_hadith}
+              </p>
+            </div>
             {currentLabel !== undefined && (
-              <div className="text-center">
-                <span className="text-on-surface-variant dark:text-dark-on-surface-variant">
-                  Current grade:{' '}
-                </span>
-                <span className={`font-medium ${GRADE_COLORS[currentLabel]}`}>
-                  {GRADE_LABELS[currentLabel]}
-                </span>
-              </div>
+              <p className="font-ui-label text-ui-label text-on-surface-variant dark:text-dark-on-surface-variant">
+                {t('annotation.current')}:{' '}
+                <span className={`font-semibold ${GRADE_COLORS[currentLabel]}`}>{t(`annotation.score${currentLabel}`)}</span>
+              </p>
             )}
           </div>
         ) : (
-          <div className="text-center py-12 text-on-surface-variant dark:text-dark-on-surface-variant">
-            No more hadiths to annotate for this query.
-          </div>
+          <p className="text-center py-12 text-on-surface-variant dark:text-dark-on-surface-variant">{t('annotation.done')}</p>
         )}
-      </div>
+      </section>
 
-      <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
+      <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4">
         <button
+          type="button"
           onClick={() => navigateTo(state.current_index - 1)}
           disabled={state.current_index === 0}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg border border-outline dark:border-dark-outline text-on-surface dark:text-dark-on-surface hover:bg-surface-variant dark:hover:bg-dark-surface-variant disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          className={navBtn}
         >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-          </svg>
-          Previous
+          <span className="material-symbols-outlined text-[20px] rtl:-scale-x-100" aria-hidden="true">chevron_right</span>
+          {t('annotation.previous')}
         </button>
 
-        <div className="flex gap-3">
-          <button
-            onClick={() => saveLabel(state.current_index, 0)}
-            disabled={!currentHadith || saving}
-            className={`flex flex-col items-center gap-1 px-6 py-3 rounded-lg border-2 transition-all ${
-              flashGrade === 0
-                ? 'border-red-500 bg-red-500 scale-105 shadow-lg shadow-red-500/50'
-                : currentLabel === 0
-                ? 'border-red-500 bg-red-50 dark:bg-red-900/20'
-                : 'border-outline dark:border-dark-outline hover:border-red-400 hover:bg-red-50 dark:hover:bg-red-900/20'
-            }`}
-          >
-            <span className={`text-lg font-bold ${flashGrade === 0 ? 'text-white' : 'text-red-600 dark:text-red-400'}`}>0</span>
-            <span className={`text-xs ${flashGrade === 0 ? 'text-white' : 'text-on-surface-variant dark:text-dark-on-surface-variant'}`}>Not Relevant</span>
-          </button>
-
-          <button
-            onClick={() => saveLabel(state.current_index, 1)}
-            disabled={!currentHadith || saving}
-            className={`flex flex-col items-center gap-1 px-6 py-3 rounded-lg border-2 transition-all ${
-              flashGrade === 1
-                ? 'border-yellow-500 bg-yellow-500 scale-105 shadow-lg shadow-yellow-500/50'
-                : currentLabel === 1
-                ? 'border-yellow-500 bg-yellow-50 dark:bg-yellow-900/20'
-                : 'border-outline dark:border-dark-outline hover:border-yellow-400 hover:bg-yellow-50 dark:hover:bg-yellow-900/20'
-            }`}
-          >
-            <span className={`text-lg font-bold ${flashGrade === 1 ? 'text-white' : 'text-yellow-600 dark:text-yellow-400'}`}>1</span>
-            <span className={`text-xs ${flashGrade === 1 ? 'text-white' : 'text-on-surface-variant dark:text-dark-on-surface-variant'}`}>Relevant</span>
-          </button>
-
-          <button
-            onClick={() => saveLabel(state.current_index, 2)}
-            disabled={!currentHadith || saving}
-            className={`flex flex-col items-center gap-1 px-6 py-3 rounded-lg border-2 transition-all ${
-              flashGrade === 2
-                ? 'border-green-500 bg-green-500 scale-105 shadow-lg shadow-green-500/50'
-                : currentLabel === 2
-                ? 'border-green-500 bg-green-50 dark:bg-green-900/20'
-                : 'border-outline dark:border-dark-outline hover:border-green-400 hover:bg-green-50 dark:hover:bg-green-900/20'
-            }`}
-          >
-            <span className={`text-lg font-bold ${flashGrade === 2 ? 'text-white' : 'text-green-600 dark:text-green-400'}`}>2</span>
-            <span className={`text-xs ${flashGrade === 2 ? 'text-white' : 'text-on-surface-variant dark:text-dark-on-surface-variant'}`}>Highly Relevant</span>
-          </button>
+        <div role="group" aria-label={t('annotation.current')} className="grid grid-cols-3 gap-2 sm:gap-3">
+          {SCORES.map(({ n, key, on, cur }) => (
+            <button
+              type="button"
+              key={n}
+              onClick={() => saveLabel(state.current_index, n)}
+              disabled={!currentHadith || saving}
+              aria-pressed={currentLabel === n}
+              className={`flex flex-col items-center gap-1 px-3 sm:px-6 py-3 rounded border-2 transition-colors disabled:opacity-50 ${
+                flashGrade === n
+                  ? on
+                  : currentLabel === n
+                  ? cur
+                  : 'border-outline dark:border-dark-outline hover:bg-surface-container dark:hover:bg-dark-surface-container'
+              }`}
+            >
+              <span className={`text-lg font-bold ${flashGrade === n ? 'text-white' : 'text-on-surface dark:text-dark-on-surface'}`}>{arNum.format(n)}</span>
+              <span className={`text-xs ${flashGrade === n ? 'text-white' : 'text-on-surface-variant dark:text-dark-on-surface-variant'}`}>{t(key)}</span>
+            </button>
+          ))}
         </div>
 
         <button
+          type="button"
           onClick={() => navigateTo(state.current_index + 1)}
           disabled={state.current_index >= state.total - 1}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg border border-outline dark:border-dark-outline text-on-surface dark:text-dark-on-surface hover:bg-surface-variant dark:hover:bg-dark-surface-variant disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          className={`${navBtn} justify-end`}
         >
-          Next
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-          </svg>
+          {t('annotation.next')}
+          <span className="material-symbols-outlined text-[20px] rtl:-scale-x-100" aria-hidden="true">chevron_left</span>
         </button>
       </div>
 
-      <div className="text-center text-sm text-on-surface-variant dark:text-dark-on-surface-variant">
-        Keyboard shortcuts: <kbd className="px-1.5 py-0.5 bg-surface-variant dark:bg-dark-surface-variant rounded">0</kbd> <kbd className="px-1.5 py-0.5 bg-surface-variant dark:bg-dark-surface-variant rounded">1</kbd> <kbd className="px-1.5 py-0.5 bg-surface-variant dark:bg-dark-surface-variant rounded">2</kbd> to grade • <kbd className="px-1.5 py-0.5 bg-surface-variant dark:bg-dark-surface-variant rounded">&larr;</kbd> <kbd className="px-1.5 py-0.5 bg-surface-variant dark:bg-dark-surface-variant rounded">&rarr;</kbd> to navigate
-      </div>
+      <p className="text-center font-ui-caption text-ui-caption text-on-surface-variant dark:text-dark-on-surface-variant">
+        <span className="font-semibold">{t('annotation.shortcuts')}:</span> {t('annotation.shortcutsHelp')}
+      </p>
     </main>
   );
 };

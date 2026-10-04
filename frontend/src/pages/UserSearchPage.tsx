@@ -122,57 +122,50 @@ const UserSearchPage = () => {
   };
 
   return (
-    <main className="flex-grow w-full max-w-[90rem] mx-auto px-4 sm:px-6 lg:px-8 py-8 flex flex-col gap-6 page-enter">
-      <div className="flex flex-col gap-2">
-        <h1 className="font-display-lg text-display-lg text-primary dark:text-dark-primary">
+    <main className="flex-grow w-full max-w-[64rem] mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-12 flex flex-col gap-6 page-enter">
+      <header className="flex flex-col gap-2">
+        <h1 className="font-display-lg text-display-lg text-on-surface dark:text-dark-on-surface">
           {t('user.searchTitle')}
         </h1>
         <p className="font-body-main text-body-main text-on-surface-variant dark:text-dark-on-surface-variant">
           {t('user.searchSubtitle')}
         </p>
+      </header>
+
+      <div className="w-full">
+        <SearchBar onSearch={handleSearch} initialQuery={query} disabled={loading.search} />
       </div>
 
-      <div className="w-full max-w-4xl">
-        <SearchBar
-          onSearch={handleSearch}
-          initialQuery={query}
-          disabled={loading.search}
-        />
-      </div>
-
-      <div className="flex flex-col sm:flex-row gap-4 flex-wrap items-start sm:items-end">
+      <div role="group" aria-label={t('results.filters')} className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <GradeFilter value={selectedGrade} onChange={(g) => handleFilterChange(g, selectedBook)} />
         <BookFilter value={selectedBook} onChange={(b) => handleFilterChange(selectedGrade, b)} />
         <AlgorithmSelect value={algorithm} options={options} onChange={handleAlgorithmChange} />
       </div>
 
-      {errors.search && (
-        <ErrorBanner message={errors.search} onDismiss={() => clearError('search')} />
-      )}
+      {errors.search && <ErrorBanner message={errors.search} onDismiss={() => clearError('search')} />}
 
       {loading.search && (
-        <div className="flex flex-col items-center justify-center py-16 gap-4">
+        <div className="flex flex-col items-center justify-center py-16 gap-4" role="status" aria-live="polite">
           <LoadingSpinner />
           <p className="font-body-main text-body-main text-on-surface-variant dark:text-dark-on-surface-variant">
-            {t('loading.subtitle')}
+            {t('search.loading')}
           </p>
         </div>
       )}
 
       {!loading.search && rawResults.length > 0 && (
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-surface-variant dark:border-dark-surface-variant pb-4">
-          <p className="font-ui-caption text-ui-caption text-on-surface-variant dark:text-dark-on-surface-variant uppercase tracking-wider">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b-2 border-double border-outline dark:border-dark-outline pb-3">
+          <p role="status" className="font-ui-caption text-ui-caption text-on-surface-variant dark:text-dark-on-surface-variant">
             {t('results.showing', { count: sortedResults.length, s: sortedResults.length !== 1 ? 's' : '' })} &ldquo;{query}&rdquo;
-            {responseTime !== null && (
-              <span className="ml-2 text-primary/60 dark:text-dark-primary/60">({responseTime}ms)</span>
-            )}
+            {responseTime !== null && <span className="ms-2 tabular-nums" dir="ltr">({responseTime}ms)</span>}
           </p>
           <div className="flex items-center gap-2">
-            <span className="font-ui-label text-ui-label text-on-surface-variant dark:text-dark-on-surface-variant">{t('sort.label')}</span>
+            <label htmlFor="sort-mode" className="font-ui-label text-ui-label text-on-surface-variant dark:text-dark-on-surface-variant">{t('sort.label')}</label>
             <select
+              id="sort-mode"
               value={sortMode}
               onChange={(e) => handleSortChange(e.target.value as 'grade-relevance' | 'relevance')}
-              className="px-3 py-2 bg-surface dark:bg-dark-surface border border-outline dark:border-dark-outline rounded-lg text-on-surface dark:text-dark-on-surface font-ui-label text-ui-label cursor-pointer"
+              className="tap px-3 bg-surface dark:bg-dark-surface border border-outline dark:border-dark-outline rounded text-on-surface dark:text-dark-on-surface font-ui-label text-ui-label cursor-pointer"
             >
               <option value="grade-relevance">{t('sort.gradeRelevance')}</option>
               <option value="relevance">{t('sort.relevance')}</option>
@@ -182,25 +175,24 @@ const UserSearchPage = () => {
       )}
 
       {!loading.search && (
-        <div ref={resultsRef} className="flex flex-col gap-5">
+        <div ref={resultsRef} className="flex flex-col gap-4 scroll-mt-24" role="list" aria-label={t('results.list')}>
           {paginatedResults.map((result, index) => (
-            <HadithCard
-              key={result.hadith.hadith_id}
-              result={result}
-              rank={(currentPage - 1) * PAGE_SIZE + index + 1}
-              lang={lang}
-              onClick={() => setSelectedResult(result)}
-            />
+            <div role="listitem" key={result.hadith.hadith_id}>
+              <HadithCard
+                result={result}
+                rank={(currentPage - 1) * PAGE_SIZE + index + 1}
+                lang={lang}
+                index={index}
+                onClick={() => setSelectedResult(result)}
+              />
+            </div>
           ))}
 
           {rawResults.length === 0 && query.trim() && !errors.search && (
-            <div className="flex flex-col items-center justify-center py-16 gap-4">
-              <span className="material-symbols-outlined text-[48px] text-outline-variant dark:text-dark-outline-variant">
-                search_off
-              </span>
-              <p className="font-body-main text-body-main text-on-surface-variant dark:text-dark-on-surface-variant text-center">
-                {t('results.noResults')}
-              </p>
+            <div className="flex flex-col items-center justify-center py-16 gap-3 text-center">
+              <span className="khatam" aria-hidden="true" />
+              <p className="font-body-main text-body-main text-on-surface dark:text-dark-on-surface">{t('results.noResults')}</p>
+              <p className="font-ui-caption text-ui-caption text-on-surface-variant dark:text-dark-on-surface-variant">{t('results.hint')}</p>
             </div>
           )}
         </div>

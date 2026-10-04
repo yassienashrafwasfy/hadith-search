@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import IslamicMotif from '../components/IslamicMotif';
 import SearchBar from '../components/SearchBar';
 import GradeFilter from '../components/GradeFilter';
 import BookFilter from '../components/BookFilter';
@@ -40,12 +39,10 @@ const UserHomePage = () => {
   };
 
   return (
-    <main className="flex-grow flex flex-col items-center justify-center px-margin-mobile md:px-margin-desktop py-16 w-full max-w-container-max-width mx-auto relative">
-      <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-surface-container-low dark:from-dark-surface-container-low via-background dark:via-dark-background to-background dark:to-dark-background opacity-50 -z-10" />
-
-      <div className="text-center max-w-3xl flex flex-col items-center gap-8 mb-12 animate-fade-in-up">
-        <IslamicMotif size="md" className="mb-4" />
-        <h1 className="font-display-lg text-display-lg text-primary dark:text-dark-primary tracking-tight">
+    <main className="flex-grow flex flex-col items-center px-4 sm:px-6 md:px-10 pt-12 sm:pt-20 pb-16 w-full max-w-container-max-width mx-auto">
+      <div className="text-center max-w-3xl flex flex-col items-center gap-5 mb-10 page-enter">
+        <span className="khatam" aria-hidden="true" />
+        <h1 className="font-display-lg text-display-lg text-on-surface dark:text-dark-on-surface">
           {t('home.title')}
         </h1>
         <p className="font-body-main text-body-main text-on-surface-variant dark:text-dark-on-surface-variant max-w-2xl mx-auto">
@@ -53,35 +50,35 @@ const UserHomePage = () => {
         </p>
       </div>
 
-      <div className="w-full max-w-4xl flex flex-col items-center gap-6 animate-fade-in-up" style={{ animationDelay: '0.1s' }}>
+      <div className="w-full max-w-3xl flex flex-col gap-6 page-enter" style={{ animationDelay: '0.1s' }}>
         <SearchBar onSearch={handleSearch} />
 
-        <div className="w-full flex flex-col sm:flex-row gap-4 mt-2">
-          <div className="flex-1">
-            <GradeFilter value={selectedGrade} onChange={setSelectedGrade} />
-          </div>
-          <div className="flex-1">
-            <BookFilter value={selectedBook} onChange={setSelectedBook} />
-          </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <GradeFilter value={selectedGrade} onChange={setSelectedGrade} />
+          <BookFilter value={selectedBook} onChange={setSelectedBook} />
         </div>
 
-        <div className="flex flex-wrap items-center justify-center gap-2 mt-4">
-          <span className="font-ui-caption text-ui-caption text-on-surface-variant dark:text-dark-on-surface-variant uppercase tracking-wider me-1">
-            {t('home.popular')}
-          </span>
-          {POPULAR_QUERIES_AR.map((tag) => (
-            <button
-              key={tag}
-              onClick={() => handleSearch(tag, 'ar')}
-              className="px-3 py-1.5 rounded-full bg-surface-container dark:bg-dark-surface-container text-on-surface-variant dark:text-dark-on-surface-variant font-ui-caption text-ui-caption hover:bg-secondary-container dark:hover:bg-dark-secondary-container hover:text-on-secondary-container dark:hover:text-dark-on-secondary-container transition-colors duration-200 border border-outline-variant dark:border-dark-outline-variant hover:border-secondary dark:hover:border-dark-secondary"
-            >
-              {tag}
-            </button>
-          ))}
-        </div>
+        <section aria-labelledby="topics-h" className="flex flex-col gap-3">
+          <h2 id="topics-h" className="font-ui-label text-ui-label text-on-surface-variant dark:text-dark-on-surface-variant">
+            {t('home.topics')}
+          </h2>
+          <ul className="flex flex-wrap gap-2">
+            {POPULAR_QUERIES_AR.map((tag) => (
+              <li key={tag}>
+                <button
+                  type="button"
+                  onClick={() => handleSearch(tag, 'ar')}
+                  className="tap px-4 rounded border border-outline-variant dark:border-dark-outline-variant text-on-surface dark:text-dark-on-surface font-ui-caption text-ui-caption hover:border-secondary dark:hover:border-dark-secondary hover:text-secondary dark:hover:text-dark-secondary transition-colors"
+                >
+                  {tag}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
       </div>
 
-      <div className="w-full mt-20">
+      <div className="w-full mt-16 sm:mt-20">
         <HadithOfTheDay />
       </div>
     </main>

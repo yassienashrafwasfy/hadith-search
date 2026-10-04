@@ -51,10 +51,11 @@ const SigninPage = () => {
         )}
 
         <div className="flex flex-col gap-2">
-          <label className="font-label-lg text-on-surface dark:text-dark-on-surface">
+          <label htmlFor="signin-username" className="font-label-lg text-on-surface dark:text-dark-on-surface">
             Username
           </label>
           <input
+            id="signin-username"
             type="text"
             value={username}
             onChange={(e) => setUsername(e.target.value)}
@@ -65,10 +66,11 @@ const SigninPage = () => {
         </div>
 
         <div className="flex flex-col gap-2">
-          <label className="font-label-lg text-on-surface dark:text-dark-on-surface">
+          <label htmlFor="signin-password" className="font-label-lg text-on-surface dark:text-dark-on-surface">
             Password
           </label>
           <input
+            id="signin-password"
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}

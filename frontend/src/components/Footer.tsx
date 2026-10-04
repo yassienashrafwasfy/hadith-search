@@ -4,14 +4,15 @@ const Footer = () => {
   const { t } = useLanguage();
 
   return (
-    <footer className="bg-surface-container-lowest dark:bg-dark-surface-container-lowest text-on-surface dark:text-dark-on-surface w-full border-t border-outline-variant dark:border-dark-outline-variant py-8 px-6 flex flex-col md:flex-row justify-between items-center gap-4 mt-auto font-ui-caption text-ui-caption uppercase tracking-widest">
-      <p className="text-on-surface-variant dark:text-dark-on-surface-variant">{t('footer.copyright')}</p>
-      <nav className="flex gap-6">
-        <a className="text-on-surface-variant dark:text-dark-on-surface-variant hover:text-primary dark:hover:text-dark-primary transition-colors duration-300" href="#">{t('footer.about')}</a>
-        <a className="text-on-surface-variant dark:text-dark-on-surface-variant hover:text-primary dark:hover:text-dark-primary transition-colors duration-300" href="#">{t('footer.methodology')}</a>
-        <a className="text-on-surface-variant dark:text-dark-on-surface-variant hover:text-primary dark:hover:text-dark-primary transition-colors duration-300" href="#">{t('footer.privacy')}</a>
-        <a className="text-on-surface-variant dark:text-dark-on-surface-variant hover:text-primary dark:hover:text-dark-primary transition-colors duration-300" href="#">{t('footer.api')}</a>
-      </nav>
+    <footer className="mt-16 px-4 sm:px-6 lg:px-10 pb-10">
+      <div className="max-w-[1280px] mx-auto flex flex-col gap-5">
+        <div className="ornament text-secondary dark:text-dark-secondary" aria-hidden="true">
+          <span className="khatam" />
+        </div>
+        <p className="font-ui-caption text-ui-caption text-on-surface-variant dark:text-dark-on-surface-variant text-center max-w-prose mx-auto">
+          {t('footer.colophon')}
+        </p>
+      </div>
     </footer>
   );
 };

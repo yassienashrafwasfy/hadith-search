@@ -21,91 +21,91 @@ const Navbar = ({ mode, onModeChange }: NavbarProps) => {
 
   const navLinks = isDev
     ? [
-        { labelKey: 'nav.search', path: '/dev/search', icon: 'search' },
-        { labelKey: 'nav.benchmarks', path: '/dev/benchmark', icon: 'analytics' },
-        { labelKey: 'nav.algorithmComparison', path: '/dev/compare', icon: 'compare_arrows' },
-        { labelKey: 'nav.annotation', path: '/dev/annotation', icon: 'edit_note' },
-        { labelKey: 'nav.kvPairs', path: '/dev/kv-pairs', icon: 'fact_check' },
+        { labelKey: 'nav.search', path: '/dev/search' },
+        { labelKey: 'nav.benchmarks', path: '/dev/benchmark' },
+        { labelKey: 'nav.algorithmComparison', path: '/dev/compare' },
+        { labelKey: 'nav.annotation', path: '/dev/annotation' },
+        { labelKey: 'nav.kvPairs', path: '/dev/kv-pairs' },
       ]
-    : [{ labelKey: 'nav.search', path: '/user/search', icon: 'search' }];
+    : [{ labelKey: 'nav.search', path: '/user/search' }];
 
   const handleModeToggle = () => {
     const path = location.pathname;
     const isSearch = path === '/user/search' || path === '/dev/search';
 
     if (isDev) {
-      if (isSearch) {
-        navigate('/user/search');
-      } else {
-        navigate('/user/');
-      }
+      navigate(isSearch ? '/user/search' : '/user/');
     } else {
       navigate('/dev/search');
     }
     onModeChange(isDev ? 'user' : 'dev');
   };
 
+  const linkClass = (active: boolean) =>
+    `relative inline-flex items-center tap px-3 font-ui-label text-ui-label whitespace-nowrap transition-colors duration-200 ${
+      active
+        ? 'text-on-surface dark:text-dark-on-surface'
+        : 'text-on-surface-variant dark:text-dark-on-surface-variant hover:text-on-surface dark:hover:text-dark-on-surface'
+    }`;
+
+  const links = navLinks.map((item) => {
+    const active = location.pathname.startsWith(item.path);
+    return (
+      <Link key={item.path} to={item.path} aria-current={active ? 'page' : undefined} className={linkClass(active)}>
+        {t(item.labelKey)}
+        <span
+          aria-hidden="true"
+          className={`absolute inset-x-3 bottom-1 h-[2px] bg-secondary dark:bg-dark-secondary origin-right transition-transform duration-300 ${
+            active ? 'scale-x-100' : 'scale-x-0'
+          }`}
+        />
+      </Link>
+    );
+  });
+
   return (
-    <header className="bg-surface dark:bg-dark-surface font-newsreader text-on-surface dark:text-dark-on-surface sticky top-0 border-b border-outline dark:border-dark-outline z-50">
-      <div className="flex justify-between items-center w-full px-6 py-4 max-w-[1200px] mx-auto">
-        <div className="flex items-center gap-4">
+    <header className="sticky top-0 z-40 bg-background dark:bg-dark-background double-rule">
+      <div className="flex items-center justify-between gap-3 w-full px-4 sm:px-6 lg:px-10 py-2 max-w-[1280px] mx-auto">
+        <div className="flex items-center gap-3 min-w-0">
           <Link
             to={isDev ? '/dev/search' : '/user/'}
-            className="text-2xl font-bold tracking-tight text-primary dark:text-dark-primary flex items-center gap-2 group"
+            className="flex items-center gap-2.5 tap text-on-surface dark:text-dark-on-surface"
           >
-            <span className="material-symbols-outlined fill text-primary dark:text-dark-primary group-hover:rotate-90 transition-transform duration-500">
-              star
-            </span>
-            <span className="font-display-lg text-[24px]">{t('home.title')}</span>
+            <span className="khatam" aria-hidden="true" />
+            <span className="font-display-lg text-[28px] leading-none pt-1" translate="no">{t('home.title')}</span>
           </Link>
           {isDev && (
-            <span className="px-2 py-0.5 rounded-full bg-primary-container dark:bg-dark-primary-container text-on-primary-container dark:text-dark-on-primary-container font-ui-caption text-ui-caption uppercase tracking-wider font-bold">
+            <span className="px-2 py-0.5 border border-secondary dark:border-dark-secondary text-secondary dark:text-dark-secondary font-ui-caption text-ui-caption">
               {t('mode.dev')}
             </span>
           )}
         </div>
-        <nav className="hidden md:flex gap-1 items-center font-ui-label text-ui-label">
-          {navLinks.map((item) => {
-            const isActive = location.pathname === item.path;
-            return (
-              <Link
-                key={item.path}
-                to={item.path}
-                className={`relative flex items-center gap-1.5 py-2 px-3 rounded-lg transition-colors duration-200 ${
-                  isActive
-                    ? 'text-primary dark:text-dark-primary bg-primary/5 dark:bg-dark-primary/5 font-semibold'
-                    : 'text-on-surface-variant dark:text-dark-on-surface-variant hover:text-primary dark:hover:text-dark-primary hover:bg-surface-container dark:hover:bg-dark-surface-container'
-                }`}
-              >
-                <span
-                  className={`material-symbols-outlined text-[18px] transition-colors duration-200 ${
-                    isActive ? 'fill text-primary dark:text-dark-primary' : ''
-                  }`}
-                >
-                  {item.icon}
-                </span>
-                {t(item.labelKey)}
-                {isActive && (
-                  <span className="absolute bottom-0 left-1/2 -translate-x-1/2 w-1 h-1 bg-primary dark:bg-dark-primary rounded-full" />
-                )}
-              </Link>
-            );
-          })}
+        <nav aria-label={t('nav.main')} className="hidden md:flex items-center gap-1">
+          {links}
         </nav>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1 shrink-0">
           <ThemeToggle />
           <button
+            type="button"
             onClick={handleModeToggle}
-            className="flex items-center gap-2 px-3 py-1.5 rounded-full border border-outline-variant dark:border-dark-outline-variant text-on-surface-variant dark:text-dark-on-surface-variant hover:bg-surface-container dark:hover:bg-dark-surface-container transition-colors duration-200 font-ui-caption text-ui-caption"
-            title={isDev ? t('mode.switchToUser') : t('mode.switchToDev')}
+            aria-label={isDev ? t('mode.switchToUser') : t('mode.switchToDev')}
+            className="inline-flex items-center gap-2 tap px-3 border border-outline-variant dark:border-dark-outline-variant text-on-surface-variant dark:text-dark-on-surface-variant hover:text-on-surface dark:hover:text-dark-on-surface hover:border-on-surface dark:hover:border-dark-on-surface transition-colors duration-200 font-ui-caption text-ui-caption rounded"
           >
-            <span className="material-symbols-outlined text-[16px]">
+            <span className="material-symbols-outlined text-[18px]" aria-hidden="true">
               {isDev ? 'person' : 'code'}
             </span>
             {isDev ? t('mode.user') : t('mode.dev')}
           </button>
         </div>
       </div>
+      {isDev && (
+        <nav
+          aria-label={t('nav.main')}
+          className="md:hidden flex overflow-x-auto scrollbar-hide px-2 border-t border-outline-variant dark:border-dark-outline-variant"
+        >
+          {links}
+        </nav>
+      )}
     </header>
   );
 };

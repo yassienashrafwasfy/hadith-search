@@ -7,6 +7,8 @@ interface PaginationProps {
   onPageChange: (page: number) => void;
 }
 
+const arabicNumber = new Intl.NumberFormat('ar-EG');
+
 const Pagination = ({ currentPage, totalResults, pageSize, onPageChange }: PaginationProps) => {
   const { t } = useLanguage();
   const totalPages = Math.ceil(totalResults / pageSize);
@@ -18,66 +20,69 @@ const Pagination = ({ currentPage, totalResults, pageSize, onPageChange }: Pagin
 
   const getPages = (): (number | '...')[] => {
     if (totalPages <= 7) return Array.from({ length: totalPages }, (_, i) => i + 1);
-
     const pages: (number | '...')[] = [1];
-    const left = Math.max(2, currentPage - 2);
-    const right = Math.min(totalPages - 1, currentPage + 2);
-
+    const left = Math.max(2, currentPage - 1);
+    const right = Math.min(totalPages - 1, currentPage + 1);
     if (left > 2) pages.push('...');
     for (let i = left; i <= right; i++) pages.push(i);
     if (right < totalPages - 1) pages.push('...');
     pages.push(totalPages);
-
     return pages;
   };
 
-  const pages = getPages();
+  const btn =
+    'tap inline-flex items-center justify-center rounded font-ui-label text-ui-label transition-colors disabled:opacity-30 disabled:cursor-not-allowed';
+  const idle = 'text-on-surface-variant dark:text-dark-on-surface-variant hover:bg-surface-container dark:hover:bg-dark-surface-container';
 
   return (
-    <div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-4 border-t border-outline-variant dark:border-dark-outline-variant">
-      <span className="font-ui-caption text-ui-caption text-on-surface-variant dark:text-dark-on-surface-variant">
+    <nav
+      aria-label={t('pagination.nav')}
+      className="flex flex-col sm:flex-row items-center justify-between gap-3 py-4 border-t border-outline-variant dark:border-dark-outline-variant"
+    >
+      <span className="font-ui-caption text-ui-caption text-on-surface-variant dark:text-dark-on-surface-variant tabular-nums">
         {t('pagination.showing', { start, end, total: totalResults })}
       </span>
       <div className="flex items-center gap-1 flex-wrap justify-center">
         <button
+          type="button"
           onClick={() => onPageChange(currentPage - 1)}
           disabled={currentPage === 1}
-          className="w-10 h-10 flex items-center justify-center rounded-full font-ui-label text-ui-label text-on-surface-variant dark:text-dark-on-surface-variant hover:bg-surface-container dark:hover:bg-dark-surface-container disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-          aria-label="Previous page"
+          className={`${btn} ${idle}`}
+          aria-label={t('pagination.prev')}
         >
-          <span className="material-symbols-outlined text-[20px]">chevron_left</span>
+          <span className="material-symbols-outlined text-[20px] rtl:-scale-x-100" aria-hidden="true">chevron_left</span>
         </button>
-
-        {pages.map((page, idx) =>
+        {getPages().map((page, idx) =>
           page === '...' ? (
-            <span key={`ellipsis-${idx}`} className="w-10 h-10 flex items-center justify-center text-on-surface-variant/50 dark:text-dark-on-surface-variant/50">
-              ...
-            </span>
+            <span key={`e-${idx}`} aria-hidden="true" className="w-8 text-center text-on-surface-variant dark:text-dark-on-surface-variant">…</span>
           ) : (
             <button
+              type="button"
               key={page}
               onClick={() => onPageChange(page)}
-              className={`w-10 h-10 flex items-center justify-center rounded-full font-ui-label text-ui-label transition-colors ${
+              aria-label={t('pagination.page', { n: page })}
+              aria-current={page === currentPage ? 'page' : undefined}
+              className={`${btn} ${
                 page === currentPage
-                  ? 'bg-primary dark:bg-dark-primary text-white'
-                  : 'text-on-surface-variant dark:text-dark-on-surface-variant hover:bg-surface-container dark:hover:bg-dark-surface-container'
+                  ? 'bg-secondary dark:bg-dark-secondary text-on-secondary dark:text-dark-background'
+                  : idle
               }`}
             >
-              {page}
+              {arabicNumber.format(page)}
             </button>
           )
         )}
-
         <button
+          type="button"
           onClick={() => onPageChange(currentPage + 1)}
           disabled={currentPage === totalPages}
-          className="w-10 h-10 flex items-center justify-center rounded-full font-ui-label text-ui-label text-on-surface-variant dark:text-dark-on-surface-variant hover:bg-surface-container dark:hover:bg-dark-surface-container disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-          aria-label="Next page"
+          className={`${btn} ${idle}`}
+          aria-label={t('pagination.next')}
         >
-          <span className="material-symbols-outlined text-[20px]">chevron_right</span>
+          <span className="material-symbols-outlined text-[20px] rtl:-scale-x-100" aria-hidden="true">chevron_right</span>
         </button>
       </div>
-    </div>
+    </nav>
   );
 };
 

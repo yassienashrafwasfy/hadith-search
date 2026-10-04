@@ -66,8 +66,8 @@ const DevAnnotationPage = () => {
 
   return (
     <main className="flex-grow w-full max-w-[90rem] mx-auto px-4 sm:px-6 lg:px-8 py-10 lg:py-12 flex flex-col gap-8 page-enter">
-      <div className="flex justify-between items-start">
-        <div className="flex flex-col gap-4">
+      <div className="flex justify-between items-start gap-4 flex-wrap">
+        <div className="flex flex-col gap-4 min-w-0">
           <h1 className="font-display-lg text-display-lg text-primary dark:text-dark-primary">
             Annotation
           </h1>
@@ -75,16 +75,16 @@ const DevAnnotationPage = () => {
             {annotator ? `Welcome, ${annotator.username}` : 'Grade hadiths for relevance.'} Click a query to start annotating.
           </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-1 flex-wrap">
           <button
             onClick={() => navigate('/dev/annotation/guidelines')}
-            className="px-3 py-1.5 text-sm text-on-surface-variant dark:text-dark-on-surface-variant hover:text-primary dark:hover:text-dark-primary transition-colors"
+            className="tap px-3 text-sm text-on-surface-variant dark:text-dark-on-surface-variant hover:text-primary dark:hover:text-dark-primary transition-colors"
           >
             Guidelines
           </button>
           <button
             onClick={handleSignout}
-            className="px-3 py-1.5 text-sm text-on-surface-variant dark:text-dark-on-surface-variant hover:text-primary dark:hover:text-dark-primary transition-colors"
+            className="tap px-3 text-sm text-on-surface-variant dark:text-dark-on-surface-variant hover:text-primary dark:hover:text-dark-primary transition-colors"
           >
             Sign Out
           </button>

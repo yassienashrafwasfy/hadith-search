@@ -21,19 +21,17 @@ const DevHomePage = () => {
   };
 
   return (
-    <main className="flex-grow flex flex-col items-center justify-center px-margin-mobile md:px-margin-desktop py-16 w-full max-w-container-max-width mx-auto relative">
-      <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-surface-container-low dark:from-dark-surface-container-low via-background dark:via-dark-background to-background dark:to-dark-background opacity-50 -z-10" />
-
-      <div className="text-center max-w-3xl flex flex-col items-center gap-6 mb-10 animate-fade-in-up">
-        <h1 className="font-display-lg text-display-lg text-primary dark:text-dark-primary tracking-tight">
+    <main className="flex-grow flex flex-col items-center px-4 sm:px-6 md:px-10 pt-16 sm:pt-24 pb-16 w-full max-w-container-max-width mx-auto">
+      <div className="text-center max-w-3xl flex flex-col items-center gap-5 mb-10 page-enter">
+        <span className="khatam" aria-hidden="true" />
+        <h1 className="font-display-lg text-display-lg text-on-surface dark:text-dark-on-surface">
           {t('dev.homeTitle')}
         </h1>
         <p className="font-body-main text-body-main text-on-surface-variant dark:text-dark-on-surface-variant max-w-2xl mx-auto">
           {t('dev.homeSubtitle')}
         </p>
       </div>
-
-      <div className="w-full max-w-4xl animate-fade-in-up" style={{ animationDelay: '0.1s' }}>
+      <div className="w-full max-w-3xl page-enter" style={{ animationDelay: '0.1s' }}>
         <SearchBar onSearch={handleSearch} />
       </div>
     </main>

@@ -65,10 +65,11 @@ const SignupPage = () => {
         )}
 
         <div className="flex flex-col gap-2">
-          <label className="font-label-lg text-on-surface dark:text-dark-on-surface">
+          <label htmlFor="signup-username" className="font-label-lg text-on-surface dark:text-dark-on-surface">
             Username
           </label>
           <input
+            id="signup-username"
             type="text"
             value={username}
             onChange={(e) => setUsername(e.target.value)}
@@ -79,10 +80,11 @@ const SignupPage = () => {
         </div>
 
         <div className="flex flex-col gap-2">
-          <label className="font-label-lg text-on-surface dark:text-dark-on-surface">
+          <label htmlFor="signup-password" className="font-label-lg text-on-surface dark:text-dark-on-surface">
             Password
           </label>
           <input
+            id="signup-password"
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
@@ -93,10 +95,11 @@ const SignupPage = () => {
         </div>
 
         <div className="flex flex-col gap-2">
-          <label className="font-label-lg text-on-surface dark:text-dark-on-surface">
+          <label htmlFor="signup-confirm-password" className="font-label-lg text-on-surface dark:text-dark-on-surface">
             Confirm Password
           </label>
           <input
+            id="signup-confirm-password"
             type="password"
             value={confirmPassword}
             onChange={(e) => setConfirmPassword(e.target.value)}

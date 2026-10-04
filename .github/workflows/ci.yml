@@ -1,0 +1,142 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    # New CVEs appear without code changes, so rescan weekly
+    - cron: "0 6 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # Picks the runner for every job below: the self-hosted one (tools/runner/) when it is online and
+  # idle and the event is trusted, otherwise GitHub-hosted. Never fails; see tools/pick-runner.sh.
+  pick-runner:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    outputs:
+      runner: ${{ steps.pick.outputs.runner }}
+      self_hosted: ${{ steps.pick.outputs.self_hosted }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - id: pick
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          REPOSITORY: ${{ github.repository }}
+          RUNNER_STATUS_TOKEN: ${{ secrets.RUNNERSTATUSTOKEN }}
+        run: tools/pick-runner.sh
+
+  lint:
+    needs: pick-runner
+    runs-on: ${{ fromJSON(needs.pick-runner.outputs.runner) }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      - name: tools
+        run: |
+          uv venv --python 3.12 .venv
+          uv pip install --python .venv/bin/python ruff==0.16.9 black==26.5.1 vulture==2.16
+      - run: .venv/bin/ruff check backend tests
+      - run: .venv/bin/black --check backend tests
+      - run: PATH="$PWD/.venv/bin:$PATH" tools/dead-code.sh check
+      - name: workflow files
+        run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12
+
+  frontend:
+    needs: pick-runner
+    runs-on: ${{ fromJSON(needs.pick-runner.outputs.runner) }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+        working-directory: frontend
+      - run: tools/frontend-lint.sh
+      - run: npm run build
+        working-directory: frontend
+
+  test:
+    needs: pick-runner
+    runs-on: ${{ fromJSON(needs.pick-runner.outputs.runner) }}
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_PASSWORD: test-only-password
+          POSTGRES_DB: hadith_test
+        ports:
+          - 55432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s
+          --health-retries 12
+    env:
+      TEST_DATABASE_URL: postgresql+psycopg://postgres:test-only-password@localhost:55432/hadith_test
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: requirements*.txt
+      - name: dependencies (CPU torch first, as in the Dockerfile)
+        run: |
+          uv venv --python 3.12 .venv
+          uv pip install --python .venv/bin/python torch==2.11.0 --index-url https://download.pytorch.org/whl/cpu
+          uv pip install --python .venv/bin/python -r requirements-dev.txt
+      # Not tests/perf (needs RUN_PERF=1 and a running app). tools/test-rollback.sh stays manual.
+      - run: .venv/bin/python -m pytest
+
+  docker-scan:
+    needs: pick-runner
+    runs-on: ${{ fromJSON(needs.pick-runner.outputs.runner) }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: hadolint
+        run: docker run --rm -v "$PWD:/w" -w /w hadolint/hadolint:v2.14.0 hadolint Dockerfile
+      - name: nginx config and rate limit
+        run: tools/test-nginx.sh
+      - id: stamp
+        run: echo "created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      # The gha cache only works on GitHub-hosted runners; the self-hosted one keeps a local cache.
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        if: needs.pick-runner.outputs.self_hosted != 'true'
+        with:
+          context: .
+          load: true
+          pull: true
+          tags: hadith-search:hardened
+          build-args: |
+            REVISION=${{ github.sha }}
+            CREATED=${{ steps.stamp.outputs.created }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        if: needs.pick-runner.outputs.self_hosted == 'true'
+        with:
+          context: .
+          load: true
+          pull: true
+          tags: hadith-search:hardened
+          build-args: |
+            REVISION=${{ github.sha }}
+            CREATED=${{ steps.stamp.outputs.created }}
+          cache-from: type=local,src=/cache/buildx
+          cache-to: type=local,dest=/cache/buildx,mode=max
+      - name: trivy + dockle
+        run: tools/scan-image.sh hadith-search:hardened

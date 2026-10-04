@@ -1,0 +1,6 @@
+# Only for tools/promote_model.sh (choose a model from an MLflow registry, export it to ONNX and
+# re-embed the corpus). Not part of the app image: it is installed next to requirements.txt on the
+# machine that runs the promotion, never in the Dockerfile.
+#   uv pip install -r requirements.txt -r requirements-mlops.txt
+-r requirements.txt
+mlflow-skinny==3.16.1

@@ -1,0 +1,43 @@
+# Self-hosted GitHub Actions runner for this repository (see README.md next to this file).
+# One ephemeral runner (it takes one job, then re-registers clean) plus its own Docker daemon.
+# The runner shares the daemon's network namespace, so `localhost:<port>` published by job
+# containers (service containers, tools/test-nginx.sh) is reachable from the job steps.
+name: hadith-runner
+
+services:
+  dind:
+    image: docker:29.8.2-dind@sha256:7dcdfc4a20246236f558175182ccace1eb15a41bd3eb119dd2284f393498b7c1
+    privileged: true # a Docker daemon inside a container needs it; it is why only trusted events may use this runner
+    restart: unless-stopped
+    environment:
+      DOCKER_TLS_CERTDIR: "" # plain tcp on 127.0.0.1 inside the shared namespace only, nothing is published
+    command: ["--host=tcp://127.0.0.1:2375", "--host=unix:///var/run/docker.sock"]
+    volumes:
+      - dind-data:/var/lib/docker
+      - docker-sock:/var/run
+
+  runner:
+    image: myoung34/github-runner:2.337.0-ubuntu-noble@sha256:1b947d2475cc6f4c3edf0e91dd879b091857e41a311be917016243479bb34101
+    restart: unless-stopped
+    depends_on: [dind]
+    network_mode: service:dind
+    env_file: .env.runner
+    environment:
+      REPO_URL: ${REPO_URL}
+      RUNNER_SCOPE: repo
+      RUNNER_NAME: ${RUNNER_NAME:-hadith-wsl}
+      LABELS: hadith-ci
+      EPHEMERAL: "true"
+      DISABLE_AUTO_UPDATE: "true"
+      UNSET_CONFIG_VARS: "true" # the registration token is removed from the environment of jobs
+      DOCKER_HOST: tcp://127.0.0.1:2375
+    volumes:
+      - docker-sock:/var/run
+      - buildx-cache:/cache
+      - runner-work:/_work
+
+volumes:
+  dind-data:
+  docker-sock:
+  buildx-cache:
+  runner-work:

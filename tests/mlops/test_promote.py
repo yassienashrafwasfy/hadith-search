@@ -69,6 +69,7 @@ def test_versions_with_different_pairs_are_refused(
 
 
 def test_settings_errors(_live_dir, _stage, monkeypatch, capsys):
+    pytest.importorskip("mlflow")
     monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
     assert pm.main(run_args(_live_dir, _stage)) == 2
     assert "MLFLOW_TRACKING_URI" in capsys.readouterr().err

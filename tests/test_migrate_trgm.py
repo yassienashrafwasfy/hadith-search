@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from sqlalchemy import DDL, create_engine, inspect, text
+from sqlalchemy import DDL, create_engine, text
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.engine import make_url
 from sqlalchemy.pool import NullPool
@@ -36,8 +36,6 @@ def test_dry_run_prints_every_step_and_needs_no_database():
     result = _run("--dry-run", env={"DATABASE_URL": "", "PSQL": "false"})
     assert result.returncode == 0, result.stderr
     assert "CREATE EXTENSION IF NOT EXISTS pg_trgm" in result.stdout
-    assert "CREATE TABLE IF NOT EXISTS hadith_exact_text" in result.stdout
-    assert "scripts.build_exact_text" in result.stdout
     for name in TRGM_INDEXES:
         assert f"CREATE INDEX CONCURRENTLY IF NOT EXISTS {name} " in result.stdout
 
@@ -68,7 +66,6 @@ async def test_it_upgrades_a_database_that_has_no_trigram_objects(_pg_ready, _pa
     schema = make_url(os.environ["DATABASE_URL"]).query["application_name"]
     url = os.environ["DATABASE_URL"].replace("+psycopg", "")
     with database.get_sync_engine().begin() as conn:  # make the schema look like an old release
-        conn.execute(DDL("DROP TABLE hadith_exact_text"))
         for name in TRGM_INDEXES:
             conn.execute(DDL(f"DROP INDEX IF EXISTS {name}"))
     result = _run(env={"DATABASE_URL": url, "PYTHON": sys.executable})
@@ -82,8 +79,5 @@ async def test_it_upgrades_a_database_that_has_no_trigram_objects(_pg_ready, _pa
                 text("SELECT indexname FROM pg_indexes WHERE schemaname = :s"), {"s": schema}
             )
         }
-        rows = conn.execute(text(f'SELECT count(*) FROM "{schema}".hadith_exact_text')).scalar()
     admin.dispose()
     assert TRGM_INDEXES.keys() <= found
-    assert rows == 3
-    assert inspect(database.get_sync_engine()).has_table("hadith_exact_text")

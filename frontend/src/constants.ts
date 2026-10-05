@@ -9,12 +9,6 @@ export const POPULAR_QUERIES_AR = [
   'الصدق',
 ];
 
-// Arabic names for the methods that have one; the other methods keep their technical names.
-export const ALGORITHM_LABELS_AR: Record<string, string> = {
-  'exact': 'مطابقة تامة للكلمات',
-  'exact-semantic-rrf': 'مطابقة تامة + دلالي (RRF)',
-};
-
 // A grade is shown by its words, by how many of three bars are filled (strength of the
 // narration) and by colour. The colour is never the only signal.
 export interface GradeMeta {

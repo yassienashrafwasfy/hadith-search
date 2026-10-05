@@ -927,45 +927,19 @@ Frontend only. No backend, database, nginx or API change, nothing committed.
 - **Dense filters apply before the cut.** `semantic-rerank`, `cosine-similarity` and `semantic-rrf` used to filter by grade or book after taking their top results, so a filtered search could return fewer than a page (4 instead of 10 in the audit). The allowed ids now go in as `restrict`. Results of filtered dense searches change; re-run evaluations that use filters.
 - **Not done, by decision:** no vector index (exact search is about 5.6 ms at 33K x 64; HNSW or IVFFlat would save under 5 ms and lose exactness), no whole-response cache, no `pg_stat_statements`. Findings left open: `hybrid_prf` is not registered as a method; unrestricted BM25 + TF-IDF hybrids aggregate every matching hadith in Python; `ix_hadiths_Book` and `ix_hadiths_Normalized_Grade` are unused by the search path (check `pg_stat_user_indexes` on the live database before dropping).
 
-### 43. Exact search, suggestions and "did you mean" with pg_trgm (2026-10-05)
+### 43. Suggestions and "did you mean" with pg_trgm (2026-10-05)
 
-**What changed:** two search methods, `exact` (EN and AR) and `exact-semantic-rrf` (AR, needs `dense_retrieval`); `GET /api/v1/suggestions?q=&limit=` (limit 1 to 10, `Text` input, problem+json errors, `_links`, linked from the root, no search slot); an optional `did_you_mean` on the search answer, set only when a keyword method (`exact`, `bm25`, marked `keyword=True` in the registry) finds nothing. The first eight methods are unchanged. The frontend search bar is now an ARIA combobox (200 ms debounce, arrow keys, Enter, Escape, RTL) and shows the hint on an empty result.
+**What changed:** `GET /api/v1/suggestions?q=&limit=` (limit 1 to 10, `Text` input, problem+json errors, `_links`, linked from the root, no search slot) and an optional `did_you_mean` on the search answer, set only when a keyword method (`bm25`, marked `keyword=True` in the registry) finds nothing. The frontend search bar is an ARIA combobox (200 ms debounce, arrow keys, Enter, Escape, RTL) and shows the hint on an empty result. The vocabulary is the lemmatised term list plus chapter titles, so Arabic suggestions are normalised forms (ta marbuta to ha, folded alef) with no handling of the article.
 
-**Where the exact match runs:** on a new table `hadith_exact_text(hadith_id, english, arabic)` that holds each hadith's full text (isnad and matn) lowercased, with Arabic marks and tatweel removed and every run of non-letters turned into one space, padded with a space at both ends. A whole word is the substring ` word `, so the query is `LIKE '% word %'` on a plain `gin_trgm_ops` GIN index per column, ANDed over the query words (at most 10). Occurrences are counted by length difference after `replace`. Ranking: occurrences, then id; at most 500 results. `exact_text.rebuild` fills the table inside `build_inverted_index`; existing databases are backfilled by `python -m scripts.build_exact_text` (the migration script runs it). It is in `CORPUS_TABLES`.
+**Exact-match methods were built and then removed.** `exact` and `exact-semantic-rrf`, with a `hadith_exact_text` table and its GIN indexes, were merged and then taken out before release because they did not work in the running app. Nothing of them is left in the code. If they come back, the design notes were: a folded copy of the full text (isnad and matn) with a space at both ends, whole word as the substring ` word `, a plain `gin_trgm_ops` GIN index per language; an index on an expression over `hadiths` was too slow (a common word took 1.4 to 8 seconds on 33K synthetic hadiths) so the folded text has to be stored. Latency on that synthetic set was 100 to 190 ms for a very common word, 2 to 11 ms otherwise.
 
-**Why not an index on the expression over `hadiths`:** I built that first. On 33K synthetic hadiths Arabic `translate()` alone cost about 75 microseconds per row, and a common word took 1.4 to 8 seconds. Storing the folded text moves that cost to build time (about 20 s including both GIN builds). The price is one more copy of the text (index sizes: 22 MB English, 36 MB Arabic) and a rebuild step whenever the corpus changes.
+**Thresholds:** suggestions use similarity 0.3 (prefix matches always qualify); the hint uses 0.4, stricter so it does not propose unrelated words. Both are set per query with `set_config('pg_trgm.similarity_threshold', ..., true)`. Order: prefix first, then similarity, then terms before chapter titles, then text.
 
-**Measured (synthetic data, 33K hadiths, about 400 Arabic characters each, Zipf word frequencies, local WSL PostgreSQL 17; medians, not the real corpus):**
+**Migration (blue/green safe, additive):** `init_schema` creates the extension and the indexes on a new database. On an existing one run `tools/migrate_trgm.sh --dry-run`, then the same command without the flag: extension, then three `CREATE INDEX CONCURRENTLY IF NOT EXISTS` statements (`terms`, `chapters` English and Arabic). Until it runs, suggestions are slow but correct. The old release ignores the indexes.
 
-| Query | Hits | Latency |
-|---|---|---|
-| EN word in nearly every hadith | 500 (cap) | 100 ms |
-| EN two common words | 500 (cap) | 190 ms |
-| EN mid-frequency word | 141 | 11 ms |
-| EN rare word | 12 | 8 ms |
-| EN no match | 0 | 2 ms |
-| AR common word | 500 (cap) | 135 ms |
-| AR two common words | 500 (cap) | 220 ms |
-| AR mid-frequency word | 70 | 4 ms |
-| AR rare word | 152 | 5 ms |
+**Not verified:** the combobox in a real browser; the migration on a production-sized database.
 
-Suggestions took 4 to 25 ms and the hint 6 to 9 ms. Without the GIN indexes a rare word costs 55 to 80 ms (sequential scan), so the index only pays off for words that are not common. At these table sizes the trigram indexes on `terms` and `chapters` barely matter.
-
-**Thresholds:** suggestions use similarity 0.3 (prefix matches always qualify); the hint uses 0.4, stricter so it does not propose unrelated words. Both are set per query with `set_config('pg_trgm.similarity_threshold', ..., true)`, so server settings do not change them. Order: prefix first, then similarity, then terms before chapter titles, then text. The query is folded first (Arabic: marks removed, `normalize_arabic_text`; English: lowercase, non-letters removed).
-
-**Migration (blue/green safe, everything is additive):**
-1. Deploy the new image to the idle colour. `init_schema` creates the extension and the new table (empty). The old colour keeps working.
-2. `tools/migrate_trgm.sh --dry-run` prints the steps. Then run it without the flag against the target database: extension, table, backfill, then five `CREATE INDEX CONCURRENTLY IF NOT EXISTS` statements (`PSQL`, `PYTHON` and `DATABASE_URL` can be set; it never runs unless you call it).
-3. Smoke test `method=exact`, then canary and promote as in item 21. Until step 2 is done, `exact` returns nothing and suggestions are slow but correct.
-Rollback needs no schema change: the old release ignores the new table and indexes.
-
-**Limits:** the suggestion vocabulary is the lemmatised term list, so Arabic suggestions are normalised forms (ta marbuta to ha, folded alef) and there is no handling of the article. The hint therefore corrects spelling toward lemmas, not surface forms. A word is a run of letters or digits, so `100%` becomes `100`. The `[[:alnum:]]` class used for English follows the database locale: with a C locale, non-ASCII letters would count as separators (the test database is `en_US.utf8`). Occurrence counts are exact whole-word counts.
-
-**Not verified:** the combobox in a real browser (build and types pass, no browser test ran); the migration on a production-sized database; behaviour under a C-locale database; latency on the real corpus.
-
-**Open questions for the owner:** (1) should `exact` search the isnad too, or the matn only like BM25? (2) is a separate table right, or should the folded text be a column on `hadiths`? (3) should `did_you_mean` stay a corrected query string, or be a list of terms per unknown word? (4) should suggestions come from surface words (needs a new vocabulary table) instead of lemmas? (5) Arabic labels exist only for the two new methods; the older ones still show their slugs or English names.
-
-**Files:** `backend/services/exact_text.py`, `backend/services/suggestions.py`, `backend/routers/suggestions.py`, `backend/scripts/build_exact_text.py`, `tools/migrate_trgm.sh`, `backend/models/orm.py`, `backend/database.py`, `backend/services/ranking.py`, `backend/services/retrieval.py`, `backend/routers/search.py`, `backend/routers/root.py`, `backend/models/schemas.py`, `docs/behaviours/exact-search.feature`, `tests/test_exact_text.py`, `tests/test_exact_search.py`, `tests/test_suggestions.py`, `tests/security/test_suggestions.py`, `tests/test_migrate_trgm.py`, `tests/bdd/test_exact_search.py`, `frontend/src` (SearchBar, DidYouMean, useSuggestions, constants, ar.ts, types, api)
+**Files:** `backend/services/suggestions.py`, `backend/routers/suggestions.py`, `tools/migrate_trgm.sh`, `backend/models/orm.py`, `backend/database.py`, `backend/services/retrieval.py`, `backend/routers/search.py`, `backend/routers/root.py`, `backend/models/schemas.py`, `tests/test_suggestions.py`, `tests/security/test_suggestions.py`, `tests/test_migrate_trgm.py`, `frontend/src` (SearchBar, DidYouMean, useSuggestions, types, api)
 
 ## Still open
 

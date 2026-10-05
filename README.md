@@ -178,14 +178,11 @@ hadith-search/
 | **Cosine Similarity** | Dense retrieval using vector embeddings and cosine similarity |
 | **Semantic Rerank** | BM25 candidates reranked by cosine similarity |
 | **Semantic RRF** | Reciprocal Rank Fusion combining sparse (BM25) and dense (cosine) results |
-| **Exact words** | The query words as typed (no stemming), all of them must appear as whole words; ranked by how often they occur |
-| **Exact + semantic RRF** | Reciprocal Rank Fusion of the exact-words ranking and the dense (cosine) ranking. Arabic only |
 
-### Exact words, suggestions and "did you mean"
+### Suggestions and "did you mean"
 
-- `exact` matches the words you typed, lowercased and with Arabic marks and tatweel removed, but without stemming. Every word must appear as a whole word in the hadith (isnad and matn, as stored). Results are ranked by the number of occurrences, then by id, and capped at 500. The text it searches lives in the table `hadith_exact_text`, which `build_inverted_index` rebuilds. On an existing database run `tools/migrate_trgm.sh --dry-run`, then the same command without the flag (see `docs/HANDOFF.md` item 43).
 - `GET /api/v1/suggestions?q=...&limit=...` returns up to 10 completions from the index vocabulary and chapter titles, using prefix and trigram (`pg_trgm`) matching.
-- When `exact` or `bm25` finds nothing, the search answer can carry `did_you_mean`: the query with each unknown word replaced by the closest indexed term (similarity 0.4 or more). The field is absent otherwise.
+- When `bm25` finds nothing, the search answer can carry `did_you_mean`: the query with each unknown word replaced by the closest indexed term (similarity 0.4 or more). The field is absent otherwise.
 
 ### Search Architecture
 - **Sparse Retrieval**: BM25, TF-IDF, Term Overlap — Fast, interpretable, language-independent
@@ -335,8 +332,8 @@ What the system has to do, in plain terms, and the rule in the code behind each 
 ### Search
 
 - A searcher sends a query (1 to 500 characters), a method, a language (`en` or `ar`) and optionally a book filter and a grade filter. The answer is a ranked list of hadiths with their score.
-- Ten methods exist: term overlap, TF-IDF, BM25, BM25 + TF-IDF hybrid, BM25 + pseudo-relevance feedback, cosine similarity, semantic rerank, semantic RRF, exact words and exact + semantic RRF. `GET /api/v1/search-methods` lists the ones enabled, with the languages each accepts.
-- Sparse methods and `exact` work in both languages. Dense methods (cosine, semantic rerank, semantic RRF, exact + semantic RRF) work on Arabic only, because the embedding model is Arabic. An English query to a dense method, or an unknown method, is rejected with 422.
+- Eight methods exist: term overlap, TF-IDF, BM25, BM25 + TF-IDF hybrid, BM25 + pseudo-relevance feedback, cosine similarity, semantic rerank, semantic RRF. `GET /api/v1/search-methods` lists the ones enabled, with the languages each accepts.
+- Sparse methods work in both languages. Dense methods (cosine, semantic rerank, semantic RRF) work on Arabic only, because the embedding model is Arabic. An English query to a dense method, or an unknown method, is rejected with 422.
 - Queries are preprocessed the same way as the corpus (NLTK for English, CAMeL Tools for Arabic), so terms match the index.
 - Each hadith has an English and an Arabic text. The BM25 index and the embeddings cover the matn (the body of the hadith) only, not the chain of narrators.
 - Which methods are available is a deployment choice (feature flags, or the `APP_MODE` presets `annotation`, `search`, `research`). The `annotation` preset runs without the search stack.

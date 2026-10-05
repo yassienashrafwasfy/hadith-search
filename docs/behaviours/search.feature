@@ -21,15 +21,12 @@ Feature: Search the hadith corpus
       | bm25            | prayer | en   |
       | bm25-tf-idf     | prayer | en   |
       | bm25-prf        | prayer | en   |
-      | exact           | prayer | en   |
-      | exact           | الصلاة | ar   |
 
     Examples: dense methods (Arabic only)
       | method             | query  | lang |
       | semantic-rerank    | صلاه   | ar   |
       | cosine-similarity  | صلاه   | ar   |
       | semantic-rrf       | صلاه   | ar   |
-      | exact-semantic-rrf | الصلاة | ar   |
 
   Scenario: Results come back ranked
     When a client searches "prayer" with method "bm25"
@@ -84,6 +81,6 @@ Feature: Search the hadith corpus
 
   Scenario: Feature flags decide which methods exist
     Given dense_retrieval is off
-    Then the methods offered are term-overlap, tfidf, bm25, bm25-tf-idf, bm25-prf and exact
+    Then the methods offered are term-overlap, tfidf, bm25, bm25-tf-idf, bm25-prf
     Given search is off
     Then no method is offered and no /api/v1/search route is mounted

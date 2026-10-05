@@ -36,7 +36,7 @@ export interface SearchResponse {
   number_of_results: number;
   results: SearchResult[];
   response_time_ms?: number;
-  // A corrected query, only when a keyword search (exact, bm25) found nothing.
+  // A corrected query, only when a keyword search (bm25) found nothing.
   did_you_mean?: string;
 }
 
@@ -80,9 +80,7 @@ export type Algorithm =
   | 'bm25-prf'
   | 'semantic-rerank'
   | 'cosine-similarity'
-  | 'semantic-rrf'
-  | 'exact'
-  | 'exact-semantic-rrf';
+  | 'semantic-rrf';
 
 export const ALGORITHMS: { value: Algorithm; label: string; endpoint: string }[] = [
   { value: 'term-overlap', label: 'Term Overlap', endpoint: 'term-overlap' },
@@ -93,6 +91,4 @@ export const ALGORITHMS: { value: Algorithm; label: string; endpoint: string }[]
   { value: 'semantic-rerank', label: 'Semantic Rerank', endpoint: 'semantic-rerank' },
   { value: 'cosine-similarity', label: 'Cosine Similarity', endpoint: 'cosine-similarity' },
   { value: 'semantic-rrf', label: 'Semantic RRF', endpoint: 'semantic-rrf' },
-  { value: 'exact', label: 'Exact Match', endpoint: 'exact' },
-  { value: 'exact-semantic-rrf', label: 'Exact + Semantic RRF', endpoint: 'exact-semantic-rrf' },
 ];

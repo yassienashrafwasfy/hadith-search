@@ -30,7 +30,6 @@ from models import (
     EmbeddingSet,
     Hadith,
     HadithEmbedding,
-    HadithExactText,
     HadithLength,
     HadithPreprocessed,
     KvPair,
@@ -52,7 +51,6 @@ __all__ = [
     "EmbeddingSet",
     "Hadith",
     "HadithEmbedding",
-    "HadithExactText",
     "HadithLength",
     "HadithPreprocessed",
     "KvPair",
@@ -76,7 +74,6 @@ __all__ = [
 
 # The corpus and everything derived from it; dropped together when the corpus is rebuilt.
 CORPUS_TABLES = [
-    HadithExactText.__table__,
     Posting.__table__,
     Term.__table__,
     HadithLength.__table__,
@@ -100,7 +97,7 @@ _HADITH_REFERENCES = [
 _PREPROCESSED_COLUMNS = [c.name for c in HadithPreprocessed.__table__.c if c.name != "hadith_id"]
 
 _ENABLE_VECTOR = DDL("CREATE EXTENSION IF NOT EXISTS vector")
-_ENABLE_TRGM = DDL("CREATE EXTENSION IF NOT EXISTS pg_trgm")  # exact search and suggestions
+_ENABLE_TRGM = DDL("CREATE EXTENSION IF NOT EXISTS pg_trgm")  # suggestions
 
 # Transaction-scoped advisory lock keys (any app-wide constants; unrelated to table names).
 SCHEMA_LOCK = 7_302  # one schema initialiser at a time (blue and green can start together)

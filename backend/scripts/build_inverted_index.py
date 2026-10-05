@@ -1,4 +1,4 @@
-"""Build the BM25 index (terms, postings, lengths) and the exact-search text in PostgreSQL."""
+"""Build the BM25 index (terms, postings, lengths) in PostgreSQL."""
 
 import time
 from collections import Counter
@@ -9,7 +9,6 @@ from sqlalchemy.orm import Session
 
 from database import get_sync_session, init_schema_sync, read_hadiths_df
 from models import HadithLength, Posting, Term
-from services.exact_text import rebuild as rebuild_exact_text
 
 LANGUAGES = {"EN": "Preprocessed_English_Matn", "AR": "Preprocessed_Arabic_Matn"}
 INSERT_BATCH = 20_000
@@ -76,7 +75,6 @@ def write_index(session: Session, df, commit: bool = True) -> tuple[int, int]:
     _insert_in_batches(session, HadithLength, lengths)
     _insert_in_batches(session, Term, terms)
     _insert_in_batches(session, Posting, postings)
-    rebuild_exact_text(session)  # exact search reads the same corpus, so it is rebuilt with it
     if commit:
         session.commit()
     return tuple(sum(1 for t in terms if t["language"] == language) for language in LANGUAGES)

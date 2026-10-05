@@ -27,7 +27,7 @@ def test_router_groups_toggle_independently():
 
 def test_dense_flag_gates_endpoints():
     lexical = {s.slug for s in enabled_systems(Features(dense_retrieval=False))}
-    assert lexical == {"term-overlap", "tfidf", "bm25", "bm25-tf-idf", "bm25-prf", "exact"}
+    assert lexical == {"term-overlap", "tfidf", "bm25", "bm25-tf-idf", "bm25-prf"}
     assert {s.slug for s in enabled_systems(Features())} == set(SYSTEMS)
     assert enabled_systems(Features(search=False)) == []
 

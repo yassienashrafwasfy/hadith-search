@@ -179,10 +179,10 @@ def _search_off(_ctx):
     _ctx["features"] = Features(search=False)
 
 
-@then("the methods offered are term-overlap, tfidf, bm25, bm25-tf-idf, bm25-prf and exact")
+@then("the methods offered are term-overlap, tfidf, bm25, bm25-tf-idf, bm25-prf")
 def _lexical_only(_ctx):
     slugs = {s.slug for s in enabled_systems(_ctx["features"])}
-    assert slugs == {"term-overlap", "tfidf", "bm25", "bm25-tf-idf", "bm25-prf", "exact"}
+    assert slugs == {"term-overlap", "tfidf", "bm25", "bm25-tf-idf", "bm25-prf"}
 
 
 @then("no method is offered and no /api/v1/search route is mounted")

@@ -109,16 +109,6 @@ def _semantic_rrf(ctx, query, lang):
     return ranking.bm25_dense_rrf(ctx.session, query, lang, ctx.model(), restrict=ctx.restrict)
 
 
-@_system("exact", keyword=True)
-def _exact(ctx, query, lang):
-    return ranking.exact_search(ctx.session, query, lang)
-
-
-@_system("exact-semantic-rrf", "dense_retrieval", **_DENSE)
-def _exact_semantic_rrf(ctx, query, lang):
-    return ranking.exact_dense_rrf(ctx.session, query, lang, ctx.model(), restrict=ctx.restrict)
-
-
 def enabled_systems(features: Features) -> list[RetrievalSystem]:
     return [system for system in SYSTEMS.values() if system.enabled(features)]
 

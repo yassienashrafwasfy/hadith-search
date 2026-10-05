@@ -133,35 +133,6 @@ class HadithPreprocessed(Base):
     Preprocessed_Arabic_Matn = _text()
 
 
-class HadithExactText(Base):
-    """The text exact search matches on, one row per hadith (rebuilt with the index, see
-    `services.exact_text`). Lowercase, Arabic marks removed, every run of non-letters turned into
-    one space and a space at both ends, so a whole word is the substring ` word ` and a trigram
-    index can serve it. `ix_*_trgm` need the pg_trgm extension (`database.init_schema`)."""
-
-    __tablename__ = "hadith_exact_text"
-    __table_args__ = (
-        Index(
-            "ix_hadith_exact_text_english_trgm",
-            "english",
-            postgresql_using="gin",
-            postgresql_ops={"english": "gin_trgm_ops"},
-        ),
-        Index(
-            "ix_hadith_exact_text_arabic_trgm",
-            "arabic",
-            postgresql_using="gin",
-            postgresql_ops={"arabic": "gin_trgm_ops"},
-        ),
-    )
-
-    hadith_id: Mapped[int] = mapped_column(
-        ForeignKey("hadiths.id", ondelete="CASCADE"), primary_key=True, autoincrement=False
-    )
-    english: Mapped[str] = mapped_column(Text, server_default="  ")
-    arabic: Mapped[str] = mapped_column(Text, server_default="  ")
-
-
 class HadithEmbedding(Base):
     """One Arabic sentence vector per hadith. No fixed dimension, so a different model needs no migration."""
 

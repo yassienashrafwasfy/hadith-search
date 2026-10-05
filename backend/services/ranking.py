@@ -18,12 +18,11 @@ from sqlalchemy import Float, Numeric, String, and_, cast, column, func, select,
 from sqlalchemy.orm import Session
 
 import timing
-from models import HadithEmbedding, HadithExactText, HadithLength, HadithPreprocessed, Posting, Term
+from models import HadithEmbedding, HadithLength, HadithPreprocessed, Posting, Term
 from models.embedding_sets import embedding_table
 from scripts.arabic_encoder import encoding_text
 from scripts.preprocess import preprocess_arabic, preprocess_english
 from scripts.search import rrf_fusion
-from services import exact_text
 from settings import get_settings
 
 K1 = 1.2
@@ -340,43 +339,3 @@ def bm25_dense_rrf(
     """Reciprocal rank fusion of the BM25 and dense rankings."""
     fused = _fused_candidates(session, query, lang, model, candidate_k, restrict)
     return dict(list(fused.items())[:top_k])
-
-
-# ---------- exact keyword search ----------
-
-EXACT_LIMIT = 500  # matches kept, best first
-
-
-def exact_search(session: Session, query: str, lang: str, limit: int = EXACT_LIMIT) -> Scores:
-    """Hadiths containing every query word as a whole word, most occurrences first, then id.
-
-    No stemming: `pray` does not match `prayer`. The match runs on `hadith_exact_text` (see
-    `services.exact_text`), not on the lemmatized postings: a LIKE the trigram index serves.
-    The score is the total number of occurrences.
-    """
-    needles = exact_text.needles(query, lang)
-    if not needles:
-        return {}
-    text_column = exact_text.column(lang)
-    score = sum(exact_text.occurrences(text_column, needle) for needle in needles)
-    stmt = select(HadithExactText.hadith_id, score).where(
-        *(text_column.contains(needle, autoescape=True) for needle in needles)
-    )
-    return _scores(session, stmt.order_by(score.desc(), HadithExactText.hadith_id).limit(limit))
-
-
-def exact_dense_rrf(
-    session: Session,
-    query: str,
-    lang: str,
-    model,
-    candidate_k: int = 500,
-    top_k: int = 50,
-    restrict: Collection[int] | None = None,
-) -> Scores:
-    """Reciprocal rank fusion of the exact keyword ranking and the dense ranking."""
-    lexical = exact_search(session, query, lang, limit=candidate_k)
-    if restrict is not None:
-        lexical = {i: v for i, v in lexical.items() if i in restrict}
-    dense = dense_search(session, encode_query(model, query, lang), lang, candidate_k, restrict)
-    return dict(list(rrf_fusion([_ranks(lexical), _ranks(dense)]).items())[:top_k])

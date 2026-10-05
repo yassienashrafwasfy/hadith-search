@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Adds the pg_trgm extension, the exact-search table and the trigram indexes to an EXISTING
+# Adds the pg_trgm extension, and the trigram indexes to an EXISTING
 # database. A new database gets all of this from `init_schema` (create_all); an existing one
 # does not, because create_all never changes a table that is already there.
 #
@@ -51,17 +51,6 @@ echo "pg_trgm migration ($([ "$DRY_RUN" = 1 ] && echo 'dry run, nothing is chang
 
 run_sql "CREATE EXTENSION IF NOT EXISTS pg_trgm"
 
-run_sql "CREATE TABLE IF NOT EXISTS hadith_exact_text (hadith_id INTEGER NOT NULL PRIMARY KEY REFERENCES hadiths (id) ON DELETE CASCADE, english TEXT NOT NULL DEFAULT '  ', arabic TEXT NOT NULL DEFAULT '  ')"
-
-# Fill the table from the hadiths (the same SQL the index build uses). It is built before its
-# indexes, which is faster than the other way round.
-echo "-> backfill hadith_exact_text (python -m scripts.build_exact_text)"
-if [ "$DRY_RUN" = 0 ]; then
-  (cd backend && "$PYTHON" -m scripts.build_exact_text)
-fi
-
-run_sql "CREATE INDEX CONCURRENTLY IF NOT EXISTS ix_hadith_exact_text_english_trgm ON hadith_exact_text USING gin (english gin_trgm_ops)"
-run_sql "CREATE INDEX CONCURRENTLY IF NOT EXISTS ix_hadith_exact_text_arabic_trgm ON hadith_exact_text USING gin (arabic gin_trgm_ops)"
 run_sql "CREATE INDEX CONCURRENTLY IF NOT EXISTS ix_terms_term_trgm ON terms USING gin (term gin_trgm_ops)"
 run_sql "CREATE INDEX CONCURRENTLY IF NOT EXISTS ix_chapters_title_english_trgm ON chapters USING gin (title_english gin_trgm_ops)"
 run_sql "CREATE INDEX CONCURRENTLY IF NOT EXISTS ix_chapters_title_arabic_trgm ON chapters USING gin (title_arabic gin_trgm_ops)"

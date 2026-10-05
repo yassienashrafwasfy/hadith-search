@@ -18,7 +18,6 @@ from sqlalchemy.orm import Session
 
 from models import Chapter, Term
 from scripts.preprocess import normalize_arabic_text
-from services.exact_text import ARABIC_MARKS
 
 SUGGEST_SIMILARITY = 0.3
 HINT_SIMILARITY = 0.4
@@ -27,6 +26,8 @@ HINT_MAX_WORDS = 10
 
 _ARABIC = re.compile(r"[؀-ۿ]")
 _NOT_LETTERS = re.compile(r"[\W\d_]+")
+# Tatweel, the harakat U+064B..U+065F and dagger alef.
+ARABIC_MARKS = "".join(map(chr, [0x640, *range(0x64B, 0x660), 0x670]))
 _MARKS = re.compile(f"[{ARABIC_MARKS}]")
 
 

@@ -121,11 +121,11 @@ async def test_suggestions_bad_input_is_a_problem(_search_client, params):
 
 
 async def test_search_hint_only_when_empty(_search_client):
-    miss = (await _search_client.get(SEARCH, params={"q": "prayr", "method": "exact"})).json()
+    miss = (await _search_client.get(SEARCH, params={"q": "prayr", "method": "bm25"})).json()
     assert miss["number_of_results"] == 0 and miss["did_you_mean"] == "prayer"
     bm25 = (await _search_client.get(SEARCH, params={"q": "prayr", "method": "bm25"})).json()
     assert bm25["did_you_mean"] == "prayer"
-    hit = (await _search_client.get(SEARCH, params={"q": "prayer", "method": "exact"})).json()
+    hit = (await _search_client.get(SEARCH, params={"q": "prayer", "method": "bm25"})).json()
     assert "did_you_mean" not in hit
 
 
@@ -135,5 +135,5 @@ async def test_no_hint_for_methods_that_always_answer(_search_client):
 
 
 async def test_no_hint_when_nothing_is_close(_search_client):
-    body = (await _search_client.get(SEARCH, params={"q": "xylophone", "method": "exact"})).json()
+    body = (await _search_client.get(SEARCH, params={"q": "xylophone", "method": "bm25"})).json()
     assert body["number_of_results"] == 0 and "did_you_mean" not in body

@@ -3,7 +3,7 @@
 #
 #   tools/deploy.sh init                 first start: postgres, nginx and the blue app
 #   tools/deploy.sh status               which colour is live, canary share, health of each
-#   tools/deploy.sh deploy [--build|IMG] start the idle colour with a new image and wait for health
+#   tools/deploy.sh deploy [--build|--pull VERSION|IMG]  start the idle colour with a new image and wait for health
 #   tools/deploy.sh canary PERCENT       send PERCENT% of client addresses (1-99) to the idle colour
 #   tools/deploy.sh promote              send everything to the idle colour (old one keeps running)
 #   tools/deploy.sh rollback [--force]   canary: stop it. After a promote: switch back to the old colour
@@ -47,6 +47,7 @@ SMOKE_RETRY_WAIT=${SMOKE_RETRY_WAIT:-2}       # seconds before a busy (503) sear
 SMOKE_DEFAULT_SEARCH='/api/v1/searches?q=prayer&method=term-overlap&lang=en'
 KEEP_IMAGES=${KEEP_IMAGES:-3}                 # release tags prune-images keeps (newest first)
 PRUNE_AFTER_PROMOTE=${PRUNE_AFTER_PROMOTE:-0} # 1 runs prune-images after a successful promote
+REGISTRY_IMAGE=${REGISTRY_IMAGE:-ghcr.io/yassienashrafwasfy/hadith-search} # private image CI pushes on a version tag; `deploy --pull VERSION` reads it (docker login ghcr.io first)
 IMAGE_REPO=${IMAGE_REPO:-hadith-search}       # repository whose release tags prune-images may remove
 COMPOSE=(docker compose)
 
@@ -272,16 +273,21 @@ cmd_status() {
 cmd_deploy() {
   load_state
   [ "$CANARY" -eq 0 ] || die "a canary is running; promote or roll it back first"
-  local idle image release build=0
+  local idle image release version build=0 pull=0
   idle=$(other "$ACTIVE")
   case "${1:-}" in
     --build) build=1; release=$(make_release_id); image="hadith-search:$release" ;;
-    "") die "usage: tools/deploy.sh deploy --build | IMAGE" ;;
+    --pull)
+      version=${2:-}
+      [[ "$version" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.]+)?$ ]] || die "usage: tools/deploy.sh deploy --pull VERSION (for example v1.2.3)"
+      pull=1; release=$version; image="hadith-search:$release" ;;
+    "") die "usage: tools/deploy.sh deploy --build | --pull VERSION | IMAGE" ;;
     *) image=$1; release=$(release_from_image "$image") ;;
   esac
   [[ "$release" =~ ^[A-Za-z0-9._-]+$ ]] || die "release id '$release' has characters other than letters, digits, . _ -"
   if [ "$DRY_RUN" -eq 1 ]; then
     [ "$build" -eq 0 ] || say_dry "build $image (skipped if that tag already exists; tags are never overwritten)"
+    [ "$pull" -eq 0 ] || say_dry "pull $REGISTRY_IMAGE:$version and tag it $image (skipped if that tag already exists)"
     say_dry "replace $idle (now release $(release_of "$idle")) with release $release ($image), wait for healthy; live traffic stays on $ACTIVE"
     return
   fi
@@ -297,6 +303,15 @@ cmd_deploy() {
     else
       log "building $image"
       docker build --pull --build-arg "REVISION=$release" --build-arg "CREATED=$(date -u +%Y-%m-%dT%H:%M:%SZ)" -t "$image" .
+    fi
+  fi
+  if [ "$pull" -eq 1 ]; then
+    if docker image inspect "$image" >/dev/null 2>&1; then
+      log "image $image already exists; not pulling (tags are never overwritten)"
+    else
+      log "pulling $REGISTRY_IMAGE:$version"
+      docker pull "$REGISTRY_IMAGE:$version" || die "could not pull $REGISTRY_IMAGE:$version (docker login ghcr.io with a token that has read:packages, and check the version exists)"
+      docker tag "$REGISTRY_IMAGE:$version" "$image"
     fi
   fi
   # The idle colour is the rollback target after a promote; replacing it ends that window. Its

@@ -302,6 +302,15 @@ tools/deploy.sh canary 10         # 10% of client addresses
 tools/deploy.sh promote           # or: tools/deploy.sh rollback
 ```
 
+**Releases from the private registry.** Pushing a version tag (`git tag v1.2.3 && git push origin v1.2.3`) runs `.github/workflows/release.yml`. It checks that the tagged commit is on `main` and passed CI, builds the image and publishes it to a private GitHub Container Registry package (`ghcr.io/<owner>/hadith-search:v1.2.3`). It then deletes all but the newest 3 versions. Pull requests and forks never run it. On the host, log in once and deploy by version:
+
+```bash
+echo "$TOKEN" | docker login ghcr.io -u <github-user> --password-stdin   # token: classic PAT with only read:packages
+tools/deploy.sh deploy --pull v1.2.3                                       # same canary/promote steps as above
+```
+
+`--build` still works without the registry. Check once, under the repository's Packages, that `hadith-search` is set to Private.
+
 **Rollback.** `tools/deploy.sh promote` checks the new colour after the switch and puts traffic back on the old one by itself (exit 1) if it fails. `tools/deploy.sh rollback` does the same by hand, and refuses if the old colour is not running and healthy; add `--dry-run` to any command to see the plan. Images are tagged with the git sha and kept; `tools/deploy.sh prune-images` removes all but the newest 3 (never one that is running or still a rollback target). The health check is `GET /api/v1/health`, which also checks the database. The database is not rolled back: once the column drops of `docs/HANDOFF.md` item 28 (step 2/2b) have run, restore the `pg_dump` first, and create `deploy/state/schema-step2-applied` so rollback warns you. See item 35.
 
 Both colours share one database, so schema changes must be additive. Details are in `docs/HANDOFF.md`, item 21.

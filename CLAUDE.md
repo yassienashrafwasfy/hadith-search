@@ -29,6 +29,7 @@ cd ../frontend && npm run build                # tsc -b && vite build
 
 tools/deploy.sh init                           # docker compose: postgres + nginx (:8000) + the blue app; Dockerfile builds the frontend and FastAPI serves it
 tools/deploy.sh deploy --build && tools/deploy.sh canary 10 && tools/deploy.sh promote   # blue/green release (see docs/HANDOFF.md item 21)
+tools/deploy.sh deploy --pull v1.2.3   # same, from the private GHCR image CI publishes on a version tag (HANDOFF item 44)
 tools/promote_model.sh run --registered-model NAME [--dry-run|--promote]   # best MLflow model -> ONNX -> new embeddings table -> deploy (HANDOFF item 40; needs requirements-mlops.txt)
 ```
 

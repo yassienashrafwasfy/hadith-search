@@ -29,7 +29,8 @@ case "$args" in
   *"exec -T nginx sh -c"*"-O -"*)
     if [ -e "$FAKE/no-search" ]; then echo '{"_links":{"self":{}}}'; else echo '{"_links":{"searches":{}}}'; fi ;;
   "images --format"*) cut -d' ' -f1 "$FAKE/images" | grep "^${args##* }:" ;;
-  "image inspect"*) grep "^${args##* } " "$FAKE/images" | cut -d' ' -f2 ;;
+  "image inspect"*) found=$(grep "^${args##* } " "$FAKE/images" 2>/dev/null) || exit 1
+    echo "$found" | cut -d' ' -f2 ;;
   "ps --format"*) cat "$FAKE/running-images" 2>/dev/null ;;
   "rmi "*) sed -i "\\|^${args#rmi } |d" "$FAKE/images" ;;
   *"up -d"*)
@@ -334,3 +335,43 @@ def test_deploy_reads_the_staged_model_settings(_live):
     assert "ARABIC_MODEL_DIR=/m/mv2 EMBEDDINGS_RELEASE=mv2" in out
     dry = _run(_live, "--dry-run", "deploy", "registry/app:5").stdout
     assert "model settings" not in dry
+
+
+def test_pull_fetches_the_registry_image_and_tags_it_locally(_sandbox):
+    assert _run(_sandbox, "init").returncode == 0
+    result = _run(_sandbox, "deploy", "--pull", "v1.2.3")
+    assert result.returncode == 0, result.stderr
+    log = (_sandbox / "fake" / "log").read_text()
+    assert "pull ghcr.io/yassienashrafwasfy/hadith-search:v1.2.3" in log
+    assert "tag ghcr.io/yassienashrafwasfy/hadith-search:v1.2.3 hadith-search:v1.2.3" in log
+    assert "GREEN_REL_ID=v1.2.3" in (_sandbox / "deploy" / "state" / "releases.env").read_text()
+
+
+def test_pull_uses_the_registry_named_in_the_environment(_sandbox, monkeypatch):
+    monkeypatch.setenv("REGISTRY_IMAGE", "ghcr.io/someone/else")
+    assert _run(_sandbox, "init").returncode == 0
+    assert _run(_sandbox, "deploy", "--pull", "v1.0.0").returncode == 0
+    assert "pull ghcr.io/someone/else:v1.0.0" in (_sandbox / "fake" / "log").read_text()
+
+
+@pytest.mark.parametrize("version", ["", "latest", "main", "1.2", "v1.2.3; rm -rf /", "../x"])
+def test_pull_refuses_anything_but_a_version(_sandbox, version):
+    assert _run(_sandbox, "init").returncode == 0
+    args = ["deploy", "--pull", *([version] if version else [])]
+    result = _run(_sandbox, *args)
+    assert result.returncode != 0 and "VERSION" in result.stderr
+    assert "pull " not in (_sandbox / "fake" / "log").read_text()
+
+
+def test_pull_does_not_fetch_a_tag_that_already_exists_locally(_sandbox):
+    assert _run(_sandbox, "init").returncode == 0
+    (_sandbox / "fake" / "images").write_text("hadith-search:v1.2.3 2026-10-05T10:00:00Z\n")
+    assert _run(_sandbox, "deploy", "--pull", "v1.2.3").returncode == 0
+    assert "pull " not in (_sandbox / "fake" / "log").read_text()
+
+
+def test_pull_dry_run_changes_nothing(_sandbox):
+    assert _run(_sandbox, "init").returncode == 0
+    result = _run(_sandbox, "deploy", "--pull", "v1.2.3", "--dry-run")
+    assert result.returncode == 0 and "would pull" in result.stdout
+    assert "pull " not in (_sandbox / "fake" / "log").read_text()

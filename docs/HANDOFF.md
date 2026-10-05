@@ -941,6 +941,18 @@ Frontend only. No backend, database, nginx or API change, nothing committed.
 
 **Files:** `backend/services/suggestions.py`, `backend/routers/suggestions.py`, `tools/migrate_trgm.sh`, `backend/models/orm.py`, `backend/database.py`, `backend/services/retrieval.py`, `backend/routers/search.py`, `backend/routers/root.py`, `backend/models/schemas.py`, `tests/test_suggestions.py`, `tests/security/test_suggestions.py`, `tests/test_migrate_trgm.py`, `frontend/src` (SearchBar, DidYouMean, useSuggestions, types, api)
 
+### 44. Private image registry: GHCR on version tags (2026-10-05)
+
+**What changed:** `.github/workflows/release.yml` (new) runs on a pushed tag `vX.Y.Z`, on a GitHub-hosted runner. It refuses a tag that is not on `main` or whose commit has no successful `ci.yml` run, refuses a version that already exists in the registry, builds, pushes `ghcr.io/<owner>/hadith-search:<tag>` (no provenance or SBOM, so each version is one manifest) and then keeps the newest 3 package versions (`actions/delete-package-versions`). `tools/deploy.sh deploy --pull VERSION` pulls that image, tags it locally as `hadith-search:VERSION` (so `prune-images`, `releases.env` and rollback work as before) and starts the idle colour; `REGISTRY_IMAGE` overrides the name. `--build` is unchanged. A pull is skipped when the local tag exists (tags are never overwritten).
+
+**Decisions (owner):** push on version tags only; pull with fallback to local build; read-only token for pulling; keep 3 versions.
+
+**Access:** the workflow uses the job's `GITHUB_TOKEN` with `packages: write` on the release job only. The host needs a token to pull a private package. GitHub's registry does not accept fine-grained tokens, so use a classic personal access token with only the `read:packages` scope, a short expiry, and `docker login ghcr.io`. The Dockerfile already carries `org.opencontainers.image.source`, which links the package to this repository. The repository is public; the package must still be set to Private under Packages, then Package settings.
+
+**Not verified:** the workflow has not run on GitHub (actionlint and the tests only), so the first tag push is the real test; whether the package comes out private (check the package settings after it); the visibility of an image published from a public repository; `docker pull` from the host.
+
+**Files:** `.github/workflows/release.yml`, `tools/deploy.sh`, `tests/test_deploy_script.py`, `tests/test_release_workflow.py`, `README.md`
+
 ## Still open
 
 - Nothing has been pushed and no PR exists. Everything is on local branches.

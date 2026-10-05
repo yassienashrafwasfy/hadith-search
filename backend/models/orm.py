@@ -43,6 +43,20 @@ class Chapter(Base):
     """
 
     __tablename__ = "chapters"
+    __table_args__ = (
+        Index(
+            "ix_chapters_title_english_trgm",
+            "title_english",
+            postgresql_using="gin",
+            postgresql_ops={"title_english": "gin_trgm_ops"},
+        ),
+        Index(
+            "ix_chapters_title_arabic_trgm",
+            "title_arabic",
+            postgresql_using="gin",
+            postgresql_ops={"title_arabic": "gin_trgm_ops"},
+        ),
+    )
 
     book: Mapped[str] = mapped_column(ForeignKey("books.book"), primary_key=True)
     chapter_number: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
@@ -119,6 +133,35 @@ class HadithPreprocessed(Base):
     Preprocessed_Arabic_Matn = _text()
 
 
+class HadithExactText(Base):
+    """The text exact search matches on, one row per hadith (rebuilt with the index, see
+    `services.exact_text`). Lowercase, Arabic marks removed, every run of non-letters turned into
+    one space and a space at both ends, so a whole word is the substring ` word ` and a trigram
+    index can serve it. `ix_*_trgm` need the pg_trgm extension (`database.init_schema`)."""
+
+    __tablename__ = "hadith_exact_text"
+    __table_args__ = (
+        Index(
+            "ix_hadith_exact_text_english_trgm",
+            "english",
+            postgresql_using="gin",
+            postgresql_ops={"english": "gin_trgm_ops"},
+        ),
+        Index(
+            "ix_hadith_exact_text_arabic_trgm",
+            "arabic",
+            postgresql_using="gin",
+            postgresql_ops={"arabic": "gin_trgm_ops"},
+        ),
+    )
+
+    hadith_id: Mapped[int] = mapped_column(
+        ForeignKey("hadiths.id", ondelete="CASCADE"), primary_key=True, autoincrement=False
+    )
+    english: Mapped[str] = mapped_column(Text, server_default="  ")
+    arabic: Mapped[str] = mapped_column(Text, server_default="  ")
+
+
 class HadithEmbedding(Base):
     """One Arabic sentence vector per hadith. No fixed dimension, so a different model needs no migration."""
 
@@ -162,6 +205,14 @@ class Term(Base):
     """A term of the inverted index with its document frequency. `language` is "EN" or "AR"."""
 
     __tablename__ = "terms"
+    __table_args__ = (
+        Index(
+            "ix_terms_term_trgm",
+            "term",
+            postgresql_using="gin",
+            postgresql_ops={"term": "gin_trgm_ops"},
+        ),
+    )
 
     language: Mapped[str] = mapped_column(Text, primary_key=True)
     term: Mapped[str] = mapped_column(Text, primary_key=True)

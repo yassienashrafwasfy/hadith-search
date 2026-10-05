@@ -2,7 +2,7 @@
 
 Set `DATABASE_URL` to a SQLAlchemy URL using the psycopg driver, e.g.
 `postgresql+psycopg://user:password@host:5432/hadith`. The database needs the pgvector
-extension available; `init_schema` turns it on.
+and pg_trgm extensions available; `init_schema` turns them on.
 """
 
 from datetime import datetime, timezone
@@ -30,6 +30,7 @@ from models import (
     EmbeddingSet,
     Hadith,
     HadithEmbedding,
+    HadithExactText,
     HadithLength,
     HadithPreprocessed,
     KvPair,
@@ -51,6 +52,7 @@ __all__ = [
     "EmbeddingSet",
     "Hadith",
     "HadithEmbedding",
+    "HadithExactText",
     "HadithLength",
     "HadithPreprocessed",
     "KvPair",
@@ -74,6 +76,7 @@ __all__ = [
 
 # The corpus and everything derived from it; dropped together when the corpus is rebuilt.
 CORPUS_TABLES = [
+    HadithExactText.__table__,
     Posting.__table__,
     Term.__table__,
     HadithLength.__table__,
@@ -97,6 +100,7 @@ _HADITH_REFERENCES = [
 _PREPROCESSED_COLUMNS = [c.name for c in HadithPreprocessed.__table__.c if c.name != "hadith_id"]
 
 _ENABLE_VECTOR = DDL("CREATE EXTENSION IF NOT EXISTS vector")
+_ENABLE_TRGM = DDL("CREATE EXTENSION IF NOT EXISTS pg_trgm")  # exact search and suggestions
 
 # Transaction-scoped advisory lock keys (any app-wide constants; unrelated to table names).
 SCHEMA_LOCK = 7_302  # one schema initialiser at a time (blue and green can start together)
@@ -182,10 +186,11 @@ def _create_missing_indexes(conn) -> None:
 
 
 async def init_schema() -> None:
-    """Enable pgvector and create any missing table (no migrations: existing tables are kept)."""
+    """Enable pgvector and pg_trgm and create any missing table (no migrations: existing tables are kept)."""
     async with get_async_engine().begin() as conn:
         await conn.execute(select(func.pg_advisory_xact_lock(SCHEMA_LOCK)))
         await conn.execute(_ENABLE_VECTOR)
+        await conn.execute(_ENABLE_TRGM)
         await conn.run_sync(Base.metadata.create_all)
         await conn.run_sync(_create_missing_indexes)
 
@@ -194,6 +199,7 @@ def init_schema_sync() -> None:
     with get_sync_engine().begin() as conn:
         conn.execute(select(func.pg_advisory_xact_lock(SCHEMA_LOCK)))
         conn.execute(_ENABLE_VECTOR)
+        conn.execute(_ENABLE_TRGM)
         Base.metadata.create_all(conn)
         _create_missing_indexes(conn)
 

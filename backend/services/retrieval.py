@@ -15,6 +15,7 @@ from features import Features
 from models import SearchRequest, SearchResponse
 from services import ranking
 from services.results import allowed_ids, build_results
+from services.suggestions import did_you_mean
 
 RERANK_CANDIDATES = 50
 RERANK_TOP_K = 10
@@ -38,6 +39,7 @@ class RetrievalSystem:
     run: Callable[[SearchContext, str, str], Scores]
     requires: tuple[str, ...] = ()  # Features flags that must all be on
     languages: tuple[str, ...] = ("EN", "AR")  # query languages the system can answer
+    keyword: bool = False  # matches words, so an empty result may be a typo (`did_you_mean`)
 
     def enabled(self, features: Features) -> bool:
         return features.search and all(features.is_enabled(flag) for flag in self.requires)
@@ -46,9 +48,11 @@ class RetrievalSystem:
 SYSTEMS: dict[str, RetrievalSystem] = {}
 
 
-def _system(slug: str, *requires: str, languages: tuple[str, ...] = ("EN", "AR")):
+def _system(
+    slug: str, *requires: str, languages: tuple[str, ...] = ("EN", "AR"), keyword: bool = False
+):
     def register(run):
-        SYSTEMS[slug] = RetrievalSystem(slug, run, requires, languages)
+        SYSTEMS[slug] = RetrievalSystem(slug, run, requires, languages, keyword)
         return run
 
     return register
@@ -68,7 +72,7 @@ def _tfidf(ctx, query, lang):
     return ranking.tf_idf(ctx.session, query, lang)
 
 
-@_system("bm25")
+@_system("bm25", keyword=True)
 def _bm25(ctx, query, lang):
     return ranking.bm25(ctx.session, query, lang)
 
@@ -105,6 +109,16 @@ def _semantic_rrf(ctx, query, lang):
     return ranking.bm25_dense_rrf(ctx.session, query, lang, ctx.model(), restrict=ctx.restrict)
 
 
+@_system("exact", keyword=True)
+def _exact(ctx, query, lang):
+    return ranking.exact_search(ctx.session, query, lang)
+
+
+@_system("exact-semantic-rrf", "dense_retrieval", **_DENSE)
+def _exact_semantic_rrf(ctx, query, lang):
+    return ranking.exact_dense_rrf(ctx.session, query, lang, ctx.model(), restrict=ctx.restrict)
+
+
 def enabled_systems(features: Features) -> list[RetrievalSystem]:
     return [system for system in SYSTEMS.values() if system.enabled(features)]
 
@@ -119,4 +133,7 @@ def run_search(system: RetrievalSystem, ctx: SearchContext, req: SearchRequest) 
     results = build_results(
         ctx.session, raw, req.grade_filter, req.book_filter, allowed=ctx.restrict
     )
-    return SearchResponse(number_of_results=len(results), results=results)
+    hint = None
+    if system.keyword and not results:
+        hint = did_you_mean(ctx.session, req.query, req.lang.value.upper())
+    return SearchResponse(number_of_results=len(results), results=results, did_you_mean=hint)

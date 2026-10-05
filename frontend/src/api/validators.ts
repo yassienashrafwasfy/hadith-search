@@ -32,6 +32,7 @@ export const validateSearchResponse = (data: unknown): SearchResponse => {
   if (!isNumber(data.number_of_results)) throw new ValidationError('Invalid search response: missing number_of_results');
   if (!Array.isArray(data.results)) throw new ValidationError('Invalid search response: missing results array');
   data.results.forEach(validateSearchResult);
+  if (data.did_you_mean !== undefined && !isString(data.did_you_mean)) throw new ValidationError('Invalid search response: did_you_mean should be a string');
   return data as unknown as SearchResponse;
 };
 

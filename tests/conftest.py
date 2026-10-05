@@ -404,6 +404,7 @@ async def _search_client(_search_index, _fake_model, _mock_preprocess):
     import database
     from features import Features
     from routers.search import get_search_context, make_search_router
+    from routers.suggestions import router as suggestions_router
     from services.retrieval import SearchContext
 
     def context() -> Iterator[SearchContext]:
@@ -415,6 +416,7 @@ async def _search_client(_search_index, _fake_model, _mock_preprocess):
     app = FastAPI()
     install_error_handlers(app)
     app.include_router(make_search_router(Features(search=True, dense_retrieval=True)))
+    app.include_router(suggestions_router)
     app.dependency_overrides[get_search_context] = context
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         yield c

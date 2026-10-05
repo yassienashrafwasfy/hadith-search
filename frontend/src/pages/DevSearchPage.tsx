@@ -6,6 +6,7 @@ import BookFilter from '../components/BookFilter';
 import HadithCard from '../components/HadithCard';
 import HadithModal from '../components/HadithModal';
 import ErrorBanner from '../components/ErrorBanner';
+import DidYouMean from '../components/DidYouMean';
 import LoadingSpinner from '../components/LoadingSpinner';
 import Pagination from '../components/Pagination';
 import AlgorithmSelect from '../components/AlgorithmSelect';
@@ -31,6 +32,7 @@ const DevSearchPage = () => {
   const [selectedBook, setSelectedBook] = useState<string | null>(searchParams.get('book') || null);
   const [rawResults, setRawResults] = useState<SearchResult[]>([]);
   const [responseTime, setResponseTime] = useState<number | null>(null);
+  const [didYouMean, setDidYouMean] = useState<string | null>(null);
   const [selectedResult, setSelectedResult] = useState<SearchResult | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [sortMode, setSortMode] = useState<'grade-relevance' | 'relevance'>('grade-relevance');
@@ -67,6 +69,7 @@ const DevSearchPage = () => {
     search(effectiveAlgorithm, request).then((response) => {
       setRawResults(response.results);
       setResponseTime(response.response_time_ms ?? null);
+      setDidYouMean(response.did_you_mean ?? null);
       setCurrentPage(1);
     });
   };
@@ -191,6 +194,7 @@ const DevSearchPage = () => {
               <span className="khatam" aria-hidden="true" />
               <p className="font-body-main text-body-main text-on-surface dark:text-dark-on-surface">{t('results.noResults')}</p>
               <p className="font-ui-caption text-ui-caption text-on-surface-variant dark:text-dark-on-surface-variant">{t('results.hint')}</p>
+              {didYouMean && <DidYouMean suggestion={didYouMean} onPick={(picked) => handleSearch(picked, 'ar')} />}
             </div>
           )}
         </div>

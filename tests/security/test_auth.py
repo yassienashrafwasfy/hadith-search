@@ -104,6 +104,7 @@ def test_only_the_expected_routes_are_public(_app):
         ("GET", f"{API}/hadiths/{{hadith_id}}"),
         ("GET", f"{API}/search-methods"),
         ("GET", f"{API}/searches"),
+        ("GET", f"{API}/suggestions"),
         ("POST", f"{API}/annotators"),
         ("POST", f"{API}/tokens"),
         ("GET", f"{API}/benchmark"),

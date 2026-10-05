@@ -82,6 +82,7 @@ def _include_feature_routers(app: FastAPI, features: Features) -> None:
         kv_pairs_router,
         make_root_router,
         make_search_router,
+        suggestions_router,
     )
 
     app.include_router(make_root_router(features))
@@ -93,6 +94,7 @@ def _include_feature_routers(app: FastAPI, features: Features) -> None:
         app.include_router(kv_pairs_router)
     if features.search:
         app.include_router(make_search_router(features))
+        app.include_router(suggestions_router)
     if features.benchmark:
         app.include_router(benchmark_router)
 

@@ -87,8 +87,10 @@ def make_search_router(features: Features) -> APIRouter:
             "methods": link(href("search-methods")),
         }
         # The model is serialised once by pydantic; the links are appended to its JSON object.
+        # `did_you_mean` is left out when empty, so an ordinary body is unchanged.
+        hint_off = None if response.did_you_mean else {"did_you_mean"}
         body = EncodedJson(
-            f'{response.model_dump_json()[:-1]},"_links":'
+            f'{response.model_dump_json(exclude=hint_off)[:-1]},"_links":'
             f"{json.dumps(links, ensure_ascii=False, separators=(',', ':'))}}}"
         )
         return json_response(

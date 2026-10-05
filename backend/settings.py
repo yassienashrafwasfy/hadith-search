@@ -28,6 +28,10 @@ DEFAULT_CORS_ORIGINS = "http://localhost:5173,http://127.0.0.1:5173"
 DEFAULT_SEARCH_RUNNING = 8
 DEFAULT_SEARCH_WAITING = 64
 DEFAULT_SEARCH_TIMEOUT_SECONDS = 5.0
+DEFAULT_DB_POOL_OVERFLOW = 2
+DEFAULT_DB_POOL_RECYCLE_SECONDS = 1800
+DEFAULT_ENCODER_BATCH_WAIT_MS = 0.0
+DEFAULT_ENCODER_BATCH_MAX = 16
 DEFAULT_ENCODER_THREADS = 1  # a query is one short text; see handoff item 24 for why not more
 RELEASE_PATTERN = re.compile(r"^[a-z][a-z0-9_]{0,39}$")
 ENV_FILE = Path(__file__).resolve().parent.parent / ".env"
@@ -66,6 +70,14 @@ class Settings(BaseSettings):
     search_max_concurrent: int = Field(default=DEFAULT_SEARCH_RUNNING, gt=0)
     search_queue_size: int = Field(default=DEFAULT_SEARCH_WAITING, ge=0)
     search_queue_timeout_seconds: float = Field(default=DEFAULT_SEARCH_TIMEOUT_SECONDS, gt=0)
+    # Connection pool per engine: one connection per running search (None: SEARCH_MAX_CONCURRENT)
+    db_pool_size: int | None = Field(default=None, gt=0)
+    db_pool_overflow: int = Field(default=DEFAULT_DB_POOL_OVERFLOW, ge=0)
+    db_pool_recycle_seconds: int = Field(default=DEFAULT_DB_POOL_RECYCLE_SECONDS, gt=0)
+    # Queries that arrive within this many ms share one encoder call. 0 (default) is off: on 2 CPUs
+    # it gave no throughput gain and added the wait to every query (docs/HANDOFF.md item 42)
+    encoder_batch_wait_ms: float = Field(default=DEFAULT_ENCODER_BATCH_WAIT_MS, ge=0)
+    encoder_batch_max: int = Field(default=DEFAULT_ENCODER_BATCH_MAX, gt=0)
 
     @field_validator("embeddings_release")
     @classmethod

@@ -905,6 +905,18 @@ Frontend only. No backend, database, nginx or API change, nothing committed.
 
 **Files:** `.github/workflows/ci.yml`, `tools/pick-runner.sh`, `tools/frontend-lint.sh`, `tools/runner/`, `tests/test_pick_runner.py`, `.gitignore`
 
+### 42. Sized DB pool and optional micro-batching of the query encoder (2026-10-05)
+
+**Files:** `backend/batching.py` (new), `backend/database.py`, `backend/settings.py`, `backend/scripts/loading.py`, `tests/test_batching.py` (new), `.env.example`.
+
+**Connection reuse.** Both engines were already cached per URL with a pool and `pool_pre_ping`, but the pool was SQLAlchemy's default (5 connections, 10 extra) while the search queue lets 8 searches run. `database.pool_kwargs()` now sizes it from settings: `DB_POOL_SIZE` (default `SEARCH_MAX_CONCURRENT`, 8), `DB_POOL_OVERFLOW` (2) and `DB_POOL_RECYCLE_SECONDS` (1800). Tests that pass a `poolclass` (NullPool) keep it unchanged.
+
+**Batching.** `MicroBatcher` wraps the encoder returned by `get_model()`: queries from concurrent searches that arrive within `ENCODER_BATCH_WAIT_MS` share one encoder call (up to `ENCODER_BATCH_MAX`, 16); calls with more texts than that, or with `batch_size`, go straight through. A failure in the encoder reaches every caller in the batch.
+
+**It is off by default.** Measured on the exported model, pinned to 2 CPUs, 8 threads each encoding one query: 117.5 queries/s directly, 110.5 batched (p50 66 ms against 73 ms). A single caller went from 14 ms to 18 ms because of the 5 ms window. The encoder does about 117 queries/s while a whole search tops out near 26 per second (item 27 and the sweep below), so the encoder is not the limit; the CPU spent on SQL is. Set `ENCODER_BATCH_WAIT_MS=5` to turn it on, for example on a machine with more cores.
+
+**Load sweep with the queue (rig `hadith-prof`, 2 CPU / 4 GB, no nginx, 2026-10-05, one run each):** 40 users 0 failures p99 1.1 s; 60 users 0 failures p99 1.8 s; 80 users 0 failures p99 2.3 s (about 26 rps); 100 users 4-6% refused, p99 3.2 s; 150 users 51% refused; 200 users 68%; 300 users 80%; 400 users 85%, p99 4.7 s. Every failure above 100 users was a 503 from the queue; no OOM, memory about 1.5 GB. The rig ran the code from before this item (queue present, default pool).
+
 ## Still open
 
 - Nothing has been pushed and no PR exists. Everything is on local branches.

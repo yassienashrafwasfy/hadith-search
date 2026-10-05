@@ -39,9 +39,15 @@ def get_english_lemmatizer():
 @lru_cache()
 def get_model():
     """The Arabic sentence encoder (ONNX Runtime); see scripts/export_onnx.py to create it."""
+    from batching import MicroBatcher
     from scripts.arabic_encoder import load_encoder
+    from settings import get_settings
 
-    return load_encoder()
+    encoder = load_encoder()
+    settings = get_settings()
+    if settings.encoder_batch_wait_ms <= 0:
+        return encoder
+    return MicroBatcher(encoder, settings.encoder_batch_wait_ms / 1000, settings.encoder_batch_max)
 
 
 get_mle = _load_once(get_mle)

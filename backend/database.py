@@ -103,8 +103,22 @@ SCHEMA_LOCK = 7_302  # one schema initialiser at a time (blue and green can star
 ASSIGNMENT_LOCK = 7_303  # one sign-up at a time hands out query assignments
 
 # Extra keyword arguments for both engines (tests swap in NullPool so engines don't outlive
-# their event loop).
+# their event loop). Without a `poolclass`, the pool is sized from settings (`pool_kwargs`).
 ENGINE_KWARGS: dict = {"pool_pre_ping": True}
+
+
+def pool_kwargs() -> dict:
+    """Reuse connections: one per running search, a little overflow, recycled before they go stale."""
+    if "poolclass" in ENGINE_KWARGS:
+        return dict(ENGINE_KWARGS)
+    settings = get_settings()
+    return {
+        **ENGINE_KWARGS,
+        "pool_size": settings.db_pool_size or settings.search_max_concurrent,
+        "max_overflow": settings.db_pool_overflow,
+        "pool_recycle": settings.db_pool_recycle_seconds,
+    }
+
 
 # Engines are cached per URL so tests can point each test at its own schema.
 _async_engines: dict[str, AsyncEngine] = {}
@@ -124,14 +138,14 @@ def database_url() -> str:
 def get_async_engine() -> AsyncEngine:
     url = database_url()
     if url not in _async_engines:
-        _async_engines[url] = create_async_engine(url, **ENGINE_KWARGS)
+        _async_engines[url] = create_async_engine(url, **pool_kwargs())
     return _async_engines[url]
 
 
 def get_sync_engine():
     url = database_url()
     if url not in _sync_engines:
-        _sync_engines[url] = create_engine(url, **ENGINE_KWARGS)
+        _sync_engines[url] = create_engine(url, **pool_kwargs())
     return _sync_engines[url]
 
 

@@ -146,7 +146,14 @@ async def test_api_root_lists_only_enabled_resources():
             return res.json()["_links"]
 
     full = await root(Features())
-    assert {"searches", "search-methods", "assignments", "kv-pairs", "benchmark"} <= set(full)
+    assert {
+        "searches",
+        "search-methods",
+        "suggestions",
+        "assignments",
+        "kv-pairs",
+        "benchmark",
+    } <= set(full)
     assert full["searches"]["templated"] is True
     light = await root(Features(search=False, benchmark=False, kv_pairs=False))
     assert set(light) == {

@@ -45,6 +45,7 @@ class SearchResult(BaseModel):
 class SearchResponse(BaseModel):
     number_of_results: int = 0
     results: list[SearchResult]
+    did_you_mean: str | None = None  # a corrected query, only when a keyword search found nothing
 
 
 class QrelEntry(BaseModel):

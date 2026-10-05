@@ -42,6 +42,7 @@ def make_root_router(features: Features) -> APIRouter:
         }
         if features.search:
             links["search-methods"] = link(href("search-methods"))
+            links["suggestions"] = link(href("suggestions") + "{?q,limit}", templated=True)
             links["searches"] = link(href("searches") + SEARCH_TEMPLATE, templated=True)
         if features.annotation:
             links["annotators"] = link(href("annotators"))

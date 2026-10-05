@@ -10,6 +10,7 @@ import { useApi } from '../api/useApi';
 import { useLanguage } from '../i18n/useLanguage';
 import { sortByGradeAndRelevance, sortByRelevance } from '../utils/sort';
 import { ALGORITHMS } from '../types';
+import { ALGORITHM_LABELS_AR } from '../constants';
 import type { Lang, SearchResult, SearchRequest } from '../types';
 
 const DevComparePage = () => {
@@ -108,8 +109,10 @@ const DevComparePage = () => {
     return sortMode === 'grade-relevance' ? sortByGradeAndRelevance(resultsB) : sortByRelevance(resultsB);
   }, [resultsB, sortMode]);
 
-  const algoALabel = ALGORITHMS.find((a) => a.value === algorithmA)?.label || algorithmA;
-  const algoBLabel = ALGORITHMS.find((a) => a.value === algorithmB)?.label || algorithmB;
+  const labelOf = (value: string) =>
+    ALGORITHM_LABELS_AR[value] ?? ALGORITHMS.find((a) => a.value === value)?.label ?? value;
+  const algoALabel = labelOf(algorithmA);
+  const algoBLabel = labelOf(algorithmB);
   const isLoading = isLoadingA || isLoadingB;
 
   return (
@@ -148,7 +151,7 @@ const DevComparePage = () => {
               className="h-12 px-4 rounded-lg border border-outline dark:border-dark-outline bg-surface dark:bg-dark-surface text-on-surface dark:text-dark-on-surface font-ui-label text-ui-label focus:ring-2 focus:ring-primary dark:focus:ring-dark-primary cursor-pointer"
             >
               {ALGORITHMS.map((algo) => (
-                <option key={algo.value} value={algo.value} disabled={algo.value === algorithmB}>{algo.label}</option>
+                <option key={algo.value} value={algo.value} disabled={algo.value === algorithmB}>{labelOf(algo.value)}</option>
               ))}
             </select>
           </div>
@@ -161,7 +164,7 @@ const DevComparePage = () => {
               className="h-12 px-4 rounded-lg border border-outline dark:border-dark-outline bg-surface dark:bg-dark-surface text-on-surface dark:text-dark-on-surface font-ui-label text-ui-label focus:ring-2 focus:ring-secondary dark:focus:ring-dark-secondary cursor-pointer"
             >
               {ALGORITHMS.map((algo) => (
-                <option key={algo.value} value={algo.value} disabled={algo.value === algorithmA}>{algo.label}</option>
+                <option key={algo.value} value={algo.value} disabled={algo.value === algorithmA}>{labelOf(algo.value)}</option>
               ))}
             </select>
           </div>

@@ -1,7 +1,7 @@
 import { API_BASE_URL } from './config';
 import { ApiError } from './errors';
 import { validateSearchResponse, validateBenchmarkResults } from './validators';
-import type { SearchResponse, BenchmarkResults, SearchRequest, Lang } from '../types';
+import type { SearchResponse, BenchmarkResults, SearchRequest, Lang, Suggestion } from '../types';
 
 export { ApiError };
 
@@ -129,4 +129,16 @@ export const getSearchMethods = async (signal?: AbortSignal): Promise<SearchMeth
 
   const data = await response.json();
   return data.methods as SearchMethodInfo[];
+};
+
+// Autocomplete (GET /api/v1/suggestions): vocabulary words and chapter titles for a partial query.
+export const getSuggestions = async (query: string, signal?: AbortSignal): Promise<Suggestion[]> => {
+  const response = await fetch(`${API_V1}/suggestions?${new URLSearchParams({ q: query })}`, { signal });
+
+  if (!response.ok) {
+    throw new ApiError(`Suggestions fetch failed: ${response.status}`, response.status);
+  }
+
+  const data = await response.json();
+  return Array.isArray(data.suggestions) ? (data.suggestions as Suggestion[]) : [];
 };

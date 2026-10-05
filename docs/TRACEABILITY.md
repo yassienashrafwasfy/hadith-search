@@ -75,8 +75,12 @@ docs/CORPUS_DECISIONS.md decision n; `CLAUDE` = CLAUDE.md.
 | R-54 | Embeddings can live in a per-release table; a colour with a missing or incomplete release refuses to start; the default table is untouched | Covered |
 | R-55 | Promotion is staged, resumable and dry-runnable; only `--promote` releases it; `prune` keeps the newest 3 releases | Covered (`tools/promote_model.sh` itself and a real deploy by hand) |
 | R-56 | CI uses the self-hosted runner only for trusted events when it is online and idle, otherwise GitHub-hosted | Partly covered (selector tested; workflow never ran on GitHub) |
+| R-57 | `exact` matches the typed words (no stemming), all as whole words, ranked by occurrences then id, in EN and AR; `exact-semantic-rrf` fuses it with the dense ranking (Arabic, needs `dense_retrieval`) | Covered |
+| R-58 | `GET /api/v1/suggestions` returns at most 10 prefix and trigram matches, with problem+json errors and `_links`, and refuses bad input | Covered |
+| R-59 | `did_you_mean` is set only when `exact` or `bm25` finds nothing and a close term exists (similarity 0.4 or more), and is absent otherwise | Covered |
+| R-60 | The pg_trgm change is additive and `tools/migrate_trgm.sh` is idempotent and has a dry run | Covered (not run on a production-sized database) |
 
-Counts: 56 requirements, 49 fully covered, 4 partly covered (R-23, R-25, R-46, R-56), 3 with no automated test
+Counts: 60 requirements, 53 fully covered, 4 partly covered (R-23, R-25, R-46, R-56), 3 with no automated test
 (R-32, R-43, R-44). See "Requirements with no test".
 
 ## Search
@@ -562,6 +566,30 @@ Counts: 56 requirements, 49 fully covered, 4 partly covered (R-23, R-25, R-46, R
 - Tests: `tests/test_pick_runner.py` (fake runners API: idle, busy, offline, no runner, fork,
   untrusted event, missing token, HTTP errors, unreadable answer, unreachable API). The workflow
   itself was checked with actionlint only; no run happened on GitHub or on the self-hosted runner.
+
+### R-57 Exact search methods
+- Statement: `exact` lowercases the query, strips Arabic marks and tatweel, does not stem, needs every word as a whole word, ranks by occurrences then id (max 500). `exact-semantic-rrf` is Arabic only and needs `dense_retrieval`.
+- Source: HO 43.
+- Code: `backend/services/exact_text.py`, `backend/services/ranking.py`, `backend/services/retrieval.py`.
+- Tests: `tests/test_exact_text.py`, `tests/test_exact_search.py`, `tests/bdd/test_exact_search.py` (`docs/behaviours/exact-search.feature`).
+
+### R-58 Suggestions route
+- Statement: `GET /api/v1/suggestions?q=&limit=` returns up to 10 entries from terms and chapter titles; NUL bytes, long input and a bad limit give 422; metacharacters and SQL-looking text are treated as text.
+- Source: HO 43; HO 27 (no queue slot).
+- Code: `backend/routers/suggestions.py`, `backend/services/suggestions.py`, `backend/routers/root.py`.
+- Tests: `tests/test_suggestions.py`, `tests/security/test_suggestions.py`.
+
+### R-59 Did you mean
+- Statement: `did_you_mean` appears only for keyword methods with no results, replacing unknown words by the closest term at similarity 0.4 or more.
+- Source: HO 43.
+- Code: `backend/services/suggestions.py`, `backend/services/retrieval.py`, `backend/routers/search.py`.
+- Tests: `tests/test_suggestions.py`, `tests/test_exact_search.py`.
+
+### R-60 pg_trgm migration
+- Statement: the extension, the new table and the trigram indexes are additive; `tools/migrate_trgm.sh` uses `CREATE INDEX CONCURRENTLY IF NOT EXISTS` and supports `--dry-run`.
+- Source: HO 43; HO 21 (schema rule).
+- Code: `tools/migrate_trgm.sh`, `backend/database.py`, `backend/models/orm.py`, `backend/scripts/build_exact_text.py`.
+- Tests: `tests/test_migrate_trgm.py` (dry run, parity with the models' indexes, live run in a throwaway schema).
 
 ### R-28 Schema changes are additive
 - Statement: blue and green share one database; the app only adds tables and columns, so starting

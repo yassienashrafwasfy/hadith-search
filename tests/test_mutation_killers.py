@@ -65,7 +65,7 @@ def test_build_results_filters_skip_only_the_failing_row(_db_session):
 
 
 def test_build_results_default_top_k():
-    assert results.DEFAULT_TOP_K == 500
+    assert results.DEFAULT_TOP_K == 15
 
 
 def test_finite_drops_none_and_nan():

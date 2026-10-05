@@ -294,14 +294,16 @@ async def _labels_by_annotator(session, query_id: str) -> dict[int, dict[int, in
     assigned = await session.execute(
         select(Assignment.annotator_id).where(Assignment.query_id == query_id)
     )
-    labels = {}
-    for annotator_id in assigned.scalars().all():
-        result = await session.execute(
-            select(Annotation.hadith_id, Annotation.label).where(
-                Annotation.annotator_id == annotator_id, Annotation.query_id == query_id
-            )
+    labels = {annotator_id: {} for annotator_id in assigned.scalars().all()}
+    if not labels:
+        return labels
+    result = await session.execute(
+        select(Annotation.annotator_id, Annotation.hadith_id, Annotation.label).where(
+            Annotation.annotator_id.in_(list(labels)), Annotation.query_id == query_id
         )
-        labels[annotator_id] = {row.hadith_id: row.label for row in result}
+    )
+    for row in result:
+        labels[row.annotator_id][row.hadith_id] = row.label
     return labels
 
 

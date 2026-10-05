@@ -5,8 +5,8 @@ public slug to a ranking function and declares which feature flags it needs, so 
 feature gating and dependencies are declared in one place.
 """
 
-from collections.abc import Callable
-from dataclasses import dataclass
+from collections.abc import Callable, Collection
+from dataclasses import dataclass, replace
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from features import Features
 from models import SearchRequest, SearchResponse
 from services import ranking
-from services.results import build_results
+from services.results import allowed_ids, build_results
 
 RERANK_CANDIDATES = 50
 RERANK_TOP_K = 10
@@ -29,6 +29,7 @@ class SearchContext:
 
     session: Session
     model: Callable[[], Any]
+    restrict: Collection[int] | None = None  # ids that pass the filters; the dense systems use it
 
 
 @dataclass(frozen=True)
@@ -84,7 +85,9 @@ def _bm25_prf(ctx, query, lang):
 
 @_system("semantic-rerank", "dense_retrieval", **_DENSE)
 def _semantic_rerank(ctx, query, lang):
-    candidates = list(ranking.bm25(ctx.session, query, lang, limit=RERANK_CANDIDATES))
+    candidates = list(
+        ranking.bm25(ctx.session, query, lang, restrict=ctx.restrict, limit=RERANK_CANDIDATES)
+    )
     return ranking.semantic_rerank(
         ctx.session, query, lang, candidates, ctx.model(), top_k=RERANK_TOP_K
     )
@@ -92,12 +95,14 @@ def _semantic_rerank(ctx, query, lang):
 
 @_system("cosine-similarity", "dense_retrieval", **_DENSE)
 def _cosine(ctx, query, lang):
-    return ranking.cosine_search(ctx.session, query, lang, ctx.model(), top_k=COSINE_TOP_K)
+    return ranking.cosine_search(
+        ctx.session, query, lang, ctx.model(), top_k=COSINE_TOP_K, restrict=ctx.restrict
+    )
 
 
 @_system("semantic-rrf", "dense_retrieval", **_DENSE)
 def _semantic_rrf(ctx, query, lang):
-    return ranking.bm25_dense_rrf(ctx.session, query, lang, ctx.model())
+    return ranking.bm25_dense_rrf(ctx.session, query, lang, ctx.model(), restrict=ctx.restrict)
 
 
 def enabled_systems(features: Features) -> list[RetrievalSystem]:
@@ -105,6 +110,13 @@ def enabled_systems(features: Features) -> list[RetrievalSystem]:
 
 
 def run_search(system: RetrievalSystem, ctx: SearchContext, req: SearchRequest) -> SearchResponse:
+    # Filters apply before the dense systems cut to their top results, so a filtered search still
+    # returns a full page; the lexical systems rank everything and are filtered in build_results.
+    if "dense_retrieval" in system.requires:
+        allowed = allowed_ids(ctx.session, req.grade_filter, req.book_filter)
+        ctx = replace(ctx, restrict=allowed)
     raw = system.run(ctx, req.query, req.lang.value.upper())
-    results = build_results(ctx.session, raw, req.grade_filter, req.book_filter)
+    results = build_results(
+        ctx.session, raw, req.grade_filter, req.book_filter, allowed=ctx.restrict
+    )
     return SearchResponse(number_of_results=len(results), results=results)

@@ -169,12 +169,25 @@ def get_sync_session() -> Session:
     return Session(get_sync_engine(), expire_on_commit=False)
 
 
+# Tables whose indexes `init_schema*` adds to an existing database (create_all skips existing
+# tables). They are small and rarely written, so the build is quick and additive.
+INDEXED_LATER = ("annotations", "assignments", "kv_pairs")
+
+
+def _create_missing_indexes(conn) -> None:
+    for table in Base.metadata.sorted_tables:
+        if table.name in INDEXED_LATER:
+            for index in table.indexes:
+                index.create(conn, checkfirst=True)
+
+
 async def init_schema() -> None:
     """Enable pgvector and create any missing table (no migrations: existing tables are kept)."""
     async with get_async_engine().begin() as conn:
         await conn.execute(select(func.pg_advisory_xact_lock(SCHEMA_LOCK)))
         await conn.execute(_ENABLE_VECTOR)
         await conn.run_sync(Base.metadata.create_all)
+        await conn.run_sync(_create_missing_indexes)
 
 
 def init_schema_sync() -> None:
@@ -182,6 +195,7 @@ def init_schema_sync() -> None:
         conn.execute(select(func.pg_advisory_xact_lock(SCHEMA_LOCK)))
         conn.execute(_ENABLE_VECTOR)
         Base.metadata.create_all(conn)
+        _create_missing_indexes(conn)
 
 
 def drop_corpus_tables(bind=None) -> None:

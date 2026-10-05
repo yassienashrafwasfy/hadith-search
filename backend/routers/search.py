@@ -6,6 +6,7 @@ from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
+import timing
 from database import get_sync_session
 from features import Features
 from inputs import Text
@@ -69,6 +70,7 @@ def make_search_router(features: Features) -> APIRouter:
                     f"{', '.join(language.lower() for language in system.languages)}"
                 ),
             )
+        timings = timing.start()
         started = time.perf_counter()
         response = run_search(
             system,
@@ -93,7 +95,11 @@ def make_search_router(features: Features) -> APIRouter:
             request,
             body,
             max_age=CACHE_SECONDS,
-            headers={"Server-Timing": server_timing("search", elapsed_ms)},
+            headers={
+                "Server-Timing": ", ".join(
+                    [server_timing("search", elapsed_ms), *timing.metrics(timings)]
+                )
+            },
         )
 
     return router

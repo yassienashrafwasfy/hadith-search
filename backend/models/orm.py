@@ -194,7 +194,10 @@ class Annotator(Base):
 
 class Assignment(Base):
     __tablename__ = "assignments"
-    __table_args__ = (UniqueConstraint("annotator_id", "query_id"),)
+    __table_args__ = (
+        UniqueConstraint("annotator_id", "query_id"),
+        Index("ix_assignments_query_id", "query_id"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     annotator_id: Mapped[int] = mapped_column(ForeignKey("annotators.id", ondelete="CASCADE"))
@@ -204,7 +207,10 @@ class Assignment(Base):
 
 class Annotation(Base):
     __tablename__ = "annotations"
-    __table_args__ = (CheckConstraint("label IN (0, 1, 2)", name="ck_annotations_label"),)
+    __table_args__ = (
+        CheckConstraint("label IN (0, 1, 2)", name="ck_annotations_label"),
+        Index("ix_annotations_hadith_id", "hadith_id"),
+    )
 
     annotator_id: Mapped[int] = mapped_column(
         ForeignKey("annotators.id", ondelete="CASCADE"), primary_key=True
@@ -237,6 +243,7 @@ class KvPair(Base):
         CheckConstraint("status IN ('pending', 'verified', 'rejected')", name="ck_kv_pairs_status"),
         Index("idx_kv_pairs_status", "status"),
         Index("idx_kv_pairs_topic", "topic"),
+        Index("idx_kv_pairs_hadith_id", "hadith_id"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)

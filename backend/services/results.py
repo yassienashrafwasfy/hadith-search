@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from models import HADITH_CHAPTER, Chapter, Hadith, HadithSchema, SearchResult
 
-DEFAULT_TOP_K = 500
+DEFAULT_TOP_K = 15
 
 
 _COLUMNS = (
@@ -41,12 +41,25 @@ def _to_hadith(row) -> HadithSchema:
     )
 
 
+def allowed_ids(session: Session, grade_filter: str | None, book_filter: str | None):
+    """Ids of the hadiths that pass the filters, or None when there is no filter."""
+    if not (grade_filter or book_filter):
+        return None
+    stmt = select(Hadith.id)
+    if grade_filter:
+        stmt = stmt.where(Hadith.Normalized_Grade == grade_filter)
+    if book_filter:
+        stmt = stmt.where(Hadith.Book == book_filter)
+    return set(session.scalars(stmt))
+
+
 def build_results(
     session: Session,
     raw: dict[int, float],
     grade_filter: str | None = None,
     book_filter: str | None = None,
     top_k: int = DEFAULT_TOP_K,
+    allowed: set[int] | None = None,
 ) -> list[SearchResult]:
     """Rows for the ranked ids (best first), filtered by grade/book, cut to `top_k`.
 
@@ -55,13 +68,9 @@ def build_results(
     response uses (not the preprocessed texts).
     """
     ids = list(raw)
-    if grade_filter or book_filter:
-        stmt = select(Hadith.id).where(_in(ids))
-        if grade_filter:
-            stmt = stmt.where(Hadith.Normalized_Grade == grade_filter)
-        if book_filter:
-            stmt = stmt.where(Hadith.Book == book_filter)
-        allowed = set(session.scalars(stmt))
+    if allowed is None and (grade_filter or book_filter):
+        allowed = allowed_ids(session, grade_filter, book_filter)
+    if allowed is not None:
         ids = [hadith_id for hadith_id in ids if hadith_id in allowed]
     ids = ids[:top_k]
     stmt = select(*_COLUMNS).select_from(Hadith).outerjoin(Chapter, HADITH_CHAPTER).where(_in(ids))

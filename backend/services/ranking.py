@@ -6,13 +6,18 @@ the pickled index used, now evaluated in SQL (see `_bm25_statement`). `restrict`
 to a set of hadith ids; the evaluation pipeline uses it for its judged pool.
 """
 
+import threading
+import time
 from collections import Counter
 from collections.abc import Collection
+from functools import lru_cache
 from math import log
 
+import numpy as np
 from sqlalchemy import Float, Numeric, String, and_, cast, column, func, select, values
 from sqlalchemy.orm import Session
 
+import timing
 from models import HadithEmbedding, HadithLength, HadithPreprocessed, Posting, Term
 from models.embedding_sets import embedding_table
 from scripts.arabic_encoder import encoding_text
@@ -39,12 +44,37 @@ def _length_column(lang: str):
     return HadithLength.arabic_len if lang == "AR" else HadithLength.english_len
 
 
+STATS_TTL_SECONDS = 300
+_stats_cache: dict[tuple[str, str], tuple[float, tuple[int, float]]] = {}
+_stats_lock = threading.Lock()
+
+
+def clear_corpus_stats() -> None:
+    """Forget cached corpus statistics (after the corpus or the index tables were rewritten)."""
+    with _stats_lock:
+        _stats_cache.clear()
+
+
 def _corpus_stats(session: Session, lang: str) -> tuple[int, float]:
-    """(number of documents, average document length in the language)."""
+    """(number of documents, average document length in the language).
+
+    Cached per database for STATS_TTL_SECONDS: BM25 and TF-IDF ask for it up to three times per
+    search, and it only changes when the corpus is rebuilt (another process, so the time limit
+    is what keeps a running server current).
+    """
+    key = (session.get_bind().url.render_as_string(hide_password=True), lang)
+    now = time.monotonic()
+    with _stats_lock:
+        hit = _stats_cache.get(key)
+    if hit and hit[0] > now:
+        return hit[1]
     n_docs, average = session.execute(
         select(func.count(), func.avg(_length_column(lang))).select_from(HadithLength)
     ).one()
-    return n_docs, float(average or 0)
+    stats = (n_docs, float(average or 0))
+    with _stats_lock:
+        _stats_cache[key] = (now + STATS_TTL_SECONDS, stats)
+    return stats
 
 
 def _weights_table(weights: dict[str, float]):
@@ -237,19 +267,42 @@ def dense_search(
     return _scores(session, stmt)
 
 
+QUERY_CACHE_SIZE = 1024
+
+
+@lru_cache(maxsize=QUERY_CACHE_SIZE)
+def _encoded(model, text: str, release: str | None):
+    with timing.time_encode():
+        vector = model.encode([text])[0]
+    vector = np.array(vector, dtype=float)
+    vector.setflags(write=False)  # shared between requests
+    return vector
+
+
 def encode_query(model, query: str, lang: str):
-    """Unit vector for an Arabic query; the same cleanup the hadiths got when they were encoded."""
+    """Unit vector for an Arabic query; the same cleanup the hadiths got when they were encoded.
+
+    Repeated queries are served from a cache keyed by the encoder object and the embeddings
+    release, so switching the model or the release never returns an old vector.
+    """
     if lang != "AR":
         raise ValueError("Dense search supports Arabic only (the sentence encoder is Arabic)")
-    return model.encode([encoding_text(query)])[0]
+    return _encoded(model, encoding_text(query), get_settings().embeddings_release)
 
 
 def _ranks(scores: Scores) -> dict[int, int]:
     return {hadith_id: rank for rank, hadith_id in enumerate(scores, 1)}
 
 
-def cosine_search(session: Session, query: str, lang: str, model, top_k: int) -> Scores:
-    return dense_search(session, encode_query(model, query, lang), lang, top_k)
+def cosine_search(
+    session: Session,
+    query: str,
+    lang: str,
+    model,
+    top_k: int,
+    restrict: Collection[int] | None = None,
+) -> Scores:
+    return dense_search(session, encode_query(model, query, lang), lang, top_k, restrict=restrict)
 
 
 def semantic_rerank(

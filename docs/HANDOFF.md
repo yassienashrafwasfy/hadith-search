@@ -917,6 +917,16 @@ Frontend only. No backend, database, nginx or API change, nothing committed.
 
 **Load sweep with the queue (rig `hadith-prof`, 2 CPU / 4 GB, no nginx, 2026-10-05, one run each):** 40 users 0 failures p99 1.1 s; 60 users 0 failures p99 1.8 s; 80 users 0 failures p99 2.3 s (about 26 rps); 100 users 4-6% refused, p99 3.2 s; 150 users 51% refused; 200 users 68%; 300 users 80%; 400 users 85%, p99 4.7 s. Every failure above 100 users was a 503 from the queue; no OOM, memory about 1.5 GB. The rig ran the code from before this item (queue present, default pool).
 
+**Database layer, second part (2026-10-05), from an audit on synthetic data at 33K hadiths (HANDOFF figures are the real-corpus ones):**
+- **Server-Timing now splits the time:** `search;dur=..., db;dur=..;desc="N statements", encode;dur=..` (`backend/timing.py`, SQLAlchemy cursor events). `encode` is absent for lexical methods and for repeated queries.
+- **Corpus statistics are cached** for 5 minutes per database and language (`ranking._corpus_stats`; BM25, TF-IDF and PRF asked for them up to three times per search, 3.8 ms each). A rebuild by `build_all` runs in another process, so the time limit is what refreshes a running server; call `ranking.clear_corpus_stats()` in the same process.
+- **Query vectors are cached** (1,024 entries, keyed by encoder object, cleaned text and `EMBEDDINGS_RELEASE`), so a repeated Arabic query skips the encoder (about 27 ms).
+- **Three indexes added:** `annotations(hadith_id)`, `kv_pairs(hadith_id)`, `assignments(query_id)`. `create_all` skips existing tables, so `init_schema` and `init_schema_sync` now create missing indexes on those three small tables (`database.INDEXED_LATER`); additive, so an old release still runs.
+- **N+1 removed:** `_labels_by_annotator` reads every annotator's labels in one query (two statements in total).
+- **Default page is 15 results** (`results.DEFAULT_TOP_K`, was 500). Loading the texts of 500 rows was about half the database time. The dense methods still produce their own lists (cosine 20, rerank 10, RRF 50) and are cut to 15.
+- **Dense filters apply before the cut.** `semantic-rerank`, `cosine-similarity` and `semantic-rrf` used to filter by grade or book after taking their top results, so a filtered search could return fewer than a page (4 instead of 10 in the audit). The allowed ids now go in as `restrict`. Results of filtered dense searches change; re-run evaluations that use filters.
+- **Not done, by decision:** no vector index (exact search is about 5.6 ms at 33K x 64; HNSW or IVFFlat would save under 5 ms and lose exactness), no whole-response cache, no `pg_stat_statements`. Findings left open: `hybrid_prf` is not registered as a method; unrestricted BM25 + TF-IDF hybrids aggregate every matching hadith in Python; `ix_hadiths_Book` and `ix_hadiths_Normalized_Grade` are unused by the search path (check `pg_stat_user_indexes` on the live database before dropping).
+
 ## Still open
 
 - Nothing has been pushed and no PR exists. Everything is on local branches.

@@ -49,8 +49,18 @@ def _hermetic_settings(monkeypatch):
     """No repo `.env` in tests, and a fresh settings object for every test."""
     monkeypatch.setitem(Settings.model_config, "env_file", None)
     get_settings.cache_clear()
+    _clear_ranking_caches()
     yield
     get_settings.cache_clear()
+    _clear_ranking_caches()
+
+
+def _clear_ranking_caches():
+    """Corpus statistics and query vectors are cached per process; every test builds its own."""
+    from services import ranking
+
+    ranking.clear_corpus_stats()
+    ranking._encoded.cache_clear()
 
 
 TEST_DATABASE_URL = os.environ.get(

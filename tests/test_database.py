@@ -70,6 +70,19 @@ def test_create_database_roundtrip(_patched_paths):
     assert database.read_hadiths_df()["id"].tolist() == [1, 2]
 
 
+def test_rebuilding_the_corpus_keeps_the_hadith_foreign_keys_in_create_table(_patched_paths):
+    from sqlalchemy.dialects import postgresql
+    from sqlalchemy.schema import CreateTable
+
+    from models import Annotation, KvPair
+    from scripts import data_creation
+
+    data_creation.create_database(_corpus_frame([1, 2]))
+    for model in (Annotation, KvPair):
+        ddl = str(CreateTable(model.__table__).compile(dialect=postgresql.dialect()))
+        assert "REFERENCES hadiths (id)" in ddl
+
+
 def test_build_all_checks(_patched_paths):
     from scripts import build_all
 

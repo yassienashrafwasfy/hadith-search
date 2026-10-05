@@ -226,7 +226,9 @@ def restore_hadith_references(bind) -> None:
     points at a hadith id the new corpus does not have.
     """
     for constraint in _HADITH_REFERENCES:
-        bind.execute(AddConstraint(constraint))
+        # isolate_from_table=False: the default marks the shared constraint object so that table
+        # creation later in this process leaves it out, which broke every schema made afterwards
+        bind.execute(AddConstraint(constraint, isolate_from_table=False))
 
 
 def insert_hadith_rows(bind, rows: list[dict]) -> None:

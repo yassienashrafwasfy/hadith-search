@@ -47,7 +47,11 @@ RUN python -c "import nltk; \
 
 # Pre-download camel_tools MLE data (needed for Arabic preprocessing at search time).
 # Installed at build time because the non-root runtime user cannot write to CAMELTOOLS_DATA.
-RUN camel_data -i disambig-mle-calima-msa-r13
+# The download can stall without failing, so each try has a time limit and is repeated.
+RUN for try in 1 2 3 4 5; do \
+      timeout 180 camel_data -i disambig-mle-calima-msa-r13 && exit 0; \
+      echo "camel_data try $try failed or timed out"; sleep 5; \
+    done; exit 1
 
 # ===== Stage 3: Runtime (no compilers, no git, non-root) =====
 FROM python:3.12-slim AS runtime

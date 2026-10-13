@@ -168,7 +168,9 @@ async def test_labels_are_read_in_one_query_for_all_annotators(_db_session):
         assert await _labels_by_annotator(session, "no-such-query") == {}
 
 
-@pytest.mark.parametrize("method", ["cosine-similarity", "semantic-rerank", "semantic-rrf"])
+@pytest.mark.parametrize(
+    "method", ["cosine-similarity", "semantic-rerank", "semantic-rrf", "semantic-rrf-rerank"]
+)
 async def test_dense_methods_filter_before_they_cut(
     _search_index, _mock_preprocess, _fake_model, monkeypatch, method
 ):
@@ -176,9 +178,12 @@ async def test_dense_methods_filter_before_they_cut(
     filter for Hasan must still return hadith 2, not nothing."""
     monkeypatch.setattr(retrieval, "COSINE_TOP_K", 1)
     monkeypatch.setattr(retrieval, "RERANK_TOP_K", 1)
+    monkeypatch.setattr(retrieval, "CROSS_TOP_K", 1)
     request = SearchRequest(query="صيام", lang="ar", grade_filter="Hasan")
     with database.get_sync_session() as session:
-        ctx = retrieval.SearchContext(session=session, model=lambda: _fake_model)
+        ctx = retrieval.SearchContext(
+            session=session, model=lambda: _fake_model, rerank=lambda q, texts: [1.0] * len(texts)
+        )
         response = retrieval.run_search(retrieval.SYSTEMS[method], ctx, request)
     assert [r.hadith.hadith_id for r in response.results] == [2]
 

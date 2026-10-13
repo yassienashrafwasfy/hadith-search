@@ -28,7 +28,8 @@ def test_router_groups_toggle_independently():
 def test_dense_flag_gates_endpoints():
     lexical = {s.slug for s in enabled_systems(Features(dense_retrieval=False))}
     assert lexical == {"term-overlap", "tfidf", "bm25", "bm25-tf-idf", "bm25-prf"}
-    assert {s.slug for s in enabled_systems(Features())} == set(SYSTEMS)
+    assert {s.slug for s in enabled_systems(Features())} == set(SYSTEMS) - {"semantic-rrf-rerank"}
+    assert {s.slug for s in enabled_systems(Features(cross_encoder=True))} == set(SYSTEMS)
     assert enabled_systems(Features(search=False)) == []
 
 
@@ -58,6 +59,7 @@ async def test_spa_fallback(tmp_path):
 
 async def test_lifespan_initialises_db_and_preloads(_patched_paths, monkeypatch, capsys):
     preloaded = []
+    monkeypatch.setattr("main.resolve_static_dir", lambda *_: None)
     monkeypatch.setattr("main.preload_resources", lambda f: preloaded.append(f))
     features = Features(search=False, benchmark=False)
     app = create_app(features, static_dir="")

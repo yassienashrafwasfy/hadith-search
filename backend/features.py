@@ -34,6 +34,7 @@ class Features:
     search: bool = True
     dense_retrieval: bool = True  # Arabic embeddings + ONNX encoder (semantic endpoints)
     eager_model: bool = False  # load the encoder at startup instead of on first request
+    cross_encoder: bool = False  # Arabic reranker (0.6B, torch at query time): semantic-rrf-rerank
 
     def is_enabled(self, name: str) -> bool:
         return bool(getattr(self, name))

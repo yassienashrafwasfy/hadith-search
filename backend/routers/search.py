@@ -14,6 +14,7 @@ from limiter import search_slot
 from models import Lang, SearchRequest
 from rest import API_PREFIX, EncodedJson, href, json_response, link, server_timing
 from services.retrieval import SearchContext, enabled_systems, run_search
+from settings import get_settings
 
 CACHE_SECONDS = 300  # results only change when the indices are rebuilt
 
@@ -21,9 +22,15 @@ CACHE_SECONDS = 300  # results only change when the indices are rebuilt
 def get_search_context() -> Iterator[SearchContext]:
     """FastAPI dependency: one database session per request. Override in tests to fake the model."""
     from scripts import get_model
+    from services.reranker import HADITH_MAX_CHARS, rerank_texts
+
+    name = get_settings().reranker_model
+
+    def rerank(query: str, texts: list[str]) -> list[float]:
+        return rerank_texts(name, query, texts, HADITH_MAX_CHARS)
 
     with get_sync_session() as session:
-        yield SearchContext(session=session, model=get_model)
+        yield SearchContext(session=session, model=get_model, rerank=rerank)
 
 
 def make_search_router(features: Features) -> APIRouter:

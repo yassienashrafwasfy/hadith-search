@@ -178,6 +178,7 @@ hadith-search/
 | **Cosine Similarity** | Dense retrieval using vector embeddings and cosine similarity |
 | **Semantic Rerank** | BM25 candidates reranked by cosine similarity |
 | **Semantic RRF** | Reciprocal Rank Fusion combining sparse (BM25) and dense (cosine) results |
+| **Semantic RRF + Reranker** | The top 30 of Semantic RRF re-scored by a cross-encoder (ARA-Reranker-V1) that reads the query and the Arabic matn together; Arabic only, opt-in with `FEATURE_CROSS_ENCODER=true` (needs torch, about 2.4 GB of RAM) |
 
 ### Suggestions and "did you mean"
 

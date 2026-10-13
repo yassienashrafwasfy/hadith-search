@@ -14,10 +14,16 @@ SEARCH = "/api/v1/searches"
         "semantic-rerank",
         "cosine-similarity",
         "semantic-rrf",
+        "semantic-rrf-rerank",
     ],
 )
 async def test_every_search_method_returns_results(_search_client, method):
-    dense = method in {"semantic-rerank", "cosine-similarity", "semantic-rrf"}
+    dense = method in {
+        "semantic-rerank",
+        "cosine-similarity",
+        "semantic-rrf",
+        "semantic-rrf-rerank",
+    }
     params = {"q": "صلاه" if dense else "prayer", "method": method}
     if dense:
         params["lang"] = "ar"
@@ -106,7 +112,9 @@ async def test_search_methods_list_languages(_search_client):
     assert methods["bm25"]["languages"] == ["en", "ar"]
 
 
-@pytest.mark.parametrize("method", ["semantic-rerank", "cosine-similarity", "semantic-rrf"])
+@pytest.mark.parametrize(
+    "method", ["semantic-rerank", "cosine-similarity", "semantic-rrf", "semantic-rrf-rerank"]
+)
 async def test_dense_methods_reject_english(_search_client, method):
     res = await _search_client.get(SEARCH, params={"q": "prayer", "method": method, "lang": "en"})
     assert res.status_code == 422

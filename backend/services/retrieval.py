@@ -20,6 +20,8 @@ from services.suggestions import did_you_mean
 RERANK_CANDIDATES = 50
 RERANK_TOP_K = 10
 COSINE_TOP_K = 20
+CROSS_CANDIDATES = 30  # semantic-rrf results the cross-encoder reads
+CROSS_TOP_K = 15
 
 Scores = dict[int, float]
 
@@ -31,6 +33,7 @@ class SearchContext:
     session: Session
     model: Callable[[], Any]
     restrict: Collection[int] | None = None  # ids that pass the filters; the dense systems use it
+    rerank: Callable[[str, list[str]], list[float]] | None = None  # cross-encoder scores
 
 
 @dataclass(frozen=True)
@@ -107,6 +110,14 @@ def _cosine(ctx, query, lang):
 @_system("semantic-rrf", "dense_retrieval", **_DENSE)
 def _semantic_rrf(ctx, query, lang):
     return ranking.bm25_dense_rrf(ctx.session, query, lang, ctx.model(), restrict=ctx.restrict)
+
+
+@_system("semantic-rrf-rerank", "dense_retrieval", "cross_encoder", **_DENSE)
+def _semantic_rrf_rerank(ctx, query, lang):
+    candidates = ranking.bm25_dense_rrf(
+        ctx.session, query, lang, ctx.model(), top_k=CROSS_CANDIDATES, restrict=ctx.restrict
+    )
+    return ranking.cross_rerank(ctx.session, query, list(candidates), ctx.rerank, CROSS_TOP_K)
 
 
 def enabled_systems(features: Features) -> list[RetrievalSystem]:

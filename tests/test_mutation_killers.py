@@ -220,6 +220,7 @@ class TestRetrievalService:
             "semantic-rerank": ("dense_retrieval",),
             "cosine-similarity": ("dense_retrieval",),
             "semantic-rrf": ("dense_retrieval",),
+            "semantic-rrf-rerank": ("dense_retrieval", "cross_encoder"),
         }
         assert all(SYSTEMS[s].slug == s for s in SYSTEMS)
 

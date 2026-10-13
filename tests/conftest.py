@@ -397,6 +397,11 @@ async def _search_index(_patched_paths, _hadiths_df, _embeddings):
         session.commit()
 
 
+def _fake_rerank(query: str, texts: list[str]) -> list[float]:
+    """A cross-encoder stand-in: the longer matn scores higher."""
+    return [float(len(text)) for text in texts]
+
+
 @pytest_asyncio.fixture
 async def _search_client(_search_index, _fake_model, _mock_preprocess):
     """App with every search endpoint over the test schema; the model is a fake."""
@@ -410,13 +415,15 @@ async def _search_client(_search_index, _fake_model, _mock_preprocess):
 
     def context() -> Iterator[SearchContext]:
         with database.get_sync_session() as session:
-            yield SearchContext(session=session, model=lambda: _fake_model)
+            yield SearchContext(session=session, model=lambda: _fake_model, rerank=_fake_rerank)
 
     from rest import install_error_handlers
 
     app = FastAPI()
     install_error_handlers(app)
-    app.include_router(make_search_router(Features(search=True, dense_retrieval=True)))
+    app.include_router(
+        make_search_router(Features(search=True, dense_retrieval=True, cross_encoder=True))
+    )
     app.include_router(suggestions_router)
     app.dependency_overrides[get_search_context] = context
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:

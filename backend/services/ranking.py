@@ -18,7 +18,7 @@ from sqlalchemy import Float, Numeric, String, and_, cast, column, func, select,
 from sqlalchemy.orm import Session
 
 import timing
-from models import HadithEmbedding, HadithLength, HadithPreprocessed, Posting, Term
+from models import Hadith, HadithEmbedding, HadithLength, HadithPreprocessed, Posting, Term
 from models.embedding_sets import embedding_table
 from scripts.arabic_encoder import encoding_text
 from scripts.preprocess import preprocess_arabic, preprocess_english
@@ -339,3 +339,23 @@ def bm25_dense_rrf(
     """Reciprocal rank fusion of the BM25 and dense rankings."""
     fused = _fused_candidates(session, query, lang, model, candidate_k, restrict)
     return dict(list(fused.items())[:top_k])
+
+
+def cross_rerank(
+    session: Session, query: str, candidate_ids: list[int], rerank, top_k: int
+) -> Scores:
+    """Order candidates by a cross-encoder reading the question and the Arabic matn together.
+
+    `rerank(query, texts)` returns one score per text. A candidate without Arabic matn cannot be
+    scored and is left out.
+    """
+    rows = session.execute(
+        select(Hadith.id, Hadith.Arabic_Matn).where(Hadith.id.in_(candidate_ids))
+    ).all()
+    texts = {hadith_id: matn for hadith_id, matn in rows if matn}
+    ids = [i for i in candidate_ids if i in texts]
+    if not ids:
+        return {}
+    scores = rerank(query, [texts[i] for i in ids])
+    ranked = sorted(zip(ids, scores), key=lambda pair: pair[1], reverse=True)
+    return dict(ranked[:top_k])

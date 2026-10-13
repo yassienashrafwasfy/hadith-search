@@ -35,6 +35,8 @@ from sqlalchemy.pool import NullPool
 
 from settings import Settings, get_settings
 
+pytest_plugins = ["quran_support"]  # fixtures of tests/quran (a conftest there would clash)
+
 # pg_stat_activity as a table, so the rollback helper needs no raw SQL
 PgStatActivity = Table(
     "pg_stat_activity",

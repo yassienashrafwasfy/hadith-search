@@ -53,6 +53,8 @@ def make_root_router(features: Features) -> APIRouter:
             links["kv-pairs"] = link(href("kv-pairs"))
         if features.benchmark:
             links["benchmark"] = link(href("benchmark"))
+        if features.quran_rag:
+            links["answers"] = link(href("answers"))
         return {"_links": links}
 
     return router

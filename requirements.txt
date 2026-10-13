@@ -3,6 +3,14 @@ aiofiles==25.1.0
 aiohappyeyeballs==2.6.1
 aiohttp==3.14.3
 aiosignal==1.4.0
+jsonpatch==1.33
+jsonpointer==3.2.0
+langchain-core==1.6.7
+langgraph-checkpoint==4.2.0
+langgraph-prebuilt==1.1.0
+langgraph-sdk==0.4.6
+langgraph==1.2.14
+langsmith==0.14.4
 psycopg[binary]==3.3.6
 pgvector==0.5.0
 alyahmor==0.2
@@ -74,6 +82,7 @@ python-dateutil==2.9.0.post0
 python-dotenv==1.2.2
 PyYAML==6.0.3
 regex==2026.2.28
+requests-toolbelt==1.0.0
 requests==2.33.0
 rich==14.3.3
 safetensors==0.8.0
@@ -89,6 +98,7 @@ starlette==1.3.1
 sympy==1.14.0
 tabulate==0.10.0
 Tashaphyne==0.3.6
+tenacity==9.2.1
 threadpoolctl==3.6.0
 tokenizers==0.23.2
 torch==2.11.0
@@ -99,6 +109,7 @@ typing-inspection==0.4.2
 typing_extensions==4.15.0
 tzdata==2025.3
 urllib3==2.8.0
+uuid-utils==0.17.1
 uvicorn==0.41.0
 xxhash==3.6.0
 yarl==1.23.0
@@ -108,3 +119,4 @@ onnxruntime==1.30.0
 onnxscript==0.7.2
 ml-dtypes==0.6.0
 flatbuffers==25.12.19
+zstandard==0.25.0

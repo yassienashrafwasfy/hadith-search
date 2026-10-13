@@ -27,6 +27,11 @@ x-app: &app
     # default model folder and the default hadith_embeddings table
     - ARABIC_MODEL_DIR=${ARABIC_MODEL_DIR:-}
     - EMBEDDINGS_RELEASE=${EMBEDDINGS_RELEASE:-}
+    # Quran answers (item 45): off unless FEATURE_QURAN_RAG=true; the llama-server services below
+    # run under the "quran" profile (docker compose --profile quran up -d)
+    - FEATURE_QURAN_RAG=${FEATURE_QURAN_RAG:-false}
+    - QURAN_CONTROLLER_URL=http://llama-controller:8080
+    - QURAN_ANSWERER_URL=http://llama-answerer:8080
   volumes:
     # Query lists, qrels and evaluation outputs (the corpus, index and embeddings are in postgres)
     - hadith-data:/app/backend/data
@@ -47,6 +52,31 @@ services:
     image: ${GREEN_IMAGE:-hadith-search:green}
     container_name: hadith-green
     profiles: ["green"]
+
+  # Quran RAG: two llama.cpp servers (int4 GGUF files in the quran-models volume, CPU only). They are
+  # not part of the app image and not published; the app calls them over HTTP. Put the files at
+  # /models/controller.gguf and /models/answerer.gguf (see docs/HANDOFF.md item 45).
+  llama-controller:
+    image: ghcr.io/ggml-org/llama.cpp:server
+    container_name: hadith-llama-controller
+    profiles: ["quran"]
+    command: ["-m", "/models/controller.gguf", "--host", "0.0.0.0", "--port", "8080", "-t", "4", "-c", "2048"]
+    volumes:
+      - quran-models:/models:ro
+    cpus: 4
+    mem_limit: 1g
+    restart: unless-stopped
+
+  llama-answerer:
+    image: ghcr.io/ggml-org/llama.cpp:server
+    container_name: hadith-llama-answerer
+    profiles: ["quran"]
+    command: ["-m", "/models/answerer.gguf", "--host", "0.0.0.0", "--port", "8080", "-t", "8", "-c", "4096"]
+    volumes:
+      - quran-models:/models:ro
+    cpus: 8
+    mem_limit: 2g
+    restart: unless-stopped
 
   # Corpus, BM25 index, embeddings and annotation data. Not published to the host.
   postgres:
@@ -82,3 +112,4 @@ services:
 volumes:
   hadith-data:
   postgres-data:
+  quran-models:

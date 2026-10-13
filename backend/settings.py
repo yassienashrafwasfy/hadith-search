@@ -79,8 +79,25 @@ class Settings(BaseSettings):
     encoder_batch_wait_ms: float = Field(default=DEFAULT_ENCODER_BATCH_WAIT_MS, ge=0)
     encoder_batch_max: int = Field(default=DEFAULT_ENCODER_BATCH_MAX, gt=0)
 
+    # Quran RAG (backend/quran): two llama-server processes, the answer queue and the web tool
+    quran_controller_url: str = "http://localhost:8081"
+    quran_answerer_url: str = "http://localhost:8082"
+    quran_llm_timeout_seconds: float = Field(default=180.0, gt=0)  # a 3B model on CPU
+    quran_max_concurrent: int = Field(default=1, gt=0)
+    quran_queue_size: int = Field(default=4, ge=0)
+    quran_queue_timeout_seconds: float = Field(default=30.0, gt=0)
+    quran_max_loops: int = Field(default=2, ge=0, le=5)
+    # Off by default: the search pages of the allow-listed sites return page chrome (quran.com is
+    # rendered by JavaScript), which the agent would cite as an answer. HANDOFF item 45.
+    quran_web_enabled: bool = False
+    # Cross-encoder over the top retrieval candidates (HANDOFF item 45). Off by default: it needs
+    # sentence-transformers + torch at query time and a 0.6B model (about 2.4 GB of RAM).
+    quran_rerank_enabled: bool = False
     # Also used by the hadith method semantic-rrf-rerank (FEATURE_CROSS_ENCODER).
     reranker_model: str = "Omartificial-Intelligence-Space/ARA-Reranker-V1"
+    quran_rerank_candidates: int = Field(default=12, gt=0, le=50)
+    # 0 keeps every candidate and only reorders; raise it once the logged scores are calibrated.
+    quran_rerank_min_score: float = Field(default=0.0, ge=0, le=1)
 
     @field_validator("embeddings_release")
     @classmethod

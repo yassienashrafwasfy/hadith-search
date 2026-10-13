@@ -80,6 +80,7 @@ def _include_feature_routers(app: FastAPI, features: Features) -> None:
         benchmark_router,
         hadiths_router,
         kv_pairs_router,
+        make_quran_router,
         make_root_router,
         make_search_router,
         suggestions_router,
@@ -97,6 +98,8 @@ def _include_feature_routers(app: FastAPI, features: Features) -> None:
         app.include_router(suggestions_router)
     if features.benchmark:
         app.include_router(benchmark_router)
+    if features.quran_rag:
+        app.include_router(make_quran_router(features))
 
 
 def _mount_frontend(app: FastAPI, static_dir: str) -> None:
@@ -156,6 +159,12 @@ def create_app(
         settings.search_queue_size,
         settings.search_queue_timeout_seconds,
     )
+    if features.quran_rag:
+        app.state.quran_limiter = SearchLimiter(
+            settings.quran_max_concurrent,
+            settings.quran_queue_size,
+            settings.quran_queue_timeout_seconds,
+        )
     app.add_middleware(
         CORSMiddleware,
         allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],

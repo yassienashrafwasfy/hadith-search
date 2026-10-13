@@ -1,0 +1,48 @@
+flowchart LR
+  subgraph Offline["Offline: build and train"]
+    Tanzil["Tanzil text CC BY 3.0<br/>unchanged"]
+    Tafsir["tafsir dataset CC BY 4.0<br/>Muyassar, Saadi, Ibn Kathir"]
+    Hadith["hadith corpus<br/>33k, Arabic matn"]
+    Chunk["semantic chunking<br/>cosine drop between ayat"]
+    Embed["Fada embeddings<br/>64-dim, no prefix"]
+    Sum["optional LLM summaries<br/>routing only"]
+    Tanzil --> Chunk
+    Tafsir --> Chunk
+    Chunk --> Embed --> Sum
+    Hadith --> Embed
+  end
+
+  subgraph Train["Colab fine-tune (notebooks/fada_quran_finetune.ipynb)"]
+    Pairs["pairs: AQQAC, ayah to tafsir,<br/>chapter title to hadith,<br/>Qwen3 synthetic questions"]
+    Neg["hard negatives mined with base Fada"]
+    FT["Matryoshka + Cached MNRL, Lion<br/>20 percent Arab3M replay"]
+    Eval["held-out: QRCD questions,<br/>hadith chapters, STS check"]
+    Gate{"ship gate"}
+    Pairs --> Neg --> FT --> Eval --> Gate
+  end
+  Gate -->|"pass: export_onnx, rebuild embeddings"| Embed
+
+  subgraph Store["PostgreSQL + pgvector"]
+    PG[("schema per source<br/>ayah, passage, surah nodes<br/>+ hadith, BM25 index, embeddings")]
+  end
+  Embed --> PG
+  Sum --> PG
+
+  subgraph Serve["Online: FastAPI app"]
+    HS["hadith search<br/>BM25, TF-IDF, cosine, RRF, rerank"]
+    QR["Quran agent (LangGraph)"]
+    Fada["Fada ONNX encoder<br/>CPU, no torch"]
+  end
+  PG <--> HS
+  PG <--> QR
+  Fada --> HS
+  Fada --> QR
+
+  subgraph LLMs["llama.cpp servers (CPU, int4 GGUF)"]
+    Ctrl["controller :8081<br/>AISA-AR-FunctionCall 270M<br/>routing + filters"]
+    Writer["writer :8082<br/>Falcon-H1-3B-Instruct Q4_K_M<br/>writes the cited answer"]
+  end
+  QR --> Ctrl
+  QR --> Writer
+  QR -.->|"off by default"| Web["allow-listed web<br/>quran.com, altafsir.com,<br/>qurancomplex.gov.sa, tafsir.net"]
+  User(["browser: /user/quran, /user/search"]) --> Nginx["nginx<br/>rate limits"] --> Serve

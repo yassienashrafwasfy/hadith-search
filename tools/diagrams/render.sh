@@ -3,6 +3,7 @@
 # directory (nothing is added to the repo's package.json).
 #   tools/diagrams/render.sh schema       docs/diagrams/schema.dbml -> schema.svg (and a dbml2sql check)
 #   tools/diagrams/render.sh components   components.mmd -> components.excalidraw + components.svg
+#   tools/diagrams/render.sh ai           quran_agent, quran_retrieval, ai_overview .mmd -> .svg (mermaid-cli)
 # components needs a Chromium: set CHROME to a chrome/chrome-headless-shell binary
 # (for example the one Playwright caches under ~/.cache/ms-playwright).
 set -euo pipefail
@@ -27,5 +28,14 @@ components)
       "$(realpath "$docs")/components.excalidraw" "$(realpath "$docs")/components.svg")
   rm -rf "$tmp"
   ;;
-*) echo "usage: $0 schema|components" >&2; exit 2 ;;
+ai)
+  : "${CHROME:?set CHROME to a Chromium binary}"
+  cfg="$(mktemp)"
+  printf '{"executablePath": "%s", "args": ["--no-sandbox", "--disable-setuid-sandbox"]}\n' "$CHROME" >"$cfg"
+  for name in quran_agent quran_retrieval ai_overview; do
+    npx -y @mermaid-js/mermaid-cli -i "$docs/$name.mmd" -o "$docs/$name.svg" -p "$cfg" -b white -q
+  done
+  rm -f "$cfg"
+  ;;
+*) echo "usage: $0 schema|components|ai" >&2; exit 2 ;;
 esac

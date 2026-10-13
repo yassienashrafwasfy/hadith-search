@@ -1,0 +1,38 @@
+flowchart TD
+  Question["question"] --> Rules{"rule routing (router.py)"}
+  Rules -->|"names a tafsir author"| T1["that tafsir source"]
+  Rules -->|"asks for tafsir or meaning"| T2["tafsir_muyassar"]
+  Rules -->|"no rule matches"| Ctrl["controller LLM<br/>AISA-AR-FunctionCall 270M<br/>JSON schema output"]
+  Ctrl --> Src["chosen source"]
+  T1 --> Src
+  T2 --> Src
+  Question --> SQ["self-query (selfquery.py)<br/>surah, ayah, juz, Meccan/Medinan, author"]
+  Question --> Surah["surah named as 'سورة X' (surahs.py)<br/>surah filter, no keyword gate"]
+  SQ --> Filters["validated Filters<br/>invalid fields are dropped"]
+  Surah --> Filters
+
+  Question --> Clean["encoding_text<br/>diacritics removed"]
+  Clean --> Enc["Fada encoder (ONNX)<br/>64-dim query vector"]
+
+  Src --> Kind{"tafsir source?"}
+  Kind -->|"yes"| Anchor["find the named verse in the Quran source"]
+  Anchor --> Passage["get_passage(surah, ayah)<br/>that verse's tafsir"]
+  Kind -->|"no"| Search
+  Anchor -->|"no verse found"| Search
+
+  subgraph Search["search_source (retrieval.py)"]
+    Dense["dense: pgvector cosine<br/>filters before top-k"]
+    Gate["distinctive-word gate<br/>rare query words must occur in the text"]
+    Kw["keyword: whole-word regex<br/>with Arabic prefixes and suffixes"]
+    RRF["fuse by RRF, k = 60"]
+    Gate --> Kw
+    Dense --> RRF
+    Kw --> RRF
+    Gate -->|"no rare word"| None["no result, so fallback"]
+  end
+  Enc --> Dense
+  Filters --> Search
+  RRF --> Merge["auto_merge<br/>siblings over 50% become the parent passage"]
+  Passage --> Evidence
+  Merge --> Evidence["evidence e1..en<br/>original text, never the summary"]
+  Evidence --> Agent["draft step of the agent"]

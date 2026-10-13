@@ -1,0 +1,42 @@
+flowchart TD
+  Q(["POST /api/v1/answers<br/>question"]) --> Slot["quran_slot queue<br/>1 running, 4 waiting, 503 beyond"]
+  Slot --> Route
+
+  subgraph Graph["LangGraph agent (quran/agent.py)"]
+    Route["route<br/>pick a source + self-query filters"]
+    Retrieve["retrieve<br/>hybrid search + auto-merge"]
+    Draft["draft<br/>writer LLM writes a cited answer"]
+    Critique{"critique<br/>check_draft + no_info"}
+    Revise["revise<br/>loops + 1, feedback to the writer"]
+    Web["web_search<br/>allow-listed sites, off by default"]
+    Finalize["finalize<br/>render verbatim passages"]
+    Fallback["fallback<br/>fixed sorry sentence"]
+
+    Route -->|"LLMError"| Fallback
+    Route --> Retrieve
+    Retrieve -->|"evidence"| Draft
+    Retrieve -->|"none, web on"| Web
+    Retrieve -->|"none, web off"| Fallback
+    Draft -->|"LLMError"| Fallback
+    Draft --> Critique
+    Critique -->|"valid"| Finalize
+    Critique -->|"invalid, under cap"| Revise
+    Revise --> Draft
+    Critique -->|"stuck or no info, web on"| Web
+    Critique -->|"no info, web off"| Fallback
+    Critique -->|"at cap, has evidence"| Finalize
+    Web -->|"passages"| Draft
+    Web -->|"nothing"| Fallback
+  end
+
+  Finalize --> Out(["Answer: written text + verbatim citations + trace"])
+  Fallback --> Sorry(["عذرًا، لا تتوفر لدي معلومات كافية"])
+
+  subgraph Checks["What code enforces (quran/grounding.py)"]
+    C1["only passages shown to the writer can be cited"]
+    C2["sentences with no valid [e1] marker are dropped"]
+    C3["text must be mostly Arabic"]
+    C4["a quoted verse must exist in the evidence"]
+    C5["verse and tafsir text is copied from the database, never generated"]
+  end
+  Draft -.-> Checks

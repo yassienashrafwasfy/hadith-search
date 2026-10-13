@@ -10,6 +10,7 @@ import DevComparePage from './pages/DevComparePage';
 import DevAnnotationPage from './pages/DevAnnotationPage';
 import DevAnnotationSessionPage from './pages/DevAnnotationSessionPage';
 import KvVerificationPage from './pages/KvVerificationPage';
+import QuranPage from './pages/QuranPage';
 import SigninPage from './pages/SigninPage';
 import SignupPage from './pages/SignupPage';
 import AnnotationGuidelinesPage from './pages/AnnotationGuidelinesPage';
@@ -33,11 +34,13 @@ const App = () => {
         <Route path="/user/" element={<Layout mode={mode} setMode={handleSetMode} />}>
           <Route index element={<UserHomePage />} />
           <Route path="search" element={<UserSearchPage />} />
+          <Route path="quran" element={<QuranPage />} />
         </Route>
 
         <Route path="/dev/" element={<Layout mode={mode} setMode={handleSetMode} />}>
           <Route index element={<DevHomePage />} />
           <Route path="search" element={<DevSearchPage />} />
+          <Route path="quran" element={<QuranPage />} />
           <Route path="benchmark" element={<DevBenchmarkPage />} />
           <Route path="compare" element={<DevComparePage />} />
           <Route path="annotation" element={<DevAnnotationPage />} />

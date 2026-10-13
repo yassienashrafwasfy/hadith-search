@@ -142,3 +142,64 @@ export const getSuggestions = async (query: string, signal?: AbortSignal): Promi
   const data = await response.json();
   return Array.isArray(data.suggestions) ? (data.suggestions as Suggestion[]) : [];
 };
+
+export interface QuranCitation {
+  ref: string;
+  source: string;
+  text: string;
+  web: boolean;
+  attribution: string;
+}
+
+export interface QuranAnswer {
+  answer: string;
+  fallback: boolean;
+  citations: QuranCitation[];
+  trace: string[];
+}
+
+const toQuranAnswer = (data: Record<string, unknown>): QuranAnswer => ({
+  answer: String(data.answer ?? ''),
+  fallback: Boolean(data.fallback),
+  citations: Array.isArray(data.citations) ? data.citations : [],
+  trace: Array.isArray(data.trace) ? data.trace : [],
+});
+
+// Reads the NDJSON stream: {"step": name} lines while the agent works, then {"answer": {...}}.
+export const askQuran = async (
+  question: string,
+  signal?: AbortSignal,
+  onStep?: (step: string) => void,
+): Promise<QuranAnswer> => {
+  const response = await fetch(`${API_V1}/answers?stream=true`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ question }),
+    signal,
+  });
+
+  if (!response.ok || !response.body) {
+    throw new ApiError(`Answer failed: ${response.status}`, response.status);
+  }
+
+  const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
+  let buffer = '';
+  let answer: QuranAnswer | null = null;
+  const handle = (line: string) => {
+    if (!line.trim()) return;
+    const event = JSON.parse(line);
+    if (typeof event.step === 'string') onStep?.(event.step);
+    if (event.answer) answer = toQuranAnswer(event.answer);
+  };
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += value;
+    const lines = buffer.split('\n');
+    buffer = lines.pop() ?? '';
+    lines.forEach(handle);
+  }
+  handle(buffer);
+  if (!answer) throw new ApiError('Answer failed: empty stream', 502);
+  return answer;
+};

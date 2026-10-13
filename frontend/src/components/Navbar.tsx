@@ -22,12 +22,16 @@ const Navbar = ({ mode, onModeChange }: NavbarProps) => {
   const navLinks = isDev
     ? [
         { labelKey: 'nav.search', path: '/dev/search' },
+        { labelKey: 'nav.quran', path: '/dev/quran' },
         { labelKey: 'nav.benchmarks', path: '/dev/benchmark' },
         { labelKey: 'nav.algorithmComparison', path: '/dev/compare' },
         { labelKey: 'nav.annotation', path: '/dev/annotation' },
         { labelKey: 'nav.kvPairs', path: '/dev/kv-pairs' },
       ]
-    : [{ labelKey: 'nav.search', path: '/user/search' }];
+    : [
+        { labelKey: 'nav.search', path: '/user/search' },
+        { labelKey: 'nav.quran', path: '/user/quran' },
+      ];
 
   const handleModeToggle = () => {
     const path = location.pathname;

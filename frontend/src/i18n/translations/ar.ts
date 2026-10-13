@@ -134,6 +134,22 @@ const ar: Record<string, string> = {
   'annotation.arabic': 'النص العربي',
   'annotation.english': 'النص الإنجليزي',
   'annotation.counts': 'عدد الأحكام',
+  'nav.quran': 'اسأل القرآن',
+  'quran.title': 'اسأل القرآن',
+  'quran.subtitle': 'اطرح سؤالك بالعربية، وستأتيك إجابة موثّقة بنصوص القرآن وكتب التفسير.',
+  'quran.placeholder': 'مثال: ما هي آية الكرسي؟',
+  'quran.ask': 'اسأل',
+  'quran.thinking': 'جارٍ البحث في القرآن والتفسير… قد يستغرق ذلك دقيقة.',
+  'quran.sources': 'المصادر',
+  'quran.searchingWeb': 'جارٍ البحث في الويب',
+  'quran.web': 'من الويب',
+  'quran.noInfo': 'لا تتوفر معلومات كافية للإجابة عن هذا السؤال.',
+  'quran.trace': 'خطوات الوكيل',
+  'quran.examples': 'جرّب:',
+  'quran.source.quran': 'القرآن الكريم',
+  'quran.source.tafsir_muyassar': 'التفسير الميسر',
+  'quran.source.tafsir_ibn_kathir': 'تفسير ابن كثير',
+  'quran.source.tafsir_saadi': 'تفسير السعدي',
 };
 
 export default ar;

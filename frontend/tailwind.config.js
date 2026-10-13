@@ -146,6 +146,7 @@ export default {
         "fade-in": "fade-in 0.25s ease-out both",
         "draw-x": "draw-x 0.7s cubic-bezier(0.16, 1, 0.3, 1) both",
         "ink-pulse": "ink-pulse 1.6s ease-in-out infinite",
+        "spin-slow": "spin 3s linear infinite",
       },
     },
   },

@@ -18,23 +18,34 @@ from contextlib import asynccontextmanager
 
 from fastapi import HTTPException, Request
 
+from observability import record_rejected
+
 logger = logging.getLogger(__name__)
 
 
 class Overloaded(Exception):
-    """The queue is full or the wait ran out."""
+    """The queue is full or the wait ran out. `reason` is the metric label."""
+
+    def __init__(self, message: str, reason: str):
+        super().__init__(message)
+        self.reason = reason
 
 
 class SearchLimiter:
     def __init__(self, running: int, waiting: int, timeout: float):
         self.timeout = timeout
         self._slots = asyncio.Semaphore(running)
+        self._max_running = running
         self._max_waiting = waiting
         self._waiting = 0
 
     @property
     def waiting(self) -> int:
         return self._waiting
+
+    @property
+    def running(self) -> int:
+        return self._max_running - self._slots._value
 
     @asynccontextmanager
     async def slot(self) -> AsyncIterator[None]:
@@ -49,13 +60,13 @@ class SearchLimiter:
 
     async def _wait_for_slot(self) -> None:
         if self._waiting >= self._max_waiting:
-            raise Overloaded("queue full")
+            raise Overloaded("queue full", "queue_full")
         self._waiting += 1
         try:
             async with asyncio.timeout(self.timeout):
                 await self._slots.acquire()
         except TimeoutError:
-            raise Overloaded("waited too long") from None
+            raise Overloaded("waited too long", "timeout") from None
         finally:
             self._waiting -= 1
 
@@ -74,6 +85,7 @@ async def search_slot(request: Request) -> AsyncIterator[None]:
             yield
     except Overloaded as exc:
         logger.warning("search rejected: %s (%d waiting)", exc, limiter.waiting)
+        record_rejected(request, exc.reason)
         raise HTTPException(
             status_code=503,
             detail="The server is busy. Try again in a moment.",

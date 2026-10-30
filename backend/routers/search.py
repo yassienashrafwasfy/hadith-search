@@ -12,6 +12,7 @@ from features import Features
 from inputs import Text
 from limiter import search_slot
 from models import Lang, SearchRequest
+from observability import record_search
 from rest import API_PREFIX, EncodedJson, href, json_response, link, server_timing
 from services.retrieval import SearchContext, enabled_systems, run_search
 from settings import get_settings
@@ -85,6 +86,7 @@ def make_search_router(features: Features) -> APIRouter:
             SearchRequest(query=q, lang=lang, grade_filter=grade_filter, book_filter=book_filter),
         )
         elapsed_ms = (time.perf_counter() - started) * 1000
+        record_search(request, method, elapsed_ms / 1000, timings)
         params = {"q": q, "method": method, "lang": lang.value}
         params.update(
             {k: v for k, v in (("grade_filter", grade_filter), ("book_filter", book_filter)) if v}

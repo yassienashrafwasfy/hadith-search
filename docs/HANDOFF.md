@@ -961,6 +961,47 @@ Frontend only. No backend, database, nginx or API change, nothing committed.
 
 **Files:** `backend/services/reranker.py`, `backend/services/ranking.py` (`cross_rerank`), `backend/services/retrieval.py`, `backend/routers/search.py`, `backend/features.py`, `backend/settings.py`, `tests/test_reranker.py`
 
+### 47. Observability: metrics, logs, browser errors and e-mail alerts (2026-10-31)
+
+**Decisions (made by the owner on 2026-10-31).** Self-hosted Prometheus + Grafana + Alertmanager (no SaaS, fits the single-host compose setup); alerts by e-mail; all four areas (app metrics, infrastructure metrics, structured logs, browser errors); logs through Grafana Alloy into Loki (Alloy replaces the retired Promtail); browser errors and web vitals through the Grafana Faro SDK; Grafana reachable through nginx under `/grafana/`; metrics kept 15 days, logs 7 days; Faro sends errors and Core Web Vitals only, with the search text (`?q=`) removed; the thresholds below.
+
+**What runs.** `docker-compose.yml` has ten more services, none published to the host: `prometheus`, `alertmanager`, `grafana`, `loki`, `alloy`, `postgres-exporter`, `nginx-exporter` (reads `stub_status` on nginx's internal port 8081), `cadvisor` (container CPU and memory against their limits; privileged, it reads cgroups), `node-exporter` (host disk) and `blackbox` (probes `GET /api/v1/health` through nginx, so it follows the live colour and the database check). They start with `docker compose up -d`; `tools/deploy.sh` still starts only postgres, nginx and the app. About 3 GB of memory limits in total. Config is in `monitoring/`.
+
+**App.** `backend/observability.py`: `GET /metrics` (prometheus-fastapi-instrumentator 8.1.0, one registry per app so tests can build many apps; flag `metrics`, `FEATURE_METRICS`, on by default). Request count by route template and exact status, latency histogram by route (buckets dense around 1 s and 2 s), `search_duration_seconds`, `search_db_seconds`, `search_encode_seconds` per method, `search_rejected_total{reason=queue_full|timeout}`, `search_queue_waiting` and `search_queue_running`. `/api/v1/health` and `/metrics` are not measured (scraped every 15 s). nginx answers 404 for `/metrics`; Prometheus scrapes both colours by DNS (a stopped colour drops out instead of showing as down). `LOG_FORMAT=json` (compose sets it) writes one JSON line per record with the request id; the access line has method, path (never the query string), status, duration and client. nginx sends `X-Request-ID: $request_id` to the app, the app echoes it back, and nginx writes its own access log as JSON with the same id and no query string. uvicorn runs with `--no-access-log` (its line had the search text).
+
+**Browser.** `frontend/src/observability.ts` loads `@grafana/faro-web-sdk` 2.12.1 as a separate chunk after the page starts (production builds only): `ErrorsInstrumentation` and `WebVitalsInstrumentation`, no console capture, no session tracking, no tracing; `beforeSend` replaces `q=...` in page URLs and error messages. It posts to same-origin `/faro/collect`, which nginx limits (5 a second per address, burst 20, POST only, 64 KB) and forwards to Alloy's `faro.receiver`. Alloy writes the events to Loki (`{service_name="faro"}`, label `kind`) and counts exceptions as `loki_process_custom_faro_exceptions_total` for the alert. The image build passes the git sha as the Faro release (`VITE_RELEASE`).
+
+**Alerts** (`monitoring/prometheus/alerts.yml`; each one has a promtool test just above and just below its limit in `alerts.test.yml`):
+
+| Alert | Severity | Fires when |
+| --- | --- | --- |
+| AppDown | critical | health through nginx fails for 1 min |
+| DbDown | critical | `pg_up == 0` for 1 min |
+| HighErrorRate | critical | 5xx other than 503 above 2% of requests for 5 min, and at least 0.1 request a second |
+| SearchLatencyCritical | critical | search p95 (queue wait included) above 2 s for 10 min |
+| SearchLatencyHigh | warning | search p95 above 1 s for 10 min (silenced while the critical one fires) |
+| SearchBusy | warning | more than 5% of searches answered 503 by the queue for 5 min |
+| ContainerCpuHigh | warning | a `hadith-*` container above 85% of its CPU limit for 10 min (containers without a limit never fire) |
+| ContainerMemoryHigh | warning | above 90% of its memory limit for 10 min |
+| DbConnectionsHigh | warning | above 80% of `max_connections` for 5 min |
+| DiskSpaceLow | warning | under 15% of the host root disk free for 15 min |
+| FrontendErrors | warning | more than 20 browser JavaScript errors in 10 min |
+| MonitoringTargetDown | warning | an exporter or monitoring service cannot be scraped for 5 min |
+
+Three things were added without being on the agreed list: the 0.1 request a second minimum on HighErrorRate (one failed request on an idle site is not 2% of anything useful), MonitoringTargetDown (without it a dead exporter silences its alerts), and the repeat interval (critical mailed again every hour, warnings every 4 hours, `monitoring/alertmanager/alertmanager.yml.tmpl`). Change them there.
+
+**Settings** (`.env.example`): `GRAFANA_ADMIN_PASSWORD` (Grafana refuses to start without it; the image would otherwise use admin/admin), `GRAFANA_ROOT_URL`, `GRAFANA_COOKIE_SECURE` (true behind HTTPS), `SMTP_HOST`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `ALERT_EMAIL_TO`, `ALERT_EMAIL_FROM`. Alertmanager's entrypoint fills its template from these and refuses to start without the first four; the password goes to a file inside the container, not into the config. Missing monitoring settings stop only that container, never an app deploy.
+
+**Security notes.** Grafana is public through nginx: own login, no sign-up, no anonymous access, POST `/grafana/login` limited like the app's sign-in (5 tries, then 1 a minute). Alloy mounts the Docker socket read-only (the socket API is still powerful; the image is pinned). cAdvisor runs privileged. Prometheus, Alertmanager and Loki have no login and are not published; reach them through Grafana or an SSH tunnel.
+
+**Checks.** `tools/test-monitoring.sh` (also in CI, job `docker-scan`) runs promtool on the config and the rule tests, amtool on the filled Alertmanager template, Loki `-verify-config`, `alloy validate`, blackbox `--config.check` and parses the dashboard. `tools/test-nginx.sh` gained 12 checks (`/metrics` hidden, Grafana proxied with the full path, sign-in limit, Faro POST only, flood cut to 429, 64 KB cap, `stub_status` internal, request id reaches the app, JSON access log without the search text). `tests/test_observability.py` and `tests/test_monitoring_config.py` cover the app side and keep every alert tested.
+
+**End to end (2026-10-31, on this WSL host, isolated compose project with a stub in front of the real app run from the venv, Mailpit as SMTP).** All 11 scrape targets up; every metric the alerts use present with the expected labels (cAdvisor reported a 0.5 CPU limit on a test container); `/metrics` 404 through nginx; nginx, app and Faro lines in Loki; three Faro exceptions counted in Prometheus; Grafana under `/grafana/` answered 401 without a login, listed the provisioned dashboard and reached Prometheus, Loki and Alertmanager; all 25 dashboard queries ran; stopping the app sent the AppDown e-mail. `node-exporter` cannot use the usual `rslave` mount on WSL, so the root filesystem is mounted plain read-only.
+
+**Not verified.** The real app image (not rebuilt for this change) and a real SMTP server (Gmail app password); the dashboard was checked by its queries, not by eye; Grafana behind HTTPS. Faro's web vitals were checked with a hand-made payload, not from a real browser.
+
+**Files:** `backend/observability.py`, `backend/main.py`, `backend/limiter.py`, `backend/routers/search.py`, `backend/features.py`, `backend/settings.py`, `backend/rest.py`, `requirements.txt`, `Dockerfile`, `docker-compose.yml`, `nginx/default.conf`, `nginx/proxy_app.conf`, `monitoring/**`, `frontend/src/observability.ts`, `frontend/src/main.tsx`, `frontend/package.json`, `tools/test-monitoring.sh`, `tools/test-nginx.sh`, `.github/workflows/ci.yml`, `.env.example`, `tests/test_observability.py`, `tests/test_monitoring_config.py`, `tests/security/test_auth.py`, `tests/security/test_headers_cors.py`
+
 ## Still open
 
 - Nothing has been pushed and no PR exists. Everything is on local branches.

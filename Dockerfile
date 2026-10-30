@@ -6,6 +6,9 @@ COPY frontend/package*.json ./
 # Cache mount keeps the npm download cache between builds without baking it into a layer
 RUN --mount=type=cache,target=/root/.npm npm ci
 COPY frontend/ .
+# Release reported with browser errors (Faro, docs/HANDOFF.md item 47)
+ARG REVISION=unknown
+ENV VITE_RELEASE=$REVISION
 # Skip tsc (pre-existing type errors), Vite/esbuild handles transpilation
 RUN npx vite build
 
@@ -111,4 +114,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
     CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=4)"]
 
 ENTRYPOINT ["/app/docker-entrypoint.sh"]
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log"]

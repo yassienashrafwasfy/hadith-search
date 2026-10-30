@@ -115,6 +115,10 @@ def test_only_the_expected_routes_are_public(_app):
         ("GET", f"{API}/benchmark/finetuned-stats"),
         ("GET", f"{API}/benchmark/comparison"),
         ("GET", "/{full_path:path}"),  # the frontend
+        (
+            "GET",
+            "/metrics",
+        ),  # Prometheus; nginx answers 404 for it, only the compose network reaches it
     }
 
 

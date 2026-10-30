@@ -1,0 +1,131 @@
+# Alert rules (docs/HANDOFF.md item 47). The thresholds were chosen with the owner on 2026-10-31 from
+# the performance budgets of item 37 (the app runs with 2 CPU / 4 GB). Change a number here and in
+# alerts.test.yml; tools/test-monitoring.sh checks both with promtool.
+groups:
+  - name: availability
+    rules:
+      - alert: AppDown
+        expr: probe_success{job="health"} == 0
+        for: 1m
+        labels: {severity: critical}
+        annotations:
+          summary: The site does not answer GET /api/v1/health through nginx
+          description: The live colour or its database check failed for 1 minute. Check `tools/deploy.sh status` and the app logs in Grafana.
+
+      - alert: DbDown
+        expr: pg_up == 0
+        for: 1m
+        labels: {severity: critical}
+        annotations:
+          summary: PostgreSQL is not reachable
+          description: postgres-exporter cannot connect to the database for 1 minute.
+
+      - alert: MonitoringTargetDown
+        expr: up{job!="app"} == 0
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "Prometheus cannot scrape {{ $labels.job }} ({{ $labels.instance }})"
+          description: Alerts that depend on this target cannot fire while it is down.
+
+  - name: errors
+    rules:
+      # 503 is left out: that is the search queue saying "busy" (SearchBusy below). The minimum of
+      # 0.1 requests a second (6 a minute) keeps one failed request on an idle site from paging.
+      - alert: HighErrorRate
+        expr: |
+          (
+            sum(rate(http_requests_total{job="app", status=~"5..", status!="503"}[5m]))
+            / sum(rate(http_requests_total{job="app"}[5m]))
+          ) > 0.02
+          and sum(rate(http_requests_total{job="app"}[5m])) > 0.1
+        for: 5m
+        labels: {severity: critical}
+        annotations:
+          summary: "More than 2% of requests fail with a 5xx ({{ $value | humanizePercentage }})"
+          description: 'Look for `"level": "error"` in the app logs in Grafana (Explore, Loki).'
+
+      - alert: SearchBusy
+        expr: |
+          (
+            sum(rate(http_requests_total{job="app", handler="/api/v1/searches", status="503"}[5m]))
+            / sum(rate(http_requests_total{job="app", handler="/api/v1/searches"}[5m]))
+          ) > 0.05
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "More than 5% of searches are refused as busy ({{ $value | humanizePercentage }})"
+          description: The search queue (SEARCH_MAX_CONCURRENT / SEARCH_QUEUE_SIZE) is full. See search_queue_waiting and the CPU of the app.
+
+      - alert: FrontendErrors
+        expr: sum(increase(loki_process_custom_faro_exceptions_total[10m])) > 20
+        labels: {severity: warning}
+        annotations:
+          summary: "Browsers reported {{ $value | printf \"%.0f\" }} JavaScript errors in 10 minutes"
+          description: 'Grafana, Explore, Loki: {service_name="faro"} |= "kind=exception".'
+
+  - name: latency
+    rules:
+      - alert: SearchLatencyCritical
+        expr: |
+          histogram_quantile(0.95,
+            sum by (le) (rate(http_request_duration_seconds_bucket{job="app", handler="/api/v1/searches"}[5m]))
+          ) > 2
+        for: 10m
+        labels: {severity: critical, family: search_latency}
+        annotations:
+          summary: "Search p95 is {{ $value | humanizeDuration }} (limit 2 s)"
+          description: Queue wait included. Compare search_duration_seconds (ranking only) per method on the dashboard.
+
+      - alert: SearchLatencyHigh
+        expr: |
+          histogram_quantile(0.95,
+            sum by (le) (rate(http_request_duration_seconds_bucket{job="app", handler="/api/v1/searches"}[5m]))
+          ) > 1
+        for: 10m
+        labels: {severity: warning, family: search_latency}
+        annotations:
+          summary: "Search p95 is {{ $value | humanizeDuration }} (limit 1 s)"
+          description: The 20-user budget in docs/HANDOFF.md item 37 is 1 s.
+
+  - name: resources
+    rules:
+      - alert: ContainerCpuHigh
+        expr: |
+          sum by (name) (rate(container_cpu_usage_seconds_total{name=~"hadith-.+"}[5m]))
+          / on (name) (max by (name) (container_spec_cpu_quota{name=~"hadith-.+"} > 0)
+                       / max by (name) (container_spec_cpu_period{name=~"hadith-.+"}))
+          > 0.85
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $labels.name }} uses {{ $value | humanizePercentage }} of its CPU limit"
+
+      - alert: ContainerMemoryHigh
+        expr: |
+          max by (name) (container_memory_working_set_bytes{name=~"hadith-.+"})
+          / on (name) max by (name) (container_spec_memory_limit_bytes{name=~"hadith-.+"} > 0)
+          > 0.9
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $labels.name }} uses {{ $value | humanizePercentage }} of its memory limit"
+
+      - alert: DbConnectionsHigh
+        expr: sum(pg_stat_activity_count) / max(pg_settings_max_connections) > 0.8
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "PostgreSQL uses {{ $value | humanizePercentage }} of max_connections"
+          description: Each colour opens up to SEARCH_MAX_CONCURRENT + DB_POOL_OVERFLOW connections per engine (HANDOFF item 42).
+
+      - alert: DiskSpaceLow
+        expr: |
+          node_filesystem_avail_bytes{job="host", mountpoint="/", fstype!~"tmpfs|overlay"}
+          / node_filesystem_size_bytes{job="host", mountpoint="/", fstype!~"tmpfs|overlay"}
+          < 0.15
+        for: 15m
+        labels: {severity: warning}
+        annotations:
+          summary: "Only {{ $value | humanizePercentage }} of the host disk is free"
+          description: Docker images (tools/deploy.sh prune-images), Prometheus (15 d) and Loki (7 d) live here.

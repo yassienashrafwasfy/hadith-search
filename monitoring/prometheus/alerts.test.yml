@@ -1,0 +1,252 @@
+# promtool unit tests for alerts.yml: each threshold fires just above its limit and stays quiet just
+# below it. Run with tools/test-monitoring.sh.
+rule_files:
+  - alerts.yml
+
+evaluation_interval: 1m
+
+tests:
+  # --- availability -------------------------------------------------------------------------
+  - interval: 1m
+    input_series:
+      - series: 'probe_success{job="health", instance="http://nginx:8080/api/v1/health"}'
+        values: "1 1 0 0 0 0"
+      - series: 'pg_up{job="postgres", instance="postgres-exporter:9187"}'
+        values: "1 0 0 0 0 0"
+    alert_rule_test:
+      - eval_time: 2m  # just went down: still pending
+        alertname: AppDown
+        exp_alerts: []
+      - eval_time: 3m  # down for 1 minute
+        alertname: AppDown
+        exp_alerts:
+          - exp_labels: {severity: critical, job: health, instance: "http://nginx:8080/api/v1/health"}
+            exp_annotations:
+              summary: The site does not answer GET /api/v1/health through nginx
+              description: The live colour or its database check failed for 1 minute. Check `tools/deploy.sh status` and the app logs in Grafana.
+      - eval_time: 3m
+        alertname: DbDown
+        exp_alerts:
+          - exp_labels: {severity: critical, job: postgres, instance: "postgres-exporter:9187"}
+            exp_annotations:
+              summary: PostgreSQL is not reachable
+              description: postgres-exporter cannot connect to the database for 1 minute.
+
+  # --- an exporter that cannot be scraped for 5 minutes; a stopped app colour is not a target ---
+  - interval: 1m
+    input_series:
+      - series: 'up{job="nginx", instance="nginx-exporter:9113"}'
+        values: "1 0 0 0 0 0 0 0"
+      - series: 'up{job="app", instance="10.0.0.5:8000", colour="green"}'
+        values: "0 0 0 0 0 0 0 0"
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: MonitoringTargetDown
+        exp_alerts: []
+      - eval_time: 6m
+        alertname: MonitoringTargetDown
+        exp_alerts:
+          - exp_labels: {severity: warning, job: nginx, instance: "nginx-exporter:9113"}
+            exp_annotations:
+              summary: "Prometheus cannot scrape nginx (nginx-exporter:9113)"
+              description: Alerts that depend on this target cannot fire while it is down.
+
+  # --- 5xx: 3% fires, 1% does not, 3% on an idle site does not --------------------------------
+  - interval: 1m
+    input_series:
+      # busy: 600 requests a minute (10/s), 18 of them 500 (3%)
+      - series: 'http_requests_total{job="app", colour="blue", handler="/api/v1/hadiths/{hadith_id}", method="GET", status="200"}'
+        values: "0+582x15"
+      - series: 'http_requests_total{job="app", colour="blue", handler="/api/v1/hadiths/{hadith_id}", method="GET", status="500"}'
+        values: "0+18x15"
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: HighErrorRate
+        exp_alerts:
+          - exp_labels: {severity: critical}
+            exp_annotations:
+              summary: "More than 2% of requests fail with a 5xx (3%)"
+              description: 'Look for `"level": "error"` in the app logs in Grafana (Explore, Loki).'
+  - interval: 1m
+    input_series:
+      - series: 'http_requests_total{job="app", handler="/x", method="GET", status="200"}'
+        values: "0+594x15"
+      - series: 'http_requests_total{job="app", handler="/x", method="GET", status="500"}'
+        values: "0+6x15"
+      # 503 is "busy", not an error: 10% of them must not count
+      - series: 'http_requests_total{job="app", handler="/x", method="GET", status="503"}'
+        values: "0+60x15"
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: HighErrorRate
+        exp_alerts: []
+  - interval: 1m
+    input_series:
+      # idle: 3 requests a minute, 1 of them 500 (33%), under the 0.1/s minimum
+      - series: 'http_requests_total{job="app", handler="/x", method="GET", status="200"}'
+        values: "0+2x15"
+      - series: 'http_requests_total{job="app", handler="/x", method="GET", status="500"}'
+        values: "0+1x15"
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: HighErrorRate
+        exp_alerts: []
+
+  # --- search queue: 6% busy fires, 4% does not -------------------------------------------------
+  - interval: 1m
+    input_series:
+      - series: 'http_requests_total{job="app", handler="/api/v1/searches", method="GET", status="200"}'
+        values: "0+94x15"
+      - series: 'http_requests_total{job="app", handler="/api/v1/searches", method="GET", status="503"}'
+        values: "0+6x15"
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: SearchBusy
+        exp_alerts:
+          - exp_labels: {severity: warning}
+            exp_annotations:
+              summary: "More than 5% of searches are refused as busy (6%)"
+              description: The search queue (SEARCH_MAX_CONCURRENT / SEARCH_QUEUE_SIZE) is full. See search_queue_waiting and the CPU of the app.
+  - interval: 1m
+    input_series:
+      - series: 'http_requests_total{job="app", handler="/api/v1/searches", method="GET", status="200"}'
+        values: "0+96x15"
+      - series: 'http_requests_total{job="app", handler="/api/v1/searches", method="GET", status="503"}'
+        values: "0+4x15"
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: SearchBusy
+        exp_alerts: []
+
+  # --- search p95: about 1.5 s is a warning only, about 3 s is both ----------------------------
+  - interval: 1m
+    input_series:
+      - series: 'http_request_duration_seconds_bucket{job="app", handler="/api/v1/searches", method="GET", le="1"}'
+        values: "0+0x20"
+      - series: 'http_request_duration_seconds_bucket{job="app", handler="/api/v1/searches", method="GET", le="1.5"}'
+        values: "0+60x20"
+      - series: 'http_request_duration_seconds_bucket{job="app", handler="/api/v1/searches", method="GET", le="+Inf"}'
+        values: "0+60x20"
+    alert_rule_test:
+      - eval_time: 10m  # over the limit, but not for 10 minutes yet
+        alertname: SearchLatencyHigh
+        exp_alerts: []
+      - eval_time: 18m
+        alertname: SearchLatencyHigh
+        exp_alerts:
+          - exp_labels: {severity: warning, family: search_latency}
+            exp_annotations:
+              summary: "Search p95 is 1.475s (limit 1 s)"
+              description: The 20-user budget in docs/HANDOFF.md item 37 is 1 s.
+      - eval_time: 18m
+        alertname: SearchLatencyCritical
+        exp_alerts: []
+  - interval: 1m
+    input_series:
+      - series: 'http_request_duration_seconds_bucket{job="app", handler="/api/v1/searches", method="GET", le="2"}'
+        values: "0+0x20"
+      - series: 'http_request_duration_seconds_bucket{job="app", handler="/api/v1/searches", method="GET", le="3"}'
+        values: "0+60x20"
+      - series: 'http_request_duration_seconds_bucket{job="app", handler="/api/v1/searches", method="GET", le="+Inf"}'
+        values: "0+60x20"
+    alert_rule_test:
+      - eval_time: 18m
+        alertname: SearchLatencyCritical
+        exp_alerts:
+          - exp_labels: {severity: critical, family: search_latency}
+            exp_annotations:
+              summary: "Search p95 is 2.95s (limit 2 s)"
+              description: Queue wait included. Compare search_duration_seconds (ranking only) per method on the dashboard.
+
+  # --- browser errors: 21 in 10 minutes fires, 15 does not --------------------------------------
+  - interval: 1m
+    input_series:
+      - series: 'loki_process_custom_faro_exceptions_total{job="alloy"}'
+        values: "0+2.1x15"
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: FrontendErrors
+        exp_alerts:
+          - exp_labels: {severity: warning}
+            exp_annotations:
+              summary: "Browsers reported 21 JavaScript errors in 10 minutes"
+              description: 'Grafana, Explore, Loki: {service_name="faro"} |= "kind=exception".'
+  - interval: 1m
+    input_series:
+      - series: 'loki_process_custom_faro_exceptions_total{job="alloy"}'
+        values: "0+1.5x15"
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: FrontendErrors
+        exp_alerts: []
+
+  # --- resources ---------------------------------------------------------------------------------
+  - interval: 1m
+    input_series:
+      # hadith-blue: 2 CPUs, uses 1.8 (90%); hadith-green: 2 CPUs, uses 1.6 (80%)
+      - series: 'container_cpu_usage_seconds_total{job="containers", name="hadith-blue", cpu="total"}'
+        values: "0+108x20"
+      - series: 'container_spec_cpu_quota{job="containers", name="hadith-blue"}'
+        values: "200000x20"
+      - series: 'container_spec_cpu_period{job="containers", name="hadith-blue"}'
+        values: "100000x20"
+      - series: 'container_cpu_usage_seconds_total{job="containers", name="hadith-green", cpu="total"}'
+        values: "0+96x20"
+      - series: 'container_spec_cpu_quota{job="containers", name="hadith-green"}'
+        values: "200000x20"
+      - series: 'container_spec_cpu_period{job="containers", name="hadith-green"}'
+        values: "100000x20"
+      # no limit (quota 0): never alerts, however busy
+      - series: 'container_cpu_usage_seconds_total{job="containers", name="hadith-postgres", cpu="total"}'
+        values: "0+600x20"
+      - series: 'container_spec_cpu_quota{job="containers", name="hadith-postgres"}'
+        values: "0x20"
+      - series: 'container_spec_cpu_period{job="containers", name="hadith-postgres"}'
+        values: "100000x20"
+      # memory: 3.8 of 4 GiB (95%) fires, 3.4 of 4 (85%) does not
+      - series: 'container_memory_working_set_bytes{job="containers", name="hadith-blue"}'
+        values: "4080218931x20"
+      - series: 'container_spec_memory_limit_bytes{job="containers", name="hadith-blue"}'
+        values: "4294967296x20"
+      - series: 'container_memory_working_set_bytes{job="containers", name="hadith-green"}'
+        values: "3650722201x20"
+      - series: 'container_spec_memory_limit_bytes{job="containers", name="hadith-green"}'
+        values: "4294967296x20"
+      # 85 of 100 connections; disk 10% free
+      - series: 'pg_stat_activity_count{job="postgres", datname="hadith", state="idle"}'
+        values: "60x20"
+      - series: 'pg_stat_activity_count{job="postgres", datname="hadith", state="active"}'
+        values: "25x20"
+      - series: 'pg_settings_max_connections{job="postgres"}'
+        values: "100x20"
+      - series: 'node_filesystem_avail_bytes{job="host", mountpoint="/", fstype="ext4", device="/dev/sdc"}'
+        values: "10x20"
+      - series: 'node_filesystem_size_bytes{job="host", mountpoint="/", fstype="ext4", device="/dev/sdc"}'
+        values: "100x20"
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: ContainerCpuHigh
+        exp_alerts:
+          - exp_labels: {severity: warning, name: hadith-blue}
+            exp_annotations:
+              summary: "hadith-blue uses 90% of its CPU limit"
+      - eval_time: 16m
+        alertname: ContainerMemoryHigh
+        exp_alerts:
+          - exp_labels: {severity: warning, name: hadith-blue}
+            exp_annotations:
+              summary: "hadith-blue uses 95% of its memory limit"
+      - eval_time: 16m
+        alertname: DbConnectionsHigh
+        exp_alerts:
+          - exp_labels: {severity: warning}
+            exp_annotations:
+              summary: "PostgreSQL uses 85% of max_connections"
+              description: Each colour opens up to SEARCH_MAX_CONCURRENT + DB_POOL_OVERFLOW connections per engine (HANDOFF item 42).
+      - eval_time: 16m
+        alertname: DiskSpaceLow
+        exp_alerts:
+          - exp_labels: {severity: warning, job: host, mountpoint: "/", fstype: ext4, device: /dev/sdc}
+            exp_annotations:
+              summary: "Only 10% of the host disk is free"
+              description: Docker images (tools/deploy.sh prune-images), Prometheus (15 d) and Loki (7 d) live here.

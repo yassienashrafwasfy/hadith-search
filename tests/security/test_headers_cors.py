@@ -188,7 +188,7 @@ async def test_the_exposed_headers_do_not_include_anything_sensitive(_make_app, 
     async with _open(_make_app(**_PROD)) as api:
         res = await api.get(API, headers={"Origin": GOOD_ORIGIN})
     exposed = {h.strip().lower() for h in res.headers["access-control-expose-headers"].split(",")}
-    assert exposed == {"etag", "location", "server-timing", "www-authenticate"}
+    assert exposed == {"etag", "location", "server-timing", "www-authenticate", "x-request-id"}
 
 
 async def test_a_list_of_origins_is_split_and_trimmed(_make_app, _open):

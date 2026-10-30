@@ -61,6 +61,8 @@ packaging==26.0
 pandas==3.0.1
 peft==0.19.1
 pickledb==1.6
+prometheus-client==0.26.0
+prometheus-fastapi-instrumentator==8.1.0
 propcache==0.4.1
 PyArabic==0.6.15
 pyarrow==23.0.1

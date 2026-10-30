@@ -5,6 +5,9 @@ import App from './App.tsx'
 import { LanguageProvider } from './i18n/LanguageProvider.tsx'
 import { ApiProvider } from './api/ApiContext.tsx'
 import { AuthProvider } from './api/AuthContext'
+import { startObservability } from './observability'
+
+void startObservability();
 
 // Initialize theme
 const initializeTheme = () => {

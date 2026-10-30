@@ -1,0 +1,9 @@
+# One probe: GET a URL and expect a 2xx within 5 seconds (used for /api/v1/health through nginx).
+modules:
+  http_2xx:
+    prober: http
+    timeout: 5s
+    http:
+      method: GET
+      valid_status_codes: []  # any 2xx
+      preferred_ip_protocol: ip4

@@ -1,0 +1,72 @@
+# Prometheus for the hadith stack (docs/HANDOFF.md item 47). Every target is on the compose network;
+# nothing here is published to the host. Retention (15 days) is a command flag in docker-compose.yml.
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - /etc/prometheus/alerts.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
+
+scrape_configs:
+  # Both colours, straight from the app (nginx refuses /metrics). A stopped colour has no DNS
+  # record, so it simply drops out instead of showing as down; AppDown watches the live path.
+  - job_name: app
+    dns_sd_configs:
+      - names: ["app-blue", "app-green"]
+        type: A
+        port: 8000
+        refresh_interval: 15s
+    relabel_configs:
+      - source_labels: [__meta_dns_name]
+        regex: app-(.*)
+        target_label: colour
+
+  # What users get: GET /api/v1/health through nginx and the live colour (it also runs SELECT 1).
+  - job_name: health
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    static_configs:
+      - targets: ["http://nginx:8080/api/v1/health"]
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox:9115
+
+  - job_name: postgres
+    static_configs:
+      - targets: ["postgres-exporter:9187"]
+
+  - job_name: nginx
+    static_configs:
+      - targets: ["nginx-exporter:9113"]
+
+  - job_name: containers
+    static_configs:
+      - targets: ["cadvisor:8080"]
+    metric_relabel_configs:
+      # Keep the series the alerts and the dashboard use; cAdvisor exports thousands more.
+      - source_labels: [__name__]
+        regex: container_(cpu_usage_seconds_total|memory_working_set_bytes|spec_memory_limit_bytes|spec_cpu_quota|spec_cpu_period|last_seen|network_(receive|transmit)_bytes_total)
+        action: keep
+
+  - job_name: host
+    static_configs:
+      - targets: ["node-exporter:9100"]
+
+  # Alloy's own metrics include the browser error counter (loki_process_custom_faro_*).
+  - job_name: alloy
+    static_configs:
+      - targets: ["alloy:12345"]
+
+  - job_name: monitoring
+    static_configs:
+      - targets: ["localhost:9090", "alertmanager:9093", "loki:3100", "blackbox:9115"]

@@ -9,6 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from database import dispose_engines
 from features import Features, load_features
 from limiter import SearchLimiter
+from observability import add_request_logging, build_metrics, configure_logging, install_metrics
 from rest import API_PREFIX, EXPOSED_HEADERS, install_error_handlers
 from settings import Settings, get_settings
 from startup import check_embeddings_release, init_database, preload_resources
@@ -126,6 +127,7 @@ def create_app(
     settings = settings or get_settings()
     static_dir = static_dir or resolve_static_dir(settings.static_dir)
     os.makedirs(DATA_DIR, exist_ok=True)
+    configure_logging(settings.log_format, settings.log_level)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -164,7 +166,10 @@ def create_app(
         **cors_settings(settings.effective_cors_origins),
     )
     add_security_headers(app)
+    add_request_logging(app)
     install_error_handlers(app)
+    if features.metrics:
+        install_metrics(app, build_metrics(app.state.search_limiter))
     _include_feature_routers(app, features)
 
     if static_dir:

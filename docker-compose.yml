@@ -27,6 +27,8 @@ x-app: &app
     # default model folder and the default hadith_embeddings table
     - ARABIC_MODEL_DIR=${ARABIC_MODEL_DIR:-}
     - EMBEDDINGS_RELEASE=${EMBEDDINGS_RELEASE:-}
+    # One JSON object per log line, collected by Alloy into Loki (docs/HANDOFF.md item 47)
+    - LOG_FORMAT=json
   volumes:
     # Query lists, qrels and evaluation outputs (the corpus, index and embeddings are in postgres)
     - hadith-data:/app/backend/data
@@ -79,6 +81,157 @@ services:
       - ./deploy/state:/etc/nginx/routing:ro
     restart: unless-stopped
 
+  # --- Monitoring (docs/HANDOFF.md item 47) -------------------------------------------------------
+  # Prometheus scrapes the app and the exporters below, evaluates monitoring/prometheus/alerts.yml
+  # and hands firing alerts to Alertmanager, which e-mails them. Alloy ships container logs and
+  # browser telemetry (Faro) to Loki. Grafana shows all of it under /grafana/ through nginx.
+  # Nothing here is published to the host. Start with `docker compose up -d` (tools/deploy.sh
+  # starts only postgres, nginx and the app). Missing settings stop only the container that needs
+  # them, never an app deploy.
+  prometheus:
+    image: prom/prometheus:v3.15.0
+    container_name: hadith-prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
+    volumes:
+      - ./monitoring/prometheus:/etc/prometheus:ro
+      - prometheus-data:/prometheus
+    mem_limit: 1g
+    restart: unless-stopped
+
+  alertmanager:
+    image: prom/alertmanager:v0.34.1
+    container_name: hadith-alertmanager
+    entrypoint: ["/bin/sh", "/etc/alertmanager/entrypoint.sh"]
+    environment:
+      # e.g. smtp.gmail.com:587 with a Gmail app password; see .env.example
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_USERNAME=${SMTP_USERNAME:-}
+      - SMTP_PASSWORD=${SMTP_PASSWORD:-}
+      - ALERT_EMAIL_FROM=${ALERT_EMAIL_FROM:-}
+      - ALERT_EMAIL_TO=${ALERT_EMAIL_TO:-}
+    volumes:
+      - ./monitoring/alertmanager:/etc/alertmanager:ro
+      - alertmanager-data:/alertmanager
+    mem_limit: 128m
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:13.2.5
+    container_name: hadith-grafana
+    # Refuse to start without a password: the image would otherwise fall back to admin/admin,
+    # and Grafana is reachable through nginx.
+    entrypoint: ["/bin/sh", "-c", 'test -n "$$GF_SECURITY_ADMIN_PASSWORD" || { echo "Set GRAFANA_ADMIN_PASSWORD in .env" >&2; exit 1; }; exec /run.sh']
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-}
+      # The public address of /grafana/, used for redirects and links in e-mails
+      - GF_SERVER_ROOT_URL=${GRAFANA_ROOT_URL:-http://localhost:8000/grafana/}
+      - GF_SERVER_SERVE_FROM_SUB_PATH=true
+      # true when the site is served over HTTPS
+      - GF_SECURITY_COOKIE_SECURE=${GRAFANA_COOKIE_SECURE:-false}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_AUTH_ANONYMOUS_ENABLED=false
+      - GF_SECURITY_DISABLE_GRAVATAR=true
+      - GF_ANALYTICS_REPORTING_ENABLED=false
+      - GF_ANALYTICS_CHECK_FOR_UPDATES=false
+      - GF_NEWS_NEWS_FEED_ENABLED=false
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    mem_limit: 512m
+    restart: unless-stopped
+
+  loki:
+    image: grafana/loki:3.7.9
+    container_name: hadith-loki
+    command: ["-config.file=/etc/loki/loki.yml"]
+    volumes:
+      - ./monitoring/loki:/etc/loki:ro
+      - loki-data:/loki
+    mem_limit: 512m
+    restart: unless-stopped
+
+  # Reads container logs through the Docker socket (read-only mount, but the socket API itself is
+  # powerful: keep this image pinned and trusted) and receives Faro telemetry from nginx.
+  alloy:
+    image: grafana/alloy:v1.21.2
+    container_name: hadith-alloy
+    command:
+      - run
+      - --server.http.listen-addr=0.0.0.0:12345
+      - --storage.path=/var/lib/alloy/data
+      - /etc/alloy/config.alloy
+    volumes:
+      - ./monitoring/alloy:/etc/alloy:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - alloy-data:/var/lib/alloy/data
+    mem_limit: 256m
+    restart: unless-stopped
+
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:v0.20.0
+    container_name: hadith-postgres-exporter
+    environment:
+      - DATA_SOURCE_URI=postgres:5432/hadith?sslmode=disable
+      - DATA_SOURCE_USER=hadith
+      - DATA_SOURCE_PASS=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    mem_limit: 64m
+    restart: unless-stopped
+
+  nginx-exporter:
+    image: nginx/nginx-prometheus-exporter:1.5.1
+    container_name: hadith-nginx-exporter
+    command: ["--nginx.scrape-uri=http://nginx:8081/stub_status"]
+    mem_limit: 32m
+    restart: unless-stopped
+
+  # Container CPU and memory against their limits. Needs privileged access to read cgroups.
+  cadvisor:
+    image: ghcr.io/google/cadvisor:v0.60.5
+    container_name: hadith-cadvisor
+    privileged: true
+    devices:
+      - /dev/kmsg
+    command:
+      - --docker_only=true
+      - --housekeeping_interval=15s
+      - --store_container_labels=false
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+    mem_limit: 256m
+    restart: unless-stopped
+
+  # Host disk space (the root filesystem, mounted read-only).
+  node-exporter:
+    image: prom/node-exporter:v1.12.0
+    container_name: hadith-node-exporter
+    command: ["--path.rootfs=/host"]
+    volumes:
+      - /:/host:ro
+    mem_limit: 64m
+    restart: unless-stopped
+
+  blackbox:
+    image: prom/blackbox-exporter:v0.29.0
+    container_name: hadith-blackbox
+    command: ["--config.file=/etc/blackbox/blackbox.yml"]
+    volumes:
+      - ./monitoring/blackbox:/etc/blackbox:ro
+    mem_limit: 64m
+    restart: unless-stopped
+
 volumes:
   hadith-data:
   postgres-data:
+  prometheus-data:
+  alertmanager-data:
+  grafana-data:
+  loki-data:
+  alloy-data:

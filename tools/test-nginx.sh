@@ -2,7 +2,9 @@
 # Checks nginx/default.conf against a stub app: syntax, the sign-in limit (5 quick tries, then
 # 429 as problem+json with Retry-After), that sign-up shares it, that other routes (and the health route) are not
 # limited, search spikes (smoothed, then 503 as problem+json), and the blue/green routing file written by tools/deploy.sh (live colour, canary
-# stickiness, reload). Needs Docker; does not build the real app image.
+# stickiness, reload), and the monitoring routes of item 47 (/metrics hidden, Grafana under /grafana/
+# with a sign-in limit, Faro POST /faro/collect, stub_status on the internal port, request ids,
+# JSON access log without the query string). Needs Docker; does not build the real app image.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -11,17 +13,25 @@ NET=nginx-test-$$
 PORT=${NGINX_TEST_PORT:-18080}
 STUB_CONF=$(mktemp)
 ROUTING_DIR=$(mktemp -d)
-trap 'docker rm -f "$NET-blue" "$NET-green" "$NET-edge" >/dev/null 2>&1 || true; docker network rm "$NET" >/dev/null 2>&1 || true; rm -rf "$STUB_CONF" "$ROUTING_DIR"' EXIT
+MON_CONF=$(mktemp)
+trap 'docker rm -f "$NET-blue" "$NET-green" "$NET-edge" "$NET-mon" >/dev/null 2>&1 || true; docker network rm "$NET" >/dev/null 2>&1 || true; rm -rf "$STUB_CONF" "$MON_CONF" "$ROUTING_DIR"' EXIT
 
 cat >"$STUB_CONF" <<'CONF'
 server {
     listen 8000;
     location = /api/v1/tokens { default_type application/json; return 401 '{"detail":"stub"}'; }
+    location = /api/v1/request-id { default_type text/plain; return 200 "$http_x_request_id"; }
     location / { default_type application/json; return 200 '{"ok":true}'; }
 }
 CONF
 
-chmod 644 "$STUB_CONF"
+# Stand-ins for Grafana (:3000) and Alloy's Faro receiver (:12347): they answer with the path seen.
+cat >"$MON_CONF" <<'CONF'
+server { listen 3000; location / { default_type text/plain; return 200 "grafana $request_uri"; } }
+server { listen 12347; location / { default_type text/plain; return 200 "alloy $request_uri"; } }
+CONF
+
+chmod 644 "$STUB_CONF" "$MON_CONF"
 docker network create "$NET" >/dev/null
 tools/deploy.sh routing-conf blue 0 >"$ROUTING_DIR/routing.conf"
 chmod 755 "$ROUTING_DIR"
@@ -30,6 +40,8 @@ for colour in blue green; do
   docker run -d --name "$NET-$colour" --network "$NET" --network-alias "app-$colour" \
     -v "$STUB_CONF:/etc/nginx/conf.d/default.conf:ro" "$IMAGE" >/dev/null
 done
+docker run -d --name "$NET-mon" --network "$NET" --network-alias grafana --network-alias alloy \
+  -v "$MON_CONF:/etc/nginx/conf.d/default.conf:ro" "$IMAGE" >/dev/null
 docker run -d --name "$NET-edge" --network "$NET" -p "$PORT:8080" \
   -v "$PWD/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro" \
   -v "$PWD/nginx/proxy_app.conf:/etc/nginx/proxy_app.conf:ro" \
@@ -76,6 +88,25 @@ sleep 3
 check "server version hidden" 0 "$(curl -sI "$URL/api/v1" | grep -ci '^server: nginx/')"
 big=$(head -c 2000000 /dev/zero | tr '\0' a)
 check "bodies over 1 MB rejected" 413 "$(echo "$big" | curl -s -o /dev/null -w '%{http_code}' -X POST --data-binary @- "$URL/api/v1")"
+
+# --- monitoring routes (item 47) ---
+check "/metrics is not served from outside" 404 "$(code "$URL/metrics")"
+check "Grafana is proxied under /grafana/ with the full path" "grafana /grafana/d/x?y=1" "$(curl -s "$URL/grafana/d/x?y=1")"
+check "loading the Grafana sign-in page is not limited" 200 "$(for _ in $(seq 1 8); do code "$URL/grafana/login"; echo; done | sort -u | tr -d '\n')"
+logins=$(for _ in 1 2 3 4 5 6 7; do code -X POST "$URL/grafana/login"; echo -n " "; done)
+check "Grafana sign-in: 5 tries, then 429" "200 200 200 200 200 429 429 " "$logins"
+check "Faro telemetry reaches Alloy's /collect" "alloy /collect" "$(curl -s -X POST -d '{}' "$URL/faro/collect")"
+check "Faro takes POST only" 403 "$(code "$URL/faro/collect")"
+faro=$(seq 60 | xargs -P 60 -I{} curl -s -o /dev/null -w '%{http_code}\n' -X POST -d '{}' "$URL/faro/collect")
+check "Faro: a flood from one address is cut to 429" 1 "$(echo "$faro" | grep -c '^429$' | awk '{print ($1>0)}')"
+check "Faro: bodies over 64 KB rejected" 413 "$(head -c 70000 /dev/zero | tr '\0' a | curl -s -o /dev/null -w '%{http_code}' -X POST --data-binary @- "$URL/faro/collect")"
+check "stub_status on the internal port" 1 "$(docker exec "$NET-edge" wget -qO- http://127.0.0.1:8081/stub_status | grep -c 'Active connections')"
+check "the app gets a 32-character X-Request-ID" 32 "$(curl -s "$URL/api/v1/request-id" | tr -d '\n' | wc -c | tr -d ' ')"
+curl -s -o /dev/null "$URL/api/v1/searches?q=secretword&method=bm25"
+last=$(docker logs "$NET-edge" 2>/dev/null | grep '"path":"/api/v1/searches"' | tail -1)
+check "access log is one JSON object per line" 1 "$(echo "$last" | python3 -c 'import json,sys; json.loads(sys.stdin.read()); print(1)' 2>/dev/null || echo 0)"
+check "access log leaves out the search text" 0 "$(docker logs "$NET-edge" 2>&1 | grep -c secretword || true)"
+sleep 2
 
 # --- blue/green routing ---
 release() { curl -s -o /dev/null -D - "$URL/api/v1" | tr -d '\r' | sed -n 's/^[Xx]-[Rr]elease: //p'; }

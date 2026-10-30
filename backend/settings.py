@@ -79,6 +79,10 @@ class Settings(BaseSettings):
     encoder_batch_wait_ms: float = Field(default=DEFAULT_ENCODER_BATCH_WAIT_MS, ge=0)
     encoder_batch_max: int = Field(default=DEFAULT_ENCODER_BATCH_MAX, gt=0)
 
+    # `json` (compose sets it) writes one JSON object per log line for Loki; `text` is Python's
+    log_format: str = Field(default="text", pattern="^(json|text)$")
+    log_level: str = Field(default="INFO", pattern="^(DEBUG|INFO|WARNING|ERROR)$")
+
     # Also used by the hadith method semantic-rrf-rerank (FEATURE_CROSS_ENCODER).
     reranker_model: str = "Omartificial-Intelligence-Space/ARA-Reranker-V1"
 

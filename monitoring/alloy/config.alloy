@@ -1,0 +1,117 @@
+// Grafana Alloy (docs/HANDOFF.md item 47): ships container logs and browser telemetry to Loki.
+//
+//  1. Docker logs of the app (both colours), nginx and postgres, read through the Docker socket
+//     (mounted read-only). The app writes JSON (LOG_FORMAT=json); its "level" becomes a label.
+//  2. faro.receiver: errors and web vitals from the Grafana Faro SDK in the browser. nginx
+//     forwards same-origin POST /faro/collect here and rate-limits it (nginx/default.conf).
+//     A counter of exceptions is exported on :12345/metrics for the FrontendErrors alert.
+
+loki.write "local" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}
+
+// --- 1. container logs ----------------------------------------------------------------------
+
+discovery.docker "containers" {
+  host             = "unix:///var/run/docker.sock"
+  refresh_interval = "15s"
+}
+
+discovery.relabel "containers" {
+  targets = discovery.docker.containers.targets
+
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/hadith-(blue|green|nginx|postgres)"
+    action        = "keep"
+  }
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(.*)"
+    target_label  = "container"
+  }
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/hadith-(blue|green)"
+    replacement   = "app"
+    target_label  = "service_name"
+  }
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/hadith-(nginx|postgres)"
+    replacement   = "$1"
+    target_label  = "service_name"
+  }
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/hadith-(blue|green)"
+    replacement   = "$1"
+    target_label  = "colour"
+  }
+}
+
+loki.source.docker "containers" {
+  host          = "unix:///var/run/docker.sock"
+  targets       = discovery.relabel.containers.output
+  relabel_rules = discovery.relabel.containers.rules
+  forward_to    = [loki.process.containers.receiver]
+}
+
+loki.process "containers" {
+  stage.match {
+    selector = "{service_name=\"app\"}"
+
+    stage.json {
+      expressions = { level = "level" }
+    }
+    stage.labels {
+      values = { level = "" }
+    }
+  }
+  forward_to = [loki.write.local.receiver]
+}
+
+// --- 2. browser telemetry (Faro) ------------------------------------------------------------
+
+faro.receiver "browser" {
+  server {
+    listen_address           = "0.0.0.0"
+    listen_port              = 12347
+    max_allowed_payload_size = "64KiB"
+
+    rate_limiting {
+      rate       = 50
+      burst_size = 100
+    }
+  }
+
+  output {
+    logs   = [loki.process.faro.receiver]
+    traces = []
+  }
+}
+
+loki.process "faro" {
+  stage.static_labels {
+    values = { service_name = "faro" }
+  }
+  stage.logfmt {
+    mapping = { kind = "" }
+  }
+  stage.labels {
+    values = { kind = "" }
+  }
+  stage.metrics {
+    metric.counter {
+      name              = "faro_exceptions_total"
+      description       = "JavaScript errors reported by browsers"
+      source            = "kind"
+      value             = "exception"
+      action            = "inc"
+      max_idle_duration = "24h"
+    }
+  }
+  forward_to = [loki.write.local.receiver]
+}

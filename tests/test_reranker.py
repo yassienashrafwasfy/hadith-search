@@ -1,8 +1,5 @@
-import pytest
-
-from services.reranker import CrossEncoderReranker, plain, score_pairs
-
-MAX_PASSAGE_CHARS = 400
+from services import reranker
+from services.reranker import HADITH_MAX_CHARS, plain, score_pairs
 
 
 class _Model:
@@ -20,28 +17,21 @@ def test_plain_removes_marks_and_normalises_alef_wasla():
 
 def test_score_pairs_cleans_both_sides_and_keeps_the_model_scores():
     model = _Model([0.02, 0.9])
-    scores = score_pairs(model, "ٱلصَّبْر؟", ["ٱلْحَمْدُ", "x" * 1000])
+    scores = score_pairs(model, "ٱلصَّبْر؟", ["ٱلْحَمْدُ", "x" * 2000])
     assert model.pairs[0] == ("الصبر؟", "الحمد")
-    assert len(model.pairs[1][1]) == MAX_PASSAGE_CHARS
+    assert len(model.pairs[1][1]) == HADITH_MAX_CHARS
     assert scores == [0.02, 0.9]
 
 
-async def test_empty_input_never_loads_the_model(monkeypatch):
+def test_empty_input_never_loads_the_model(monkeypatch):
     def boom(name):
         raise AssertionError("loaded")
 
     monkeypatch.setattr("services.reranker.load_cross_encoder", boom)
-    assert await CrossEncoderReranker("m")("q", []) == []
-
-
-async def test_reranker_scores_in_a_worker_thread(monkeypatch):
-    monkeypatch.setattr("services.reranker.load_cross_encoder", lambda name: _Model([0.7]))
-    assert await CrossEncoderReranker("m")("q", ["t"]) == pytest.approx([0.7])
+    assert reranker.rerank_texts("m", "q", []) == []
 
 
 def test_rerank_texts_loads_the_model_once_and_applies_the_char_limit(monkeypatch):
-    from services import reranker
-
     model = _Model([0.3, 0.8])
     monkeypatch.setattr(reranker, "load_cross_encoder", lambda name: model)
     assert reranker.rerank_texts("m", "q", ["a", "b" * 50], max_chars=10) == [0.3, 0.8]

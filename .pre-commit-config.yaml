@@ -16,6 +16,11 @@ repos:
         args: [--maxkb=500]
       - id: check-merge-conflict
       - id: check-yaml
+        exclude: ^deploy/dr/compose\.drill\.yml$  # compose merge tags (!reset); checked below
+      - id: check-yaml
+        name: check yaml (syntax only, compose tags)
+        files: ^deploy/dr/compose\.drill\.yml$
+        args: [--unsafe]
       - id: check-toml
       - id: end-of-file-fixer
       - id: trailing-whitespace

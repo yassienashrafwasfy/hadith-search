@@ -14,7 +14,21 @@ from functools import lru_cache
 from math import log
 
 import numpy as np
-from sqlalchemy import Float, Numeric, String, and_, cast, column, func, select, values
+from sqlalchemy import (
+    ARRAY,
+    Float,
+    Integer,
+    Numeric,
+    Select,
+    String,
+    and_,
+    any_,
+    case,
+    cast,
+    func,
+    literal,
+    select,
+)
 from sqlalchemy.orm import Session
 
 import timing
@@ -34,6 +48,7 @@ PRF_BETA = 0.5
 HYBRID_ALPHA = 0.8
 
 Scores = dict[int, float]
+Ids = Collection[int] | Select  # hadith ids, or a select() of them (results.allowed_query)
 
 
 def preprocess_query(query: str, lang: str) -> str:
@@ -77,21 +92,55 @@ def _corpus_stats(session: Session, lang: str) -> tuple[int, float]:
     return stats
 
 
-def _weights_table(weights: dict[str, float]):
-    return values(column("term", String), column("qtf", Float), name="q").data(
-        list(weights.items())
+def _query_terms(session: Session, lang: str, weights: dict[str, float]):
+    """(df, qtf, where) for the query terms the index knows, or None when it knows none.
+
+    `df` and `qtf` are CASE expressions on `postings.term` (the term's document frequency and
+    query weight), `where` selects the terms' postings with the terms as one array literal.
+    The ranking statements used to join a VALUES list of the terms to `terms` and then to
+    `postings`. Through that join the planner cannot see which terms they are, guessed about 90
+    postings per term (a common one has 26,000) and checked the length and any filter once per
+    posting with an index lookup. With the terms in the WHERE it reads their real counts from
+    the column statistics and hash-joins instead: 2 to 6 times faster for common words.
+    """
+    frequencies = _document_frequencies(session, lang, weights)
+    if not frequencies:
+        return None
+    df = case(frequencies, value=Posting.term)
+    qtf = case({term: weights[term] for term in frequencies}, value=Posting.term)
+    where = and_(
+        Posting.language == lang,
+        Posting.term == any_(literal(sorted(frequencies), ARRAY(String))),
     )
+    return df, qtf, where
 
 
-def _ranked(stmt, score, id_column, restrict: Collection[int] | None, limit: int | None):
+def _among(id_column, ids: Ids):
+    """`id IN (subquery)` for a filter query, else `id = ANY(array)`: one parameter however
+    many ids, not one placeholder per id."""
+    if isinstance(ids, Select):
+        return id_column.in_(ids)
+    return id_column == any_(literal(list(ids), ARRAY(Integer)))
+
+
+def _ordered(stmt, score, id_column, restrict: Ids | None, limit: int | None):
+    """Filter to `restrict`, order best first, and cut to `limit` in the database.
+
+    The search page needs 15 rows; a common word matches 30,000 hadiths, so the limit saves the
+    sort of every match, the transfer and a dict that size in Python.
+    """
     if restrict is not None:
-        stmt = stmt.where(id_column.in_(list(restrict)))
+        stmt = stmt.where(_among(id_column, restrict))
     # Scores equal to 9 decimals tie, and ties go to the lower id, so the order never depends on
     # the order the database happened to add floats in.
-    stmt = stmt.group_by(id_column).order_by(func.round(cast(score, Numeric), 9).desc(), id_column)
+    stmt = stmt.order_by(func.round(cast(score, Numeric), 9).desc(), id_column)
     if limit is not None:
         stmt = stmt.limit(limit)
     return stmt
+
+
+def _ranked(stmt, score, id_column, restrict: Ids | None, limit: int | None):
+    return _ordered(stmt.group_by(id_column), score, id_column, restrict, limit)
 
 
 def _scores(session: Session, stmt) -> Scores:
@@ -103,7 +152,11 @@ def _count_terms(terms: list[str]) -> dict[str, float]:
 
 
 def term_overlap(
-    session: Session, query: str, lang: str, restrict: Collection[int] | None = None
+    session: Session,
+    query: str,
+    lang: str,
+    restrict: Ids | None = None,
+    limit: int | None = None,
 ) -> dict[int, int]:
     """Hadiths ranked by how many distinct query terms they contain."""
     terms = set(preprocess_query(query, lang).split())
@@ -113,7 +166,7 @@ def term_overlap(
     stmt = select(Posting.hadith_id, score).where(
         Posting.language == lang, Posting.term.in_(sorted(terms))
     )
-    stmt = _ranked(stmt, score, Posting.hadith_id, restrict, None)
+    stmt = _ranked(stmt, score, Posting.hadith_id, restrict, limit)
     return {int(hadith_id): int(count) for hadith_id, count in session.execute(stmt)}
 
 
@@ -121,35 +174,39 @@ def tf_idf(
     session: Session,
     query: str,
     lang: str,
-    restrict: Collection[int] | None = None,
+    restrict: Ids | None = None,
     limit: int | None = None,
 ) -> Scores:
     weights = _count_terms(preprocess_query(query, lang).split())
     if not weights:
         return {}
+    terms = _query_terms(session, lang, weights)
+    if terms is None:
+        return {}
     n_docs, _ = _corpus_stats(session, lang)
-    q = _weights_table(weights)
-    score = func.sum(
-        (1 + func.ln(cast(Posting.tf, Float))) * func.ln(float(n_docs) / Term.df) * q.c.qtf
-    )
-    stmt = _term_postings(select(Posting.hadith_id, score), q, lang)
+    df, qtf, where = terms
+    score = func.sum(_tfidf_weight(n_docs, df) * qtf)
+    stmt = select(Posting.hadith_id, score).where(where)
     return _scores(session, _ranked(stmt, score, Posting.hadith_id, restrict, limit))
 
 
-def _term_postings(stmt, q, lang: str):
-    """FROM the query terms, joined to their document frequency and postings."""
-    return (
-        stmt.select_from(q)
-        .join(Term, and_(Term.language == lang, Term.term == q.c.term))
-        .join(Posting, and_(Posting.language == Term.language, Posting.term == Term.term))
-    )
+def _tfidf_weight(n_docs: int, df):
+    """TF-IDF of one posting: (1 + ln tf) * ln(N / df)."""
+    return (1 + func.ln(cast(Posting.tf, Float))) * func.ln(float(n_docs) / df)
+
+
+def _bm25_weight(lang: str, n_docs: int, average: float, df):
+    """Okapi BM25 of one posting (needs `hadith_lengths` joined for the document length)."""
+    idf = func.ln((float(n_docs) - df + 0.5) / (df + 0.5))
+    saturation = (K1 * ((1 - B) + B * _length_column(lang) / average)) + Posting.tf
+    return (((K1 + 1) * Posting.tf) / saturation) * idf
 
 
 def bm25(
     session: Session,
     query: str,
     lang: str,
-    restrict: Collection[int] | None = None,
+    restrict: Ids | None = None,
     limit: int | None = None,
     weights: dict[str, float] | None = None,
 ) -> Scores:
@@ -159,15 +216,15 @@ def bm25(
     if not weights:
         return {}
     n_docs, average = _corpus_stats(session, lang)
-    if not n_docs:
+    terms = _query_terms(session, lang, weights) if n_docs else None
+    if terms is None:
         return {}
-    q = _weights_table(weights)
-    length = _length_column(lang)
-    idf = func.ln((float(n_docs) - Term.df + 0.5) / (Term.df + 0.5))
-    saturation = (K1 * ((1 - B) + B * length / average)) + Posting.tf
-    score = func.sum((((K1 + 1) * Posting.tf) / saturation) * idf * q.c.qtf)
-    stmt = _term_postings(select(Posting.hadith_id, score), q, lang).join(
-        HadithLength, HadithLength.hadith_id == Posting.hadith_id
+    df, qtf, where = terms
+    score = func.sum(_bm25_weight(lang, n_docs, average, df) * qtf)
+    stmt = (
+        select(Posting.hadith_id, score)
+        .join(HadithLength, HadithLength.hadith_id == Posting.hadith_id)
+        .where(where)
     )
     return _scores(session, _ranked(stmt, score, Posting.hadith_id, restrict, limit))
 
@@ -211,30 +268,72 @@ def _expansion_weights(
     return weights
 
 
-def bm25_prf(session: Session, query: str, lang: str) -> Scores:
+def bm25_prf(
+    session: Session,
+    query: str,
+    lang: str,
+    restrict: Ids | None = None,
+    limit: int | None = None,
+) -> Scores:
+    """BM25 again with the query expanded from the top documents of a first BM25 pass.
+
+    The feedback documents come from the whole corpus; `restrict` and `limit` apply to the
+    second pass only, so a filter changes which results are shown, not the expanded query.
+    """
     first_pass = bm25(session, query, lang, limit=PRF_DOCS)
     weights = _expansion_weights(session, query, lang, list(first_pass))
-    return bm25(session, query, lang, weights=weights)
+    return bm25(session, query, lang, restrict=restrict, limit=limit, weights=weights)
 
 
 def hybrid_prf(session: Session, query: str, lang: str) -> Scores:
     """Like `bm25_prf`, but the feedback documents come from the BM25 + TF-IDF hybrid."""
-    first_pass = list(bm25_tfidf_hybrid(session, query, lang))[:PRF_DOCS]
+    first_pass = list(bm25_tfidf_hybrid(session, query, lang, limit=PRF_DOCS))
     weights = _expansion_weights(session, query, lang, first_pass)
     return bm25(session, query, lang, weights=weights)
 
 
-def bm25_tfidf_hybrid(session: Session, query: str, lang: str) -> Scores:
-    bm25_scores = bm25(session, query, lang)
-    tfidf_scores = tf_idf(session, query, lang)
-    bm25_max = max(bm25_scores.values(), default=1)
-    tfidf_max = max(tfidf_scores.values(), default=1)
-    combined = {
-        hadith_id: HYBRID_ALPHA * (bm25_scores.get(hadith_id, 0) / bm25_max)
-        + (1 - HYBRID_ALPHA) * (tfidf_scores.get(hadith_id, 0) / tfidf_max)
-        for hadith_id in set(bm25_scores) | set(tfidf_scores)
-    }
-    return dict(sorted(combined.items(), key=lambda item: (-round(item[1], 9), item[0])))
+def bm25_tfidf_hybrid(
+    session: Session,
+    query: str,
+    lang: str,
+    restrict: Ids | None = None,
+    limit: int | None = None,
+) -> Scores:
+    """HYBRID_ALPHA x BM25 + (1 - HYBRID_ALPHA) x TF-IDF, each divided by its best score.
+
+    One statement: both sums per hadith, then the two maxima as window functions over every
+    match, and only then the filter and the limit, so a filter never changes the normalisation.
+    A hadith with no length row has no BM25 score and counts 0 for it (as BM25 alone leaves it out).
+    """
+    weights = _count_terms(preprocess_query(query, lang).split())
+    if not weights:
+        return {}
+    n_docs, average = _corpus_stats(session, lang)
+    terms = _query_terms(session, lang, weights) if n_docs else None
+    if terms is None:
+        return {}
+    df, qtf, where = terms
+    per_hadith = (
+        select(
+            Posting.hadith_id.label("hadith_id"),
+            func.sum(_bm25_weight(lang, n_docs, average, df) * qtf).label("bm25"),
+            func.sum(_tfidf_weight(n_docs, df) * qtf).label("tfidf"),
+        )
+        .outerjoin(HadithLength, HadithLength.hadith_id == Posting.hadith_id)
+        .where(where)
+        .group_by(Posting.hadith_id)
+        .subquery()
+    )
+    best = select(
+        per_hadith,
+        func.coalesce(func.max(per_hadith.c.bm25).over(), 1).label("bm25_max"),
+        func.max(per_hadith.c.tfidf).over().label("tfidf_max"),
+    ).subquery()
+    score = HYBRID_ALPHA * (func.coalesce(best.c.bm25, 0) / best.c.bm25_max) + (
+        1 - HYBRID_ALPHA
+    ) * (best.c.tfidf / best.c.tfidf_max)
+    stmt = _ordered(select(best.c.hadith_id, score), score, best.c.hadith_id, restrict, limit)
+    return _scores(session, stmt)
 
 
 def _embedding_table():
@@ -254,7 +353,7 @@ def dense_search(
     query_embedding,
     lang: str,
     top_k: int,
-    restrict: Collection[int] | None = None,
+    restrict: Ids | None = None,
 ) -> Scores:
     """Exact cosine search (no vector index): score is 1 - cosine distance, best first."""
     vector = _embedding_column(lang)
@@ -262,7 +361,7 @@ def dense_search(
     hadith_id = vector.table.c.hadith_id
     stmt = select(hadith_id, 1 - distance).where(vector.is_not(None))
     if restrict is not None:
-        stmt = stmt.where(hadith_id.in_(list(restrict)))
+        stmt = stmt.where(_among(hadith_id, restrict))
     stmt = stmt.order_by(distance, hadith_id).limit(top_k)
     return _scores(session, stmt)
 
@@ -300,7 +399,7 @@ def cosine_search(
     lang: str,
     model,
     top_k: int,
-    restrict: Collection[int] | None = None,
+    restrict: Ids | None = None,
 ) -> Scores:
     return dense_search(session, encode_query(model, query, lang), lang, top_k, restrict=restrict)
 
@@ -320,7 +419,7 @@ def _fused_candidates(
     lang: str,
     model,
     candidate_k: int,
-    restrict: Collection[int] | None,
+    restrict: Ids | None,
 ) -> Scores:
     lexical = bm25(session, query, lang, restrict=restrict, limit=candidate_k)
     dense = dense_search(session, encode_query(model, query, lang), lang, candidate_k, restrict)
@@ -334,7 +433,7 @@ def bm25_dense_rrf(
     model,
     candidate_k: int = 500,
     top_k: int = 50,
-    restrict: Collection[int] | None = None,
+    restrict: Ids | None = None,
 ) -> Scores:
     """Reciprocal rank fusion of the BM25 and dense rankings."""
     fused = _fused_candidates(session, query, lang, model, candidate_k, restrict)

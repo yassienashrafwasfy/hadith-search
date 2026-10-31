@@ -366,7 +366,7 @@
 <!-- postings -->
 <g id="postings" class="node">
 <title>postings</title>
-<g id="a_postings"><a xlink:title="postings&#10;Derived. Inverted index rows, rebuilt by scripts/build_inverted_index.py. Matn only.">
+<g id="a_postings"><a xlink:title="postings&#10;Derived. Inverted index rows, rebuilt by scripts/build_inverted_index.py. Matn only. The primary key INCLUDEs tf, so ranking reads postings from the index alone (HANDOFF item 48).">
 <ellipse fill="none" stroke="black" stroke-width="0" cx="373.35" cy="-3664.96" rx="203.79" ry="214.92"/>
 <polygon fill="#1d71b8" stroke="transparent" points="231.35,-3754.96 231.35,-3814.96 515.35,-3814.96 515.35,-3754.96 231.35,-3754.96"/>
 <polygon fill="none" stroke="#29235c" points="231.35,-3754.96 231.35,-3814.96 515.35,-3814.96 515.35,-3754.96 231.35,-3754.96"/>

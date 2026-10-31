@@ -49,8 +49,8 @@ Table hadiths {
   Has_Arabic_Matn integer
 
   indexes {
-    Book [name: 'ix_hadiths_Book']
-    Normalized_Grade [name: 'ix_hadiths_Normalized_Grade']
+    Normalized_Grade [name: 'ix_hadiths_grade_id', note: 'INCLUDE (id): the grade filter is an index-only scan']
+    Book [name: 'ix_hadiths_book_id', note: 'INCLUDE (id): the book filter is an index-only scan']
   }
 
   Note: '''
@@ -101,7 +101,7 @@ Table postings {
     hadith_id [name: 'ix_postings_hadith_id']
   }
 
-  Note: 'Derived. Inverted index rows, rebuilt by scripts/build_inverted_index.py. Matn only.'
+  Note: 'Derived. Inverted index rows, rebuilt by scripts/build_inverted_index.py. Matn only. The primary key INCLUDEs tf, so ranking reads postings from the index alone (HANDOFF item 48).'
 }
 
 Table annotators {

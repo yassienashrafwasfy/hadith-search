@@ -1,6 +1,6 @@
 """Turn raw {hadith_id: score} rankings into API results."""
 
-from sqlalchemy import ARRAY, Integer, any_, bindparam, select
+from sqlalchemy import ARRAY, Integer, Select, any_, bindparam, select
 from sqlalchemy.orm import Session
 
 from models import HADITH_CHAPTER, Chapter, Hadith, HadithSchema, SearchResult
@@ -41,8 +41,12 @@ def _to_hadith(row) -> HadithSchema:
     )
 
 
-def allowed_ids(session: Session, grade_filter: str | None, book_filter: str | None):
-    """Ids of the hadiths that pass the filters, or None when there is no filter."""
+def allowed_query(grade_filter: str | None, book_filter: str | None) -> Select | None:
+    """A select() of the ids of the hadiths that pass the filters, or None when there is no filter.
+
+    Ranking takes it as `restrict`, so the database filters inside the search statement instead
+    of the app loading (say) 26,588 Sahih ids and sending them back as an array.
+    """
     if not (grade_filter or book_filter):
         return None
     stmt = select(Hadith.id)
@@ -50,7 +54,13 @@ def allowed_ids(session: Session, grade_filter: str | None, book_filter: str | N
         stmt = stmt.where(Hadith.Normalized_Grade == grade_filter)
     if book_filter:
         stmt = stmt.where(Hadith.Book == book_filter)
-    return set(session.scalars(stmt))
+    return stmt
+
+
+def allowed_ids(session: Session, grade_filter: str | None, book_filter: str | None):
+    """Ids of the hadiths that pass the filters, or None when there is no filter."""
+    stmt = allowed_query(grade_filter, book_filter)
+    return None if stmt is None else set(session.scalars(stmt))
 
 
 def build_results(

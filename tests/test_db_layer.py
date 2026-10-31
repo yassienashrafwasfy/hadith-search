@@ -1,4 +1,5 @@
 import time
+from dataclasses import replace
 
 import numpy as np
 import pytest
@@ -192,3 +193,29 @@ def test_default_page_is_fifteen_results():
     from services import results
 
     assert results.DEFAULT_TOP_K == 15
+
+
+def test_statements_are_never_prepared(_pg_schema):
+    # A prepared statement can switch to a generic plan that ignores the search terms and filter
+    # (a filtered BM25 search went from 23 ms to 109 ms on one); see database.CONNECT_ARGS.
+    with database.get_sync_engine().connect() as conn:
+        assert conn.connection.driver_connection.prepare_threshold is None
+
+
+@pytest.mark.parametrize("method", ["term-overlap", "tfidf", "bm25", "bm25-tf-idf", "bm25-prf"])
+async def test_keyword_methods_filter_and_cut_in_sql(_search_index, _mock_preprocess, method):
+    """The keyword systems get the filter and the page size, and build_results no longer filters,
+    so a Hasan filter must return Hasan hadiths only, at most a page of them."""
+    seen = {}
+    system = retrieval.SYSTEMS[method]
+
+    def spy(ctx, query, lang):
+        seen.update(limit=ctx.limit, restrict=ctx.restrict)
+        return system.run(ctx, query, lang)
+
+    request = SearchRequest(query="fasting prayer", lang="en", grade_filter="Hasan")
+    with database.get_sync_session() as session:
+        ctx = retrieval.SearchContext(session=session, model=lambda: None)
+        response = retrieval.run_search(replace(system, run=spy), ctx, request)
+    assert seen["limit"] == 15 and seen["restrict"] is not None
+    assert response.results and {r.hadith.grade for r in response.results} == {"Hasan"}

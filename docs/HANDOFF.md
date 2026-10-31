@@ -1002,6 +1002,113 @@ Three things were added without being on the agreed list: the 0.1 request a seco
 
 **Files:** `backend/observability.py`, `backend/main.py`, `backend/limiter.py`, `backend/routers/search.py`, `backend/features.py`, `backend/settings.py`, `backend/rest.py`, `requirements.txt`, `Dockerfile`, `docker-compose.yml`, `nginx/default.conf`, `nginx/proxy_app.conf`, `monitoring/**`, `frontend/src/observability.ts`, `frontend/src/main.tsx`, `frontend/package.json`, `tools/test-monitoring.sh`, `tools/test-nginx.sh`, `.github/workflows/ci.yml`, `.env.example`, `tests/test_observability.py`, `tests/test_monitoring_config.py`, `tests/security/test_auth.py`, `tests/security/test_headers_cors.py`
 
+### 48. Query profiling and faster keyword and filtered searches (2026-10-31)
+
+**How it was profiled.** Scratch database `hadith_profile` in `hadith-test-pg`, built like item 37: a `pg_dump` of the real database (read only), item 28 steps 1, 2 and 2b, `VACUUM ANALYZE`; full corpus (33,064 hadiths, 1,421,115 postings). The real `hadith-postgres` was not changed. It still has the flat pre-3NF schema (item 28 was never applied to it), so the current code cannot run on it as it is. `backend/scripts/query_profile.py` (new) runs every search method through the real `run_search` on common, mid and rare words, with a grade filter and with a book filter. It logs every statement (time and rows) and can print `EXPLAIN (ANALYZE, BUFFERS)` for one method. The Arabic encoder was the real ONNX model.
+
+**What was slow.** Every query is fast when its words are rare (5 to 45 ms). Queries with common words were slow: "قال رسول الله ..." matches 31,360 hadiths and the BM25 + TF-IDF hybrid took 463 ms. Five causes, in order of size:
+1. **Every match went back to Python.** The keyword methods sorted and returned all 31,360 scores, and `build_results` then kept 15. The hybrid did this twice and merged two 31,000-entry dicts in Python.
+2. **Wrong row estimates.** The statements joined a `VALUES` list of the query terms to `terms` and then to `postings`. Through that join the planner cannot see which terms they are. It guessed 87 postings per term (a common one has 26,000), so it chose nested loops: 52,793 separate `hadith_lengths` lookups, and with a filter as many `hadiths` lookups.
+3. **Postings read from the table.** `tf` is not in the primary key, so every posting also cost a read of the table.
+4. **Filters loaded into Python.** A grade filter loaded every allowed id (26,588 for Sahih) into Python and sent them back as an array or an `IN` list.
+5. **Generic plans.** psycopg prepares a statement once it has run 5 times on a connection, and PostgreSQL then switched the filtered BM25 statement to a generic plan that ignores the terms and the filter: 23 ms became 109 ms from the 6th run on. Item 37's single-user numbers did not show this, because they used the same few queries.
+
+**Changes.**
+- **Limit and filters in SQL.** `SearchContext.limit`: `run_search` sets it to the page size (15) and passes the filter to every method as `restrict`. The keyword methods (`term_overlap`, `tf_idf`, `bm25`, `bm25_tfidf_hybrid`, `bm25_prf`) take `restrict` and `limit`. The evaluation callers pass neither and still get every match.
+- **The hybrid is one statement.** Both sums per hadith, then the two maxima as window functions over every match, then the filter and the limit, so a filter does not change the normalisation (it was normalised over the unfiltered matches before too). `hybrid_prf` takes its 5 feedback documents with `limit`. `bm25_prf` keeps its feedback documents from the whole corpus and filters the second pass only, as before.
+- **Terms as literals** (`ranking._query_terms`). One primary-key lookup gets the terms' `df`. The statement then selects `postings.term = ANY(array)`, with `df` and the query weight as `CASE` on the term. The planner reads the real counts from the column statistics and hash-joins `hadith_lengths` and the filter. The arithmetic is unchanged: same SQL expressions, same order.
+- **Filters as a subquery.** `results.allowed_query()` returns the select of the allowed ids, and the ranking SQL uses it as `id IN (subquery)`. A collection of ids still works: `= ANY(array)`, one parameter however many ids. `build_results` no longer filters for `run_search`, because every method has filtered already.
+- **Indexes.** `postings` primary key `(language, term, hadith_id) INCLUDE (tf)`, so postings are read from the index alone. `ix_hadiths_grade_id ("Normalized_Grade") INCLUDE (id)` and `ix_hadiths_book_id ("Book") INCLUDE (id)`, so the filter subquery reads only the index. They replace `ix_hadiths_Normalized_Grade` and `ix_hadiths_Book`, which nothing used (item 42).
+- **Nothing is prepared.** `database.CONNECT_ARGS = {"prepare_threshold": None}` on both engines, so every statement is planned with its own values (1 to 4 ms of planning).
+
+**Results: same pages, 2 to 8 times faster where it was slow.** The two profiles ran on the same scratch database, 7 runs each (median ms per search, in process: query preprocessing, SQL and Python, no HTTP). Old = old code on the old indexes; new = this item's code after the migration below. All 65 method and query cases returned the same page: same ids, same order, scores equal to 9 decimals.
+
+| Method | Lang | common | mid | rare | graded | book |
+|---|---|---|---|---|---|---|
+| term-overlap | en | 58 → 26 | 8 → 8 | 10 → 8 | 98 → 30 | 15 → 13 |
+| term-overlap | ar | 74 → 37 | 9 → 8 | 7 → 7 | 85 → 21 | 18 → 9 |
+| tfidf | en | 106 → 42 | 14 → 12 | 13 → 10 | 152 → 49 | 21 → 10 |
+| tfidf | ar | 158 → 64 | 12 → 10 | 11 → 10 | 151 → 25 | 20 → 9 |
+| bm25 | en | 127 → 50 | 19 → 22 | 17 → 15 | 191 → 50 | 22 → 12 |
+| bm25 | ar | 194 → 65 | 13 → 11 | 14 → 11 | 213 → 27 | 24 → 12 |
+| bm25-tf-idf | en | 318 → 76 | 31 → 17 | 26 → 16 | 377 → 84 | 36 → 19 |
+| bm25-tf-idf | ar | 463 → 106 | 23 → 20 | 25 → 18 | 447 → 83 | 31 → 16 |
+| bm25-prf | en | 291 → 108 | 38 → 29 | 38 → 29 | 317 → 119 | 38 → 24 |
+| bm25-prf | ar | 357 → 148 | 43 → 34 | 27 → 32 | 384 → 112 | 55 → 26 |
+| semantic-rerank | ar | 152 → 72 | 16 → 15 | 17 → 14 | 70 → 32 | 92 → 12 |
+| cosine-similarity | ar | 14 → 15 | 16 → 15 | 18 → 15 | 38 → 11 | 84 → 13 |
+| semantic-rrf | ar | 157 → 88 | 28 → 26 | 29 → 33 | 100 → 38 | 171 → 27 |
+
+The sum of the 65 medians went from 6,239 to 2,223 ms. Over HTTP (uvicorn on this host, 15 requests per case, old and new code against the same database), the same pages came back: bm25 ar common 182 → 79 ms, bm25 ar with the Hasan filter 186 → 35 ms, bm25-tf-idf ar common 411 → 109 ms, semantic-rrf with the Bukhari filter 171 → 84 ms, a mid query 20 → 17 ms. `tests/perf` passed against the new code: single-user p95 at most 74 ms for every method, 20 users 15.8 rps with p95 199 ms. Autocomplete and "did you mean" (item 43) were profiled too: about 12 ms a keystroke and no statement above 6 ms. They were left unchanged.
+
+**Migrating an existing database** (additive; the old release runs on the result):
+1. `tools/migrate_postings_pk.sh --dry-run`, then `DATABASE_URL=... tools/migrate_postings_pk.sh`. It builds the covering key `CONCURRENTLY` (about 4 s for 1.4 million postings; reads and writes go on), then swaps it in with one short `ALTER TABLE`, then runs `ANALYZE`. It stops at once when the key already has `INCLUDE (tf)`. A new database gets the key from `create_all`.
+2. The two `hadiths` indexes need no step: `hadiths` is now in `database.INDEXED_LATER`, so the app creates them at start-up when they are missing (about 0.1 s). The old `ix_hadiths_Book` and `ix_hadiths_Normalized_Grade` stay on an existing database. They are harmless, and you can drop them once the old release is gone.
+
+**Tests.** `tests/test_ranking.py`: for every keyword method, on 6 queries, a filtered page (`restrict` as a set and as a subquery, plus `limit`) is the full ranking filtered and cut, with the same ids in the same order. A sum can add its terms in another order under another plan, so the scores are compared to 1e-9. `tests/test_db_layer.py`: the keyword methods receive the page size and the filter, and a Hasan filter returns only Hasan hadiths now that `build_results` does not filter. Another test checks that nothing is prepared. `tests/test_migrate_postings_pk.py`: the dry run, the key matches the model, and it upgrades an old key and can be run again. Full suite: 1426 passed.
+
+**Not done.** Storing a precomputed BM25 weight per posting, which needs no `hadith_lengths` join. A throwaway table showed 90 → 41 ms for the common Arabic query, but it needs a new column, a change to `build_inverted_index.py`, and a rebuild whenever `K1`, `B` or the corpus changes. No vector index: exact cosine search is 10 to 15 ms (item 42's decision stands). BM25-PRF is still the slowest method (110 to 150 ms on common words): it runs BM25 twice, and its expanded query adds terms.
+
+**Not verified.** The live database: it is still on the pre-3NF schema, so the migration and the numbers come from the scratch copy. The Docker image (2 CPU limit) under load; the in-process and HTTP runs used the host CPU. A host under heavy load: the numbers are medians of single runs on a host with load average 1.5 to 2.
+
+**Files:** `backend/services/ranking.py`, `backend/services/retrieval.py`, `backend/services/results.py`, `backend/database.py`, `backend/models/orm.py`, `backend/scripts/query_profile.py` (new), `tools/migrate_postings_pk.sh` (new), `docs/diagrams/schema.dbml`, `docs/diagrams/schema.svg`, `tests/test_ranking.py`, `tests/test_db_layer.py`, `tests/test_migrate_postings_pk.py` (new), `CLAUDE.md`
+
+### 49. Backups, point-in-time restore and disaster drills (2026-10-31)
+
+**Before this item there were no database backups.** A lost `postgres-data` volume or a mistaken `DROP TABLE` lost everything for good: RPO = all data, no RTO. Crashes and restarts were already fine (see the table).
+
+**Drills.** `tools/dr/drill.py` runs eight disasters against an isolated copy of the stack: `deploy/dr/compose.drill.yml`, project `hadith-dr`, which `extends` the real postgres, db-backup, app and nginx services; only localhost ports; throwaway secrets in `deploy/dr/state/drill.env` (git-ignored). `up --seed-from-real` copies the corpus tables from `hadith-postgres` with `pg_dump` (read only) into a separate `hadith_corpus` database, so restores move about 350 MB as they would for real. The real stack was not touched.
+- While a scenario runs, a prober hits `GET /api/v1/health` through nginx every 50 ms and a writer inserts a numbered row into `dr_writes` directly every 50 ms.
+- **RTO** = from the fault (or, for a partition or freeze, the moment it ends) until both are healthy for 3 s in a row.
+- **RPO** = fault time minus the oldest acknowledged write before the fault that is missing afterwards (0 when none is missing).
+- p95 by nearest rank over 20 runs per scenario.
+- Crashes are a SIGKILL of the container's host PID: `docker kill` counts as a manual stop, and the restart policy ignores it. Every run waits until all containers have been up 12 s, because Docker doubles its restart delay for a container that dies within 10 s of starting; without that wait, back-to-back runs measured 60 s.
+
+| Scenario | What happens | RTO p95 before | RTO p95 after | RPO p95 |
+|---|---|---|---|---|
+| app-kill | app SIGKILL, Docker restarts it | 4.56 s | 4.56 s | 0 |
+| db-kill | PostgreSQL SIGKILL, crash recovery | 3.86 s | 3.94 s | 0 |
+| nginx-kill | nginx SIGKILL | 2.81 s | 2.74 s | 0 |
+| db-partition | postgres off the network 10 s (from heal) | 4.32 s | 4.32 s | 0 |
+| app-freeze | app paused 10 s (from thaw) | 0.05 s | 0.05 s | 0 |
+| power-loss | every container killed at once | 7.61 s | 5.70 s | 0 |
+| db-volume-loss | data directory wiped | impossible (all data lost) | **8.81 s** | **0** |
+| drop-table | `DROP TABLE` by mistake, restore to just before | impossible | **12.20 s** | **0** |
+
+The first six needed no fix: Docker's restart policy and PostgreSQL's own crash recovery lose no acknowledged write, and the app reconnects without help. power-loss improved because postgres's health check now runs every second while it starts (it was every 5 s). app-kill is about 4 s of Python start-up (imports and the app factory) and was left as it is.
+
+**What was added.**
+- `db-backup` service (`deploy/backup/backup-loop.sh`, the postgres image): `pg_receivewal --synchronous` through the physical slot `backup` (each WAL piece is on the backup disk before the commit returns, hence RPO 0), one folder per timeline (`/backups/wal/tl<N>`), and a `pg_basebackup` (zstd, `-X none`) every 6 h, the newest 3 kept along with the WAL they need. postgres gets `max_slot_wal_keep_size=2GB`, so a dead stream cannot fill the disk, and a replication line in `deploy/backup/pg_hba.conf`. `tools/deploy.sh init` starts it.
+- `tools/db-restore.sh`: `--dry-run`, `--yes` (to the newest WAL) or `--yes --target-time '<time>'` (point in time; `@<unix seconds>` works too), `--discard-current`. It keeps a zstd copy of the replaced data directory in `/backups/pre-restore` (newest `PRE_RESTORE_KEEP`=2), restores the base backup, replays the WAL (`deploy/backup/restore-wal.sh`), recreates the slot while the server is still read-only, then opens it for writes and restarts db-backup. The app keeps running and answers 503 meanwhile.
+- Alerts `BackupStreamDown` (critical: the slot is inactive, or missing while PostgreSQL is up, for 5 min) and `BackupSlotNearLimit` (warning: under 512 MB left before the 2 GB cap), with promtool cases, and a "Backups" row on the Grafana dashboard.
+
+**Found and fixed by the drills.**
+1. After a restore the WAL stream failed for good. pg_receivewal resumed from the old timeline's last file, which the restored server does not have, and the slot was gone (base backups do not copy slots). Fix: one folder per timeline, and the restore recreates the slot before the first write.
+2. Restores took 19 to 21 s, about 9 to 12 s after the speed-ups below.
+   - zstd instead of gzip.
+   - The app is no longer stopped.
+   - postgres's health check runs every 1 s while it starts.
+   - The read-only gate replaced a second restart.
+3. A point-in-time target lost its fraction of a second (`date %N` read `@1.068` as 1.68), so the restore stopped at the wrong moment. The time is now parsed by hand.
+4. A point-in-time restore crashed in a loop ("requested recovery stop point is before consistent recovery point") when the newest base backup *started* before the target but *finished* after it. A backup is consistent only from its end. Base backups are now chosen by finish time (`backup_manifest` mtime).
+5. The copy of the replaced data was a plain tar: 18 s for 350 MB on this disk, and never deleted (16 copies, 6.2 GB, after one batch). drop-table RTO grew run by run, up to 34 s. Now it is zstd (2.3 s, a quarter of the size) and only the newest 2 are kept.
+6. `pick_base` exited silently under `set -e`/`pipefail` when the newest backup was skipped (`[ ] && echo` as the loop's last command). Fixed, and an `ERR` trap now names the failing line.
+
+**Restore runbook.** `tools/db-restore.sh --dry-run` shows which base backup and target it will use. Then run `tools/db-restore.sh --yes` after disk loss, or `--yes --target-time '2026-10-31 14:05:00+00'` for a mistake, giving a time just before it. Check the app, then the alerts: BackupStreamDown should clear within a minute. A fresh base backup starts at once on the new timeline.
+
+**Enabling on the live stack.** `docker compose up -d postgres db-backup` recreates postgres with the new settings (a few seconds down) and starts the backups. The first base backup is taken at once.
+
+**Not done.**
+- No off-host copy: the backups share the host and disk with the database, so a lost host loses both. Copy the `postgres-backups` volume elsewhere (rsync or object storage).
+- No metric for the base backup's age. `/backups/status.env` has it, but nothing exports it.
+- The drills ran on one WSL host with a 350 MB database. Restore time grows with the size of the database and with the WAL written since the last base backup (6 h at most).
+
+**Not verified.**
+- The real `hadith-postgres`: db-backup has not been started there.
+- A restore larger than the drill copy.
+
+**Files:** `deploy/backup/` (new: `backup-loop.sh`, `restore-wal.sh`, `pg_hba.conf`), `deploy/dr/` (new), `tools/db-restore.sh` (new), `tools/dr/drill.py` (new), `docker-compose.yml`, `tools/deploy.sh`, `monitoring/prometheus/alerts.yml`, `monitoring/prometheus/alerts.test.yml`, `monitoring/grafana/dashboards/hadith-overview.json`, `tests/test_backups.py` (new), `.gitignore`, `CLAUDE.md`
+
 ## Still open
 
 - Nothing has been pushed and no PR exists. Everything is on local branches.
@@ -1010,6 +1117,8 @@ Three things were added without being on the agreed list: the 0.1 request a seco
 - Some dependency findings are unfixed, and the Docker image was not rebuilt or rescanned after the PostgreSQL and deploy changes.
 - Model promotion (item 40) has not been run against a real MLflow server or the real corpus.
 - Item 43 (exact search, suggestions) was measured on synthetic data only; see its not-verified list.
+- The live `hadith-postgres` is still on the flat pre-3NF schema: item 28's migration was never run there, so neither has `tools/migrate_postings_pk.sh` (item 48). Item 48 was measured on a scratch copy.
+- Backups (item 49) are on the same host as the database, and db-backup has not been started on the live stack yet.
 - CI has no job for the PostgreSQL tests: they need a pgvector database (see the quick start).
 
 ## First run on a new machine

@@ -9,10 +9,10 @@ import random
 import _legacy_search as legacy
 import numpy as np
 import pytest
-from sqlalchemy import insert
+from sqlalchemy import insert, select
 
 import database
-from models import HadithEmbedding, HadithLength, Posting
+from models import Hadith, HadithEmbedding, HadithLength, Posting
 from scripts.build_inverted_index import write_index
 from services import ranking
 
@@ -163,6 +163,33 @@ class TestLexicalParity:
         assert list(ranking.bm25(_session, "prayer fast", "EN", limit=3)) == list(full)[:3]
         only = set(list(full)[:10:2])
         assert set(ranking.bm25(_session, "prayer fast", "EN", restrict=only)) == only
+
+    @pytest.mark.parametrize(
+        "rank",
+        [
+            ranking.term_overlap,
+            ranking.tf_idf,
+            ranking.bm25,
+            ranking.bm25_tfidf_hybrid,
+            ranking.bm25_prf,
+        ],
+    )
+    @pytest.mark.parametrize("as_query", [False, True])
+    @pytest.mark.parametrize(("query", "lang"), QUERIES)
+    def test_filtered_page_is_the_full_ranking_filtered_and_cut(
+        self, _session, rank, as_query, query, lang
+    ):
+        # The search page asks for 15 filtered results in SQL; it must be what filtering and
+        # cutting the full ranking gives (the hybrid still normalises by the unfiltered maxima).
+        full = rank(_session, query, lang)
+        even = [hadith_id for hadith_id in full if hadith_id % 2 == 0]
+        restrict = select(Hadith.id).where(Hadith.id % 2 == 0) if as_query else set(even)
+        page = rank(_session, query, lang, restrict=restrict, limit=4)
+        # Same ids in the same order; a sum may add its terms in another order under another plan.
+        assert list(page) == even[:4]
+        assert page == pytest.approx(
+            {hadith_id: full[hadith_id] for hadith_id in even[:4]}, rel=1e-9
+        )
 
     def test_empty_and_unknown_queries(self, _session):
         assert ranking.bm25(_session, "", "EN") == {}

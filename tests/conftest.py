@@ -31,7 +31,8 @@ from sqlalchemy import (
 )
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import OperationalError
-from sqlalchemy.pool import NullPool
+from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy.pool import AsyncAdaptedQueuePool, NullPool, QueuePool
 
 from settings import Settings, get_settings
 
@@ -244,8 +245,33 @@ def _rollback_open_transactions(admin, tag: str) -> int:
         return len(list(pids))
 
 
+@pytest.fixture(scope="session")
+def _pg_admin(_pg_ready):
+    """One untagged autocommit connection per worker that creates and drops the test schemas."""
+    admin = create_engine(_pg_ready, pool_size=1, isolation_level="AUTOCOMMIT")
+    yield admin
+    admin.dispose()
+
+
+# Each test's engines reuse a few connections instead of opening one per statement. With
+# NullPool every statement was a new TCP connection (two local ports through Docker's port
+# forwarding, each held in TIME_WAIT for a minute), and 16 xdist workers ran WSL's small
+# ephemeral port range (about 4,000) dry: later connects failed with "Cannot assign requested
+# address" or "server closed the connection unexpectedly". The pools close with the engines
+# (dispose_engines) after each test.
+def _pooled_async_engine(url, **kwargs):
+    pool = {"poolclass": AsyncAdaptedQueuePool, "pool_size": 2, "max_overflow": 8}
+    return create_async_engine(url, **{**kwargs, **pool})
+
+
+def _pooled_sync_engine(url, **kwargs):
+    return create_engine(
+        url, **{**kwargs, "poolclass": QueuePool, "pool_size": 2, "max_overflow": 8}
+    )
+
+
 @pytest.fixture
-def _pg_schema(_pg_ready, monkeypatch):
+def _pg_schema(_pg_ready, _pg_admin, monkeypatch):
     """A fresh empty schema for this test; DATABASE_URL points at it.
 
     Every connection of the test is tagged with the schema name. After the test, anything still
@@ -254,7 +280,7 @@ def _pg_schema(_pg_ready, monkeypatch):
     import database
 
     name = f"t_{uuid.uuid4().hex[:12]}"
-    admin = create_engine(_pg_ready, poolclass=NullPool, isolation_level="AUTOCOMMIT")
+    admin = _pg_admin
     with admin.connect() as conn:
         conn.execute(DDL(f'CREATE SCHEMA "{name}"'))
     url = make_url(_pg_ready).update_query_dict(
@@ -263,12 +289,13 @@ def _pg_schema(_pg_ready, monkeypatch):
     monkeypatch.setenv("DATABASE_URL", url.render_as_string(hide_password=False))
     get_settings.cache_clear()
     monkeypatch.setattr(database, "ENGINE_KWARGS", {"poolclass": NullPool})
+    monkeypatch.setattr(database, "create_engine", _pooled_sync_engine)
+    monkeypatch.setattr(database, "create_async_engine", _pooled_async_engine)
     yield name
     asyncio.run(database.dispose_engines())
     _rollback_open_transactions(admin, name)
     with admin.connect() as conn:
         conn.execute(DDL(f'DROP SCHEMA "{name}" CASCADE'))
-    admin.dispose()
 
 
 # ---------- API ----------

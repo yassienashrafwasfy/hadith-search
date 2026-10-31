@@ -1126,13 +1126,153 @@
     },
     {
       "type": "row",
-      "title": "Browser (Faro)",
+      "title": "Backups",
       "collapsed": false,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
         "y": 40
+      },
+      "id": 28,
+      "panels": []
+    },
+    {
+      "type": "stat",
+      "title": "WAL stream to backups (critical when off for 5 min)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "id": 29,
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 0,
+        "y": 41
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(pg_replication_slots_slot_is_active{slot_name=\"backup\"}) or on() vector(0)",
+          "refId": "A",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "DOWN",
+                  "color": "red"
+                },
+                "1": {
+                  "text": "UP",
+                  "color": "green"
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Backup slot headroom before the 2 GB cap (warning under 512 MB)",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "id": 30,
+      "gridPos": {
+        "h": 8,
+        "w": 18,
+        "x": 6,
+        "y": 41
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "min(pg_replication_slots_safe_wal_size_bytes{slot_name=\"backup\"})",
+          "legendFormat": "headroom",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.15
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "type": "row",
+      "title": "Browser (Faro)",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 49
       },
       "id": 23,
       "panels": []
@@ -1150,7 +1290,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 41
+        "y": 50
       },
       "targets": [
         {
@@ -1211,7 +1351,7 @@
         "h": 8,
         "w": 16,
         "x": 8,
-        "y": 41
+        "y": 50
       },
       "targets": [
         {
@@ -1237,7 +1377,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 49
+        "y": 58
       },
       "id": 26,
       "panels": []
@@ -1254,7 +1394,7 @@
         "h": 9,
         "w": 24,
         "x": 0,
-        "y": 50
+        "y": 59
       },
       "targets": [
         {

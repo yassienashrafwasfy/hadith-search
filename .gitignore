@@ -53,3 +53,4 @@ htmlcov/
 !.env.example
 !tools/runner/.env.runner.example
 .claude
+deploy/dr/state/

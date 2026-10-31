@@ -248,12 +248,12 @@ cmd_init() {
   mkdir -p "$STATE_DIR"
   [ ! -f "$STATE_FILE" ] || die "already initialised (see: tools/deploy.sh status)"
   local image=${BLUE_IMAGE:-hadith-search:blue}
-  if [ "$DRY_RUN" -eq 1 ]; then say_dry "start postgres, nginx and blue ($image)"; return; fi
+  if [ "$DRY_RUN" -eq 1 ]; then say_dry "start postgres, db-backup, nginx and blue ($image)"; return; fi
   save_state blue 0 ""
   routing_conf blue 0 >"$ROUTING_FILE"
   rel_set BLUE_REL_ID "$(release_from_image "$image")" BLUE_REL_IMAGE "$image" LAST init
   history "init blue $image"
-  "${COMPOSE[@]}" --profile blue up -d postgres app-blue nginx
+  "${COMPOSE[@]}" --profile blue up -d postgres db-backup app-blue nginx
   wait_healthy blue || die "blue did not become healthy in ${HEALTH_TIMEOUT}s (docker compose logs app-blue)"
   log "blue is live ($image)."
 }

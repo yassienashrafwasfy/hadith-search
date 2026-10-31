@@ -129,3 +129,25 @@ groups:
         annotations:
           summary: "Only {{ $value | humanizePercentage }} of the host disk is free"
           description: Docker images (tools/deploy.sh prune-images), Prometheus (15 d) and Loki (7 d) live here.
+
+  # Backups (docs/HANDOFF.md item 49). The WAL stream is what keeps the RPO of a lost disk under a
+  # second; without it a restore goes back to the last base backup (up to 6 hours).
+  - name: backups
+    rules:
+      - alert: BackupStreamDown
+        expr: |
+          max(pg_replication_slots_slot_is_active{slot_name="backup"}) == 0
+          or on() (absent(pg_replication_slots_slot_is_active{slot_name="backup"}) and on() max(pg_up) == 1)
+        for: 5m
+        labels: {severity: critical}
+        annotations:
+          summary: The WAL stream to the backups has stopped
+          description: Nothing has read the `backup` replication slot for 5 minutes, so new writes are not backed up. Check `docker compose logs db-backup`; a restore now would lose everything since the last base backup.
+
+      - alert: BackupSlotNearLimit
+        expr: min(pg_replication_slots_safe_wal_size_bytes{slot_name="backup"}) < 512 * 1024 * 1024
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "The backup slot can hold back only {{ $value | humanize1024 }}B more WAL"
+          description: The WAL stream is behind. At max_slot_wal_keep_size (2 GB) the server drops the slot and the backups stop for good until db-backup starts a new one.

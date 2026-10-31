@@ -250,3 +250,47 @@ tests:
             exp_annotations:
               summary: "Only 10% of the host disk is free"
               description: Docker images (tools/deploy.sh prune-images), Prometheus (15 d) and Loki (7 d) live here.
+
+  # --- backups: the WAL stream stops, the slot disappears, the slot fills up ----------------------
+  - interval: 1m
+    input_series:
+      - series: 'pg_replication_slots_slot_is_active{job="postgres", slot_name="backup", slot_type="physical"}'
+        values: "1 0 0 0 0 0 0 0"
+      - series: 'pg_replication_slots_safe_wal_size_bytes{job="postgres", slot_name="backup", slot_type="physical"}'
+        values: "2147483648 1073741824 500000000 500000000 500000000 500000000 500000000 500000000"
+      - series: 'pg_up{job="postgres"}'
+        values: "1 1 1 1 1 1 1 1"
+    alert_rule_test:
+      - eval_time: 5m  # inactive for 4 minutes: still pending
+        alertname: BackupStreamDown
+        exp_alerts: []
+      - eval_time: 6m
+        alertname: BackupStreamDown
+        exp_alerts:
+          - exp_labels: {severity: critical}
+            exp_annotations:
+              summary: The WAL stream to the backups has stopped
+              description: Nothing has read the `backup` replication slot for 5 minutes, so new writes are not backed up. Check `docker compose logs db-backup`; a restore now would lose everything since the last base backup.
+      - eval_time: 6m  # 1 GB left is fine; 500 MB for 5 minutes is not
+        alertname: BackupSlotNearLimit
+        exp_alerts: []
+      - eval_time: 7m
+        alertname: BackupSlotNearLimit
+        exp_alerts:
+          - exp_labels: {severity: warning}
+            exp_annotations:
+              summary: "The backup slot can hold back only 476.8MiB more WAL"
+              description: The WAL stream is behind. At max_slot_wal_keep_size (2 GB) the server drops the slot and the backups stop for good until db-backup starts a new one.
+
+  - interval: 1m
+    input_series:  # no slot at all while the database is up (db-backup never started)
+      - series: 'pg_up{job="postgres"}'
+        values: "1 1 1 1 1 1 1"
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: BackupStreamDown
+        exp_alerts:
+          - exp_labels: {severity: critical, slot_name: backup}
+            exp_annotations:
+              summary: The WAL stream to the backups has stopped
+              description: Nothing has read the `backup` replication slot for 5 minutes, so new writes are not backed up. Check `docker compose logs db-backup`; a restore now would lose everything since the last base backup.

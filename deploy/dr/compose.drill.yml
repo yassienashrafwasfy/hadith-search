@@ -1,0 +1,50 @@
+# Disaster-recovery drill stack (tools/dr/drill.py, docs/HANDOFF.md item 49).
+#
+# The same postgres, app and nginx services as ../../docker-compose.yml (through `extends`, so a
+# change to the real config is drilled too), under their own project name, container names,
+# volumes and ports, so a drill can never touch the real containers or data:
+#
+#   docker compose -p hadith-dr -f deploy/dr/compose.drill.yml --env-file deploy/dr/state/drill.env up -d
+#
+# tools/dr/drill.py writes the env file (throwaway secrets) and drives everything; there is no
+# need to start this by hand. Only the drill ports are published, on 127.0.0.1.
+services:
+  postgres:
+    extends:
+      file: ../../docker-compose.yml
+      service: postgres
+    container_name: hadith-dr-postgres
+    # The drill writer and the restore checks talk to the database directly.
+    ports:
+      - "127.0.0.1:${DR_PG_PORT:-15432}:5432"
+
+  db-backup:
+    extends:
+      file: ../../docker-compose.yml
+      service: db-backup
+    container_name: hadith-dr-db-backup
+
+  app-blue:
+    extends:
+      file: ../../docker-compose.yml
+      service: app-blue
+    container_name: hadith-dr-blue
+    image: ${DR_APP_IMAGE:-hadith-search:dr}
+    profiles: !reset []
+
+  nginx:
+    extends:
+      file: ../../docker-compose.yml
+      service: nginx
+    container_name: hadith-dr-nginx
+    ports: !override
+      - "127.0.0.1:${DR_HTTP_PORT:-18000}:8080"
+    volumes:
+      # Same nginx config, but the drill's own routing file (everything to app-blue).
+      - ./routing:/etc/nginx/routing:ro
+
+# Named after the real ones, but compose prefixes them with the project name (hadith-dr_...).
+volumes:
+  hadith-data:
+  postgres-data:
+  postgres-backups:

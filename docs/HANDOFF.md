@@ -1053,6 +1053,62 @@ The sum of the 65 medians went from 6,239 to 2,223 ms. Over HTTP (uvicorn on thi
 
 **Files:** `backend/services/ranking.py`, `backend/services/retrieval.py`, `backend/services/results.py`, `backend/database.py`, `backend/models/orm.py`, `backend/scripts/query_profile.py` (new), `tools/migrate_postings_pk.sh` (new), `docs/diagrams/schema.dbml`, `docs/diagrams/schema.svg`, `tests/test_ranking.py`, `tests/test_db_layer.py`, `tests/test_migrate_postings_pk.py` (new), `CLAUDE.md`
 
+### 49. Backups, point-in-time restore and disaster drills (2026-10-31)
+
+**Before this item there were no database backups.** A lost `postgres-data` volume or a mistaken `DROP TABLE` lost everything for good: RPO = all data, no RTO. Crashes and restarts were already fine (see the table).
+
+**Drills.** `tools/dr/drill.py` runs eight disasters against an isolated copy of the stack: `deploy/dr/compose.drill.yml`, project `hadith-dr`, which `extends` the real postgres, db-backup, app and nginx services; only localhost ports; throwaway secrets in `deploy/dr/state/drill.env` (git-ignored). `up --seed-from-real` copies the corpus tables from `hadith-postgres` with `pg_dump` (read only) into a separate `hadith_corpus` database, so restores move about 350 MB as they would for real. The real stack was not touched.
+- While a scenario runs, a prober hits `GET /api/v1/health` through nginx every 50 ms and a writer inserts a numbered row into `dr_writes` directly every 50 ms.
+- **RTO** = from the fault (or, for a partition or freeze, the moment it ends) until both are healthy for 3 s in a row.
+- **RPO** = fault time minus the oldest acknowledged write before the fault that is missing afterwards (0 when none is missing).
+- p95 by nearest rank over 20 runs per scenario.
+- Crashes are a SIGKILL of the container's host PID: `docker kill` counts as a manual stop, and the restart policy ignores it. Every run waits until all containers have been up 12 s, because Docker doubles its restart delay for a container that dies within 10 s of starting; without that wait, back-to-back runs measured 60 s.
+
+| Scenario | What happens | RTO p95 before | RTO p95 after | RPO p95 |
+|---|---|---|---|---|
+| app-kill | app SIGKILL, Docker restarts it | 4.56 s | 4.56 s | 0 |
+| db-kill | PostgreSQL SIGKILL, crash recovery | 3.86 s | 3.94 s | 0 |
+| nginx-kill | nginx SIGKILL | 2.81 s | 2.74 s | 0 |
+| db-partition | postgres off the network 10 s (from heal) | 4.32 s | 4.32 s | 0 |
+| app-freeze | app paused 10 s (from thaw) | 0.05 s | 0.05 s | 0 |
+| power-loss | every container killed at once | 7.61 s | 5.70 s | 0 |
+| db-volume-loss | data directory wiped | impossible (all data lost) | **8.81 s** | **0** |
+| drop-table | `DROP TABLE` by mistake, restore to just before | impossible | **12.20 s** | **0** |
+
+The first six needed no fix: Docker's restart policy and PostgreSQL's own crash recovery lose no acknowledged write, and the app reconnects without help. power-loss improved because postgres's health check now runs every second while it starts (it was every 5 s). app-kill is about 4 s of Python start-up (imports and the app factory) and was left as it is.
+
+**What was added.**
+- `db-backup` service (`deploy/backup/backup-loop.sh`, the postgres image): `pg_receivewal --synchronous` through the physical slot `backup` (each WAL piece is on the backup disk before the commit returns, hence RPO 0), one folder per timeline (`/backups/wal/tl<N>`), and a `pg_basebackup` (zstd, `-X none`) every 6 h, the newest 3 kept along with the WAL they need. postgres gets `max_slot_wal_keep_size=2GB`, so a dead stream cannot fill the disk, and a replication line in `deploy/backup/pg_hba.conf`. `tools/deploy.sh init` starts it.
+- `tools/db-restore.sh`: `--dry-run`, `--yes` (to the newest WAL) or `--yes --target-time '<time>'` (point in time; `@<unix seconds>` works too), `--discard-current`. It keeps a zstd copy of the replaced data directory in `/backups/pre-restore` (newest `PRE_RESTORE_KEEP`=2), restores the base backup, replays the WAL (`deploy/backup/restore-wal.sh`), recreates the slot while the server is still read-only, then opens it for writes and restarts db-backup. The app keeps running and answers 503 meanwhile.
+- Alerts `BackupStreamDown` (critical: the slot is inactive, or missing while PostgreSQL is up, for 5 min) and `BackupSlotNearLimit` (warning: under 512 MB left before the 2 GB cap), with promtool cases, and a "Backups" row on the Grafana dashboard.
+
+**Found and fixed by the drills.**
+1. After a restore the WAL stream failed for good. pg_receivewal resumed from the old timeline's last file, which the restored server does not have, and the slot was gone (base backups do not copy slots). Fix: one folder per timeline, and the restore recreates the slot before the first write.
+2. Restores took 19 to 21 s, about 9 to 12 s after the speed-ups below.
+   - zstd instead of gzip.
+   - The app is no longer stopped.
+   - postgres's health check runs every 1 s while it starts.
+   - The read-only gate replaced a second restart.
+3. A point-in-time target lost its fraction of a second (`date %N` read `@1.068` as 1.68), so the restore stopped at the wrong moment. The time is now parsed by hand.
+4. A point-in-time restore crashed in a loop ("requested recovery stop point is before consistent recovery point") when the newest base backup *started* before the target but *finished* after it. A backup is consistent only from its end. Base backups are now chosen by finish time (`backup_manifest` mtime).
+5. The copy of the replaced data was a plain tar: 18 s for 350 MB on this disk, and never deleted (16 copies, 6.2 GB, after one batch). drop-table RTO grew run by run, up to 34 s. Now it is zstd (2.3 s, a quarter of the size) and only the newest 2 are kept.
+6. `pick_base` exited silently under `set -e`/`pipefail` when the newest backup was skipped (`[ ] && echo` as the loop's last command). Fixed, and an `ERR` trap now names the failing line.
+
+**Restore runbook.** `tools/db-restore.sh --dry-run` shows which base backup and target it will use. Then run `tools/db-restore.sh --yes` after disk loss, or `--yes --target-time '2026-10-31 14:05:00+00'` for a mistake, giving a time just before it. Check the app, then the alerts: BackupStreamDown should clear within a minute. A fresh base backup starts at once on the new timeline.
+
+**Enabling on the live stack.** `docker compose up -d postgres db-backup` recreates postgres with the new settings (a few seconds down) and starts the backups. The first base backup is taken at once.
+
+**Not done.**
+- No off-host copy: the backups share the host and disk with the database, so a lost host loses both. Copy the `postgres-backups` volume elsewhere (rsync or object storage).
+- No metric for the base backup's age. `/backups/status.env` has it, but nothing exports it.
+- The drills ran on one WSL host with a 350 MB database. Restore time grows with the size of the database and with the WAL written since the last base backup (6 h at most).
+
+**Not verified.**
+- The real `hadith-postgres`: db-backup has not been started there.
+- A restore larger than the drill copy.
+
+**Files:** `deploy/backup/` (new: `backup-loop.sh`, `restore-wal.sh`, `pg_hba.conf`), `deploy/dr/` (new), `tools/db-restore.sh` (new), `tools/dr/drill.py` (new), `docker-compose.yml`, `tools/deploy.sh`, `monitoring/prometheus/alerts.yml`, `monitoring/prometheus/alerts.test.yml`, `monitoring/grafana/dashboards/hadith-overview.json`, `tests/test_backups.py` (new), `.gitignore`, `CLAUDE.md`
+
 ## Still open
 
 - Nothing has been pushed and no PR exists. Everything is on local branches.
@@ -1062,6 +1118,7 @@ The sum of the 65 medians went from 6,239 to 2,223 ms. Over HTTP (uvicorn on thi
 - Model promotion (item 40) has not been run against a real MLflow server or the real corpus.
 - Item 43 (exact search, suggestions) was measured on synthetic data only; see its not-verified list.
 - The live `hadith-postgres` is still on the flat pre-3NF schema: item 28's migration was never run there, so neither has `tools/migrate_postings_pk.sh` (item 48). Item 48 was measured on a scratch copy.
+- Backups (item 49) are on the same host as the database, and db-backup has not been started on the live stack yet.
 - CI has no job for the PostgreSQL tests: they need a pgvector database (see the quick start).
 
 ## First run on a new machine

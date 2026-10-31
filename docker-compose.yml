@@ -58,13 +58,52 @@ services:
       - POSTGRES_USER=hadith
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
       - POSTGRES_DB=hadith
+    # Backups (docs/HANDOFF.md item 49): the db-backup service below streams the WAL through a
+    # replication slot; the slot may hold back at most 2 GB of WAL if db-backup is down, so a
+    # stopped backup service can never fill the disk. The hba file allows its replication login.
+    command:
+      - postgres
+      - -c
+      - hba_file=/etc/postgresql/pg_hba.conf
+      - -c
+      - max_slot_wal_keep_size=2GB
     volumes:
       - postgres-data:/var/lib/postgresql/data
+      - ./deploy/backup/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
+      # restore-wal.sh is the restore_command that tools/db-restore.sh sets during a restore.
+      - ./deploy/backup:/backup:ro
+      # Read by tools/db-restore.sh (restore_command) when the database is restored.
+      - postgres-backups:/backups
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U hadith -d hadith"]
       interval: 5s
       timeout: 3s
       retries: 10
+      # Checked every second while it starts, so a restart or a restore (tools/db-restore.sh
+      # waits for healthy) is noticed within a second instead of up to 5 (docs/HANDOFF.md item 49).
+      start_period: 120s
+      start_interval: 1s
+    restart: unless-stopped
+
+  # Continuous backups: WAL streamed as it is written plus a base backup every 6 hours, into the
+  # postgres-backups volume (deploy/backup/backup-loop.sh). Restore with tools/db-restore.sh.
+  # The volume is on this host: copy it elsewhere too, or losing the host loses the backups.
+  db-backup:
+    image: pgvector/pgvector:pg17
+    container_name: hadith-db-backup
+    entrypoint: ["/backup/backup-loop.sh"]
+    environment:
+      - PGHOST=postgres
+      - PGUSER=hadith
+      - PGPASSWORD=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      - BACKUP_INTERVAL_SECONDS=${BACKUP_INTERVAL_SECONDS:-21600}
+      - BACKUP_KEEP=${BACKUP_KEEP:-3}
+    volumes:
+      - ./deploy/backup:/backup:ro
+      - postgres-backups:/backups
+    depends_on:
+      postgres:
+        condition: service_healthy
     restart: unless-stopped
 
   # Public edge: proxies to the app and rate-limits sign-in and sign-up (see nginx/default.conf).
@@ -230,6 +269,7 @@ services:
 volumes:
   hadith-data:
   postgres-data:
+  postgres-backups:
   prometheus-data:
   alertmanager-data:
   grafana-data:

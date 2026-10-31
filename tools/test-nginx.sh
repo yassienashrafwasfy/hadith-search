@@ -14,7 +14,8 @@ PORT=${NGINX_TEST_PORT:-18080}
 STUB_CONF=$(mktemp)
 ROUTING_DIR=$(mktemp -d)
 MON_CONF=$(mktemp)
-trap 'docker rm -f "$NET-blue" "$NET-green" "$NET-edge" "$NET-mon" >/dev/null 2>&1 || true; docker network rm "$NET" >/dev/null 2>&1 || true; rm -rf "$STUB_CONF" "$MON_CONF" "$ROUTING_DIR"' EXIT
+CF_CONF=$(mktemp)
+trap 'docker rm -f "$NET-blue" "$NET-green" "$NET-edge" "$NET-cf" "$NET-mon" >/dev/null 2>&1 || true; docker network rm "$NET" >/dev/null 2>&1 || true; rm -rf "$STUB_CONF" "$MON_CONF" "$ROUTING_DIR" "$CF_CONF"' EXIT
 
 cat >"$STUB_CONF" <<'CONF'
 server {
@@ -45,6 +46,7 @@ docker run -d --name "$NET-mon" --network "$NET" --network-alias grafana --netwo
 docker run -d --name "$NET-edge" --network "$NET" -p "$PORT:8080" \
   -v "$PWD/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro" \
   -v "$PWD/nginx/proxy_app.conf:/etc/nginx/proxy_app.conf:ro" \
+  -v "$PWD/nginx/cloudflare_realip.conf:/etc/nginx/cloudflare_realip.conf:ro" \
   -v "$ROUTING_DIR:/etc/nginx/routing:ro" "$IMAGE" >/dev/null
 for _ in $(seq 1 20); do curl -s -o /dev/null "http://127.0.0.1:$PORT/" && break; sleep 0.5; done
 
@@ -107,6 +109,31 @@ last=$(docker logs "$NET-edge" 2>/dev/null | grep '"path":"/api/v1/searches"' | 
 check "access log is one JSON object per line" 1 "$(echo "$last" | python3 -c 'import json,sys; json.loads(sys.stdin.read()); print(1)' 2>/dev/null || echo 0)"
 check "access log leaves out the search text" 0 "$(docker logs "$NET-edge" 2>&1 | grep -c secretword || true)"
 sleep 2
+
+# --- behind Cloudflare (nginx/cloudflare_realip.conf) ---
+# A client that is not in a Cloudflare range cannot pick its address with CF-Connecting-IP: seven
+# sign-ins, each with another claimed address, still hit one counter (the 429 comes after 5).
+docker restart "$NET-edge" >/dev/null # fresh sign-in counters
+for _ in $(seq 1 20); do curl -s -o /dev/null "$URL/" && break; sleep 0.5; done
+spoof=$(for i in 1 2 3 4 5 6 7; do code -X POST -H "CF-Connecting-IP: 203.0.113.$i" "$URL/api/v1/tokens"; echo -n " "; done)
+check "CF-Connecting-IP from a non-Cloudflare source is ignored (one counter)" "401 401 401 401 401 429 429 " "$spoof"
+check "the access log names the real source, not the claimed address" 0 "$(docker logs "$NET-edge" 2>&1 | grep -c '"client":"203.0.113.' || true)"
+# From a trusted source it is believed: same file, but with this test network as the "Cloudflare"
+# range, each claimed address gets its own counter and the log names it.
+subnet=$(docker network inspect "$NET" -f '{{(index .IPAM.Config 0).Subnet}}')
+{ echo "set_real_ip_from $subnet;"; grep -v '^set_real_ip_from' nginx/cloudflare_realip.conf; } >"$CF_CONF"
+chmod 644 "$CF_CONF"
+docker run -d --name "$NET-cf" --network "$NET" -p "$((PORT + 1)):8080" \
+  -v "$PWD/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro" \
+  -v "$PWD/nginx/proxy_app.conf:/etc/nginx/proxy_app.conf:ro" \
+  -v "$CF_CONF:/etc/nginx/cloudflare_realip.conf:ro" \
+  -v "$ROUTING_DIR:/etc/nginx/routing:ro" "$IMAGE" >/dev/null
+for _ in $(seq 1 20); do curl -s -o /dev/null "http://127.0.0.1:$((PORT + 1))/" && break; sleep 0.5; done
+CF_URL=http://127.0.0.1:$((PORT + 1))
+trusted=$(for i in 1 2 3 4 5 6 7 8; do code -X POST -H "CF-Connecting-IP: 198.51.100.$i" "$CF_URL/api/v1/tokens"; echo -n " "; done)
+check "from a trusted source each visitor address gets its own sign-in counter" "401 401 401 401 401 401 401 401 " "$trusted"
+check "from a trusted source the log names the visitor" 1 "$(docker logs "$NET-cf" 2>&1 | grep -c '"client":"198.51.100.3"' | awk '{print ($1>0)}')"
+check "X-Forwarded-For cannot replace CF-Connecting-IP" 429 "$(for i in 1 2 3 4 5 6 7; do code -X POST -H 'CF-Connecting-IP: 198.51.100.50' -H "X-Forwarded-For: 192.0.2.$i" "$CF_URL/api/v1/tokens"; echo; done | tail -1)"
 
 # --- blue/green routing ---
 release() { curl -s -o /dev/null -D - "$URL/api/v1" | tr -d '\r' | sed -n 's/^[Xx]-[Rr]elease: //p'; }

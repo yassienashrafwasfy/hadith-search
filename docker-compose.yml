@@ -112,9 +112,12 @@ services:
     image: nginxinc/nginx-unprivileged:stable-alpine
     container_name: hadith-nginx
     ports:
-      - "8000:8080"
+      # HTTP_BIND=127.0.0.1 when a tunnel (cloudflared) or a local proxy is the only way in, so
+      # nobody can reach the origin directly and skip Cloudflare.
+      - "${HTTP_BIND:-0.0.0.0}:8000:8080"
     volumes:
       - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./nginx/cloudflare_realip.conf:/etc/nginx/cloudflare_realip.conf:ro
       - ./nginx/proxy_app.conf:/etc/nginx/proxy_app.conf:ro
       # Which colour gets traffic; written by tools/deploy.sh (run `tools/deploy.sh init` first)
       - ./deploy/state:/etc/nginx/routing:ro

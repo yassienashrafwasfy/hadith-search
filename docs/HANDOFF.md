@@ -1109,9 +1109,33 @@ The first six needed no fix: Docker's restart policy and PostgreSQL's own crash 
 
 **Files:** `deploy/backup/` (new: `backup-loop.sh`, `restore-wal.sh`, `pg_hba.conf`), `deploy/dr/` (new), `tools/db-restore.sh` (new), `tools/dr/drill.py` (new), `docker-compose.yml`, `tools/deploy.sh`, `monitoring/prometheus/alerts.yml`, `monitoring/prometheus/alerts.test.yml`, `monitoring/grafana/dashboards/hadith-overview.json`, `tests/test_backups.py` (new), `.gitignore`, `CLAUDE.md`
 
+### 50. Edge audit for a Cloudflare front, and regression tests (2026-10-31)
+
+**Was it done before?** No. HANDOFF item 36 only noted that HSTS waits for a decision about what ends HTTPS. No Cloudflare security skill is installed (not in `~/.claude/skills`, not in the official marketplace), so the audit was done by hand with a Cloudflare-in-front checklist (visitor address, origin exposure, what is public, what an edge cache could keep) plus the existing `tests/security` suite.
+
+**Gaps found and fixed**
+1. **Every limit would have counted Cloudflare, not the visitor.** nginx keys the sign-in (5 tries, then 1 a minute), search and Grafana-login limits on `$binary_remote_addr`. Behind Cloudflare that is an edge address, so all visitors would have shared one sign-in counter (one person's failed tries locking everyone out) and the logs would have named Cloudflare. Fix: `nginx/cloudflare_realip.conf` (22 Cloudflare ranges, `real_ip_header CF-Connecting-IP`, `real_ip_recursive off`), included in the server block and mounted by compose. The header is believed only from those ranges; from any other source it is ignored, so a client that reaches the origin directly cannot choose its address. Traffic that does not come through Cloudflare is unaffected.
+2. **No way to close the origin.** The nginx port was published on every interface with no setting. `HTTP_BIND` (default `0.0.0.0`, so nothing changes) lets a deployment with a tunnel such as cloudflared, or a local proxy, bind it to `127.0.0.1` so nobody can skip Cloudflare by calling the origin.
+3. **Edge guarantees were only checked by the Docker shell test.** Now also pinned in pytest, without Docker (see tests).
+
+**Checked and fine:** API links are paths (`/api/v1/...`), never absolute, so an `http`-seeing app behind a TLS terminator and a forged `Host` or `X-Forwarded-Host` cannot change them; only nginx publishes a port (PostgreSQL, the app, the backups and the monitoring stack are not reachable from outside); `/metrics` is 404 from outside and the stub_status server (8081) is not published; Grafana has no anonymous access, no sign-up, refuses to start without a password, and its sign-in is rate limited; the Faro route takes POST only, 64 KB, rate limited; cacheable answers are `public` only for public data, authenticated ones `private` (item 36).
+
+**Tests.** `tests/security/test_edge.py` (new, 14): the trusted ranges are exactly Cloudflare's published list (a pinned copy; any other range, `0.0.0.0/0` or `::/0` fails), only `CF-Connecting-IP` is read and never recursively, the server includes the file and compose mounts it, every limit uses `$binary_remote_addr` (so it follows the real-IP step), the backend is told `$remote_addr`, only nginx publishes a port and only through `HTTP_BIND`, 8081 is not published, `/metrics` is 404, Grafana (no anonymous access, sign-in limited, secure cookie setting) and Faro rules, and links are paths under a forged Host. Each rule was checked by breaking it. `tools/test-nginx.sh` now also runs two real nginx containers: a source outside the Cloudflare ranges cannot choose its address with `CF-Connecting-IP` (seven claimed addresses still share one counter and the log names the real source); a trusted source gets one counter per visitor address and the log names the visitor; `X-Forwarded-For` changes nothing. All checks pass; the Docker test takes about 85 s and is not in CI.
+
+**To put the site behind Cloudflare:** turn the proxy on for the DNS record, set `CORS_ORIGINS` to the public https origin, set `GRAFANA_ROOT_URL` and `GRAFANA_COOKIE_SECURE=true`, set HSTS in Cloudflare (SSL/TLS, Edge Certificates), and either bind the origin to localhost with a tunnel (`HTTP_BIND=127.0.0.1`) or restrict the origin firewall to Cloudflare's ranges. Cloudflare's ranges change rarely: compare `nginx/cloudflare_realip.conf` with https://www.cloudflare.com/ips-v4 and /ips-v6 now and then, and update `tests/security/test_edge.py` with it.
+
+**Not done**
+- The strict xfails of item 36 are still open (a 500 is plain text without security headers, token answers lack `Cache-Control: no-store`, the secret masking findings). Token answers matter more behind an edge cache: Cloudflare does not cache JSON unless a rule says so, so do not add a "cache everything" rule for `/api/`.
+- HSTS is still off in the app; with Cloudflare it belongs at the edge, and `test_hsts_is_sent` stays an xfail until the app is served over HTTPS without a proxy.
+- No Cloudflare account or dashboard setting (WAF rules, bot fight mode, Authenticated Origin Pulls) was touched or can be checked from the repo.
+
+**Not verified:** the real Cloudflare network. The tests use the published address list and a stand-in trusted range on a Docker network.
+
+**Files:** `nginx/cloudflare_realip.conf` (new), `nginx/default.conf`, `docker-compose.yml`, `tools/test-nginx.sh`, `tests/security/test_edge.py` (new), `CLAUDE.md`
+
 ## Still open
 
-- Nothing has been pushed and no PR exists. Everything is on local branches.
+- Main was pushed on 2026-10-31 (through item 49); items 50 onward are on local branches until pushed.
 - Blue/green (item 21) was tested with a fake `docker` and stub apps, not with the real image on a real host. There is no automatic promotion on error rate because the app exports no metrics.
 - The sign-in limit is per address and not a hard lockout, JWTs cannot be revoked, and the token is kept in `localStorage`.
 - Some dependency findings are unfixed, and the Docker image was not rebuilt or rescanned after the PostgreSQL and deploy changes.

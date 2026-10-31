@@ -9,12 +9,13 @@ from collections.abc import Callable, Collection
 from dataclasses import dataclass, replace
 from typing import Any
 
+from sqlalchemy import Select
 from sqlalchemy.orm import Session
 
 from features import Features
 from models import SearchRequest, SearchResponse
 from services import ranking
-from services.results import allowed_ids, build_results
+from services.results import DEFAULT_TOP_K, allowed_query, build_results
 from services.suggestions import did_you_mean
 
 RERANK_CANDIDATES = 50
@@ -32,8 +33,13 @@ class SearchContext:
 
     session: Session
     model: Callable[[], Any]
-    restrict: Collection[int] | None = None  # ids that pass the filters; the dense systems use it
+    restrict: Collection[int] | Select | None = (
+        None  # ids (or a select() of them) passing the filters
+    )
     rerank: Callable[[str, list[str]], list[float]] | None = None  # cross-encoder scores
+    # How many results the keyword systems return (None: every match, as the evaluation needs).
+    # The dense systems keep their own list sizes (COSINE_TOP_K, ...).
+    limit: int | None = None
 
 
 @dataclass(frozen=True)
@@ -67,27 +73,27 @@ _DENSE = {"languages": ("AR",)}
 
 @_system("term-overlap")
 def _term_overlap(ctx, query, lang):
-    return ranking.term_overlap(ctx.session, query, lang)
+    return ranking.term_overlap(ctx.session, query, lang, ctx.restrict, ctx.limit)
 
 
 @_system("tfidf")
 def _tfidf(ctx, query, lang):
-    return ranking.tf_idf(ctx.session, query, lang)
+    return ranking.tf_idf(ctx.session, query, lang, ctx.restrict, ctx.limit)
 
 
 @_system("bm25", keyword=True)
 def _bm25(ctx, query, lang):
-    return ranking.bm25(ctx.session, query, lang)
+    return ranking.bm25(ctx.session, query, lang, ctx.restrict, ctx.limit)
 
 
 @_system("bm25-tf-idf")
 def _hybrid(ctx, query, lang):
-    return ranking.bm25_tfidf_hybrid(ctx.session, query, lang)
+    return ranking.bm25_tfidf_hybrid(ctx.session, query, lang, ctx.restrict, ctx.limit)
 
 
 @_system("bm25-prf")
 def _bm25_prf(ctx, query, lang):
-    return ranking.bm25_prf(ctx.session, query, lang)
+    return ranking.bm25_prf(ctx.session, query, lang, ctx.restrict, ctx.limit)
 
 
 @_system("semantic-rerank", "dense_retrieval", **_DENSE)
@@ -125,15 +131,13 @@ def enabled_systems(features: Features) -> list[RetrievalSystem]:
 
 
 def run_search(system: RetrievalSystem, ctx: SearchContext, req: SearchRequest) -> SearchResponse:
-    # Filters apply before the dense systems cut to their top results, so a filtered search still
-    # returns a full page; the lexical systems rank everything and are filtered in build_results.
-    if "dense_retrieval" in system.requires:
-        allowed = allowed_ids(ctx.session, req.grade_filter, req.book_filter)
-        ctx = replace(ctx, restrict=allowed)
+    # Filters and the page size go into the SQL: every system ranks only the hadiths that pass the
+    # filters, so a filtered search still returns a full page, and the keyword systems hand back
+    # one page instead of every hadith that shares a word with the query.
+    allowed = allowed_query(req.grade_filter, req.book_filter)
+    ctx = replace(ctx, restrict=allowed, limit=DEFAULT_TOP_K)
     raw = system.run(ctx, req.query, req.lang.value.upper())
-    results = build_results(
-        ctx.session, raw, req.grade_filter, req.book_filter, allowed=ctx.restrict
-    )
+    results = build_results(ctx.session, raw)  # already filtered by the ranking SQL
     hint = None
     if system.keyword and not results:
         hint = did_you_mean(ctx.session, req.query, req.lang.value.upper())

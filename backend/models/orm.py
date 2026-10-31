@@ -7,6 +7,7 @@ from sqlalchemy import (
     ForeignKeyConstraint,
     Index,
     Integer,
+    PrimaryKeyConstraint,
     Text,
     UniqueConstraint,
     and_,
@@ -75,10 +76,15 @@ class Hadith(Base):
             ["chapters.book", "chapters.chapter_number"],
             name="fk_hadiths_chapter",
         ),
+        # The grade and book filters run as an `id IN (subquery on these columns)`
+        # inside the ranking statements; with `id` in the index that is an index-only scan
+        # instead of a read of the whole table (docs/HANDOFF.md item 48).
+        Index("ix_hadiths_grade_id", "Normalized_Grade", postgresql_include=["id"]),
+        Index("ix_hadiths_book_id", "Book", postgresql_include=["id"]),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
-    Book: Mapped[str | None] = mapped_column(Text, ForeignKey("books.book"), index=True)
+    Book: Mapped[str | None] = mapped_column(Text, ForeignKey("books.book"))
     Source_File = _text()
 
     Chapter_Number = _int()
@@ -105,7 +111,7 @@ class Hadith(Base):
 
     English_Grade = _text()
     Arabic_Grade = _text()
-    Normalized_Grade: Mapped[str | None] = mapped_column(Text, index=True)
+    Normalized_Grade = _text()
 
     Has_English_Content = _int()
     Has_Arabic_Content = _int()
@@ -191,10 +197,17 @@ class Term(Base):
 
 
 class Posting(Base):
-    """Inverted index row: `term` occurs `tf` times in the matn of `hadith_id`."""
+    """Inverted index row: `term` occurs `tf` times in the matn of `hadith_id`.
+
+    The primary key carries `tf` (INCLUDE), so ranking reads a term's postings from the index
+    alone (index-only scan). An older database gets it from `tools/migrate_postings_pk.sh`.
+    """
 
     __tablename__ = "postings"
-    __table_args__ = (Index("ix_postings_hadith_id", "hadith_id"),)
+    __table_args__ = (
+        PrimaryKeyConstraint("language", "term", "hadith_id", postgresql_include=["tf"]),
+        Index("ix_postings_hadith_id", "hadith_id"),
+    )
 
     language: Mapped[str] = mapped_column(Text, primary_key=True)
     term: Mapped[str] = mapped_column(Text, primary_key=True)

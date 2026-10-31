@@ -107,6 +107,13 @@ ASSIGNMENT_LOCK = 7_303  # one sign-up at a time hands out query assignments
 # their event loop). Without a `poolclass`, the pool is sized from settings (`pool_kwargs`).
 ENGINE_KWARGS: dict = {"pool_pre_ping": True}
 
+# psycopg prepares a statement once it has run 5 times on a connection, and PostgreSQL may then
+# switch to a generic plan that ignores the parameter values. The ranking statements need the
+# values (which terms, which filter) for their row estimates: on the full corpus a filtered BM25
+# search went from 23 ms to 109 ms on its generic plan. So nothing is prepared, and every
+# statement is planned for its own values (about 1 to 4 ms of planning).
+CONNECT_ARGS = {"prepare_threshold": None}
+
 
 def pool_kwargs() -> dict:
     """Reuse connections: one per running search, a little overflow, recycled before they go stale."""
@@ -139,14 +146,14 @@ def database_url() -> str:
 def get_async_engine() -> AsyncEngine:
     url = database_url()
     if url not in _async_engines:
-        _async_engines[url] = create_async_engine(url, **pool_kwargs())
+        _async_engines[url] = create_async_engine(url, connect_args=CONNECT_ARGS, **pool_kwargs())
     return _async_engines[url]
 
 
 def get_sync_engine():
     url = database_url()
     if url not in _sync_engines:
-        _sync_engines[url] = create_engine(url, **pool_kwargs())
+        _sync_engines[url] = create_engine(url, connect_args=CONNECT_ARGS, **pool_kwargs())
     return _sync_engines[url]
 
 
@@ -171,8 +178,9 @@ def get_sync_session() -> Session:
 
 
 # Tables whose indexes `init_schema*` adds to an existing database (create_all skips existing
-# tables). They are small and rarely written, so the build is quick and additive.
-INDEXED_LATER = ("annotations", "assignments", "kv_pairs")
+# tables). They are small and rarely written, so the build is quick and additive (the two
+# filter indexes on `hadiths` take about 0.1 s on the full corpus).
+INDEXED_LATER = ("annotations", "assignments", "kv_pairs", "hadiths")
 
 
 def _create_missing_indexes(conn) -> None:
